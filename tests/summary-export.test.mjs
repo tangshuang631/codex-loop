@@ -93,4 +93,17 @@ test("exportMobileView returns recent transcript entries for mobile readers", as
   assert.equal(mobile.summary.recentSummary, "Prepared a mobile-friendly activity feed");
   assert.equal(mobile.transcriptEntries.length > 0, true);
   assert.equal(mobile.transcriptEntries[0].activeTask, "Review mobile transcript");
+  assert.match(mobile.bindingNote, /thread-123/);
+  assert.match(mobile.suggestedAction, /\u7b49\u5f85|\u7eed\u8dd1|\u7ed1\u5b9a/);
+});
+
+test("exportMobileView suggests binding a visible thread before starting when thread is missing", async () => {
+  const configRoot = await createWorkspace();
+  await ensureLoopArtifacts(configRoot);
+
+  const mobile = await exportMobileView(configRoot);
+
+  assert.equal(mobile.thread.threadId, "");
+  assert.match(mobile.bindingNote, /\u672a\u7ed1\u5b9a|\u7ebf\u7a0b/);
+  assert.match(mobile.suggestedAction, /\u5148.*\u7ed1\u5b9a|\u542f\u52a8/);
 });

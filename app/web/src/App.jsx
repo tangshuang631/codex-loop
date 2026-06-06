@@ -197,6 +197,8 @@ export function App() {
   const mobileSummary = mobileView?.summary?.recentSummary || latestSummary;
   const latestPrompt = mobileView?.latestPrompt || snapshot?.thread.lastDispatchPrompt;
   const primaryThreadName = formatValue(snapshot?.thread.threadTitle, "未绑定线程");
+  const bindingNote = mobileView?.bindingNote || formatValue(snapshot?.thread.note, "暂无");
+  const suggestedAction = mobileView?.suggestedAction || "建议先完成线程绑定，再开始循环。";
 
   return (
     <main className="app-shell">
@@ -206,7 +208,7 @@ export function App() {
           <h1>{formatValue(currentLoop?.name || snapshot?.config.loopName, "未命名循环")}</h1>
           <p>
             这里专注回答三个问题：循环是否已经开始、现在卡在哪一步、最近一次给 Codex
-            发了什么。桌面端可控制，手机端可查看最近对话镜像和状态摘要。
+            发了什么。桌面端可控制，手机端可查看最近对话镜像、绑定状态和建议动作。
           </p>
           <div className="hero-status-row">
             <span className={`status-pill ${snapshot?.health?.ok ? "" : "is-danger"}`}>
@@ -542,7 +544,7 @@ export function App() {
 
         <Section
           title="手机查看"
-          desc="这块是移动端优先的只读视图。打开同一网页时，手机上重点看最近摘要、最近续发和聊天镜像。"
+          desc="这块是移动端优先的只读视图。手机上重点看最近摘要、最近续发、绑定提示、建议动作和聊天镜像。"
         >
           <div className="mobile-panel">
             <div className="mobile-panel-top">
@@ -551,6 +553,16 @@ export function App() {
                 label="手机端绑定线程"
                 value={formatValue(mobileView?.thread?.title || primaryThreadName, "未绑定")}
               />
+            </div>
+
+            <div className="status-card">
+              <span className="status-label">线程绑定提示</span>
+              <p>{formatValue(bindingNote, "暂无")}</p>
+            </div>
+
+            <div className="status-card">
+              <span className="status-label">当前建议动作</span>
+              <p>{formatValue(suggestedAction, "暂无")}</p>
             </div>
 
             <div className="status-card status-card-wide">

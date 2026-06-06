@@ -402,6 +402,19 @@ export async function exportMobileView(startDir = process.cwd()) {
   const snapshot = await ensureLoopArtifacts(startDir);
   const summary = buildSummaryPayload(snapshot);
   const transcriptText = await fs.readFile(snapshot.paths.transcriptPath, "utf8");
+  const bindingNote = safeText(
+    snapshot.thread.note,
+    snapshot.thread.threadId
+      ? `当前已绑定线程：${snapshot.thread.threadTitle || snapshot.thread.threadId}（${snapshot.thread.threadId}）`
+      : "当前还没有绑定可见线程，请先绑定线程再启动或续跑。",
+  );
+  const suggestedAction = snapshot.thread.threadId
+    ? snapshot.state.mode === "running"
+      ? snapshot.thread.continuationStatus === "dispatching"
+        ? "Codex 正在当前线程处理中，先等待这一轮完成。"
+        : "线程已绑定，可以继续观察进展或手动续跑一轮。"
+      : "线程已绑定，建议先点击开始循环，再观察后续续发记录。"
+    : "建议先完成线程绑定，再开始循环，这样桌面端和手机端都能看到连续记录。";
 
   return {
     loop: {
@@ -418,6 +431,8 @@ export async function exportMobileView(startDir = process.cwd()) {
     },
     health: snapshot.health,
     summary,
+    bindingNote,
+    suggestedAction,
     latestPrompt: snapshot.thread.lastDispatchPrompt || "",
     transcriptEntries: parseTranscriptEntries(transcriptText),
     generatedAt: nowIso(),
