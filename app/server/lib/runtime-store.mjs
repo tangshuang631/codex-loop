@@ -7,6 +7,7 @@ import { initializeRun } from "../../../scripts/lib/init-run.mjs";
 import { applyHeartbeat, decideLoopMode } from "../../../scripts/lib/state.mjs";
 import { readResolvedLoopProfile } from "./adapter-store.mjs";
 import { dispatchThreadMessage as defaultDispatchThreadMessage } from "./codex-dispatcher.mjs";
+import { readLauncherStatus } from "./launcher-status.mjs";
 import { resolveProjectLayout } from "./paths.mjs";
 
 function nowIso() {
@@ -402,6 +403,7 @@ function parseTranscriptEntries(transcriptText) {
 export async function exportMobileView(startDir = process.cwd()) {
   const snapshot = await ensureLoopArtifacts(startDir);
   const summary = buildSummaryPayload(snapshot);
+  const launcher = await readLauncherStatus(startDir);
   const transcriptText = await fs.readFile(snapshot.paths.transcriptPath, "utf8");
   const bindingNote = safeText(
     snapshot.thread.note,
@@ -436,6 +438,7 @@ export async function exportMobileView(startDir = process.cwd()) {
       continuationCycleCount: snapshot.thread.continuationCycleCount,
     },
     health: snapshot.health,
+    launcher,
     summary,
     bindingNote,
     suggestedAction,

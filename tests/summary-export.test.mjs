@@ -13,6 +13,7 @@ import {
   startRun,
   requestGracefulStop,
 } from "../app/server/lib/runtime-store.mjs";
+import { writeLauncherStatus } from "../app/server/lib/launcher-status.mjs";
 
 async function createWorkspace() {
   const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), "codex-loop-summary-"));
@@ -75,6 +76,16 @@ test("exportLoopSummary writes mobile-friendly summary json", async () => {
 test("exportMobileView returns recent transcript entries for mobile readers", async () => {
   const configRoot = await createWorkspace();
   await ensureLoopArtifacts(configRoot);
+  await writeLauncherStatus(configRoot, {
+    phase: "ready",
+    apiPort: 3000,
+    webPort: 3001,
+    apiBaseUrl: "http://127.0.0.1:3000/api",
+    webUrl: "http://127.0.0.1:3001",
+    serverReady: true,
+    webReady: true,
+    note: "launcher ready",
+  });
   await saveThreadBinding(configRoot, {
     workspaceName: "opencow",
     threadTitle: "评估长时开发方案",
@@ -95,6 +106,8 @@ test("exportMobileView returns recent transcript entries for mobile readers", as
   assert.equal(mobile.summary.recentSummary, "Prepared a mobile-friendly activity feed");
   assert.equal(mobile.transcriptEntries.length > 0, true);
   assert.equal(mobile.transcriptEntries[0].activeTask, "Review mobile transcript");
+  assert.equal(mobile.launcher.phase, "ready");
+  assert.equal(mobile.launcher.webUrl, "http://127.0.0.1:3001");
   assert.match(mobile.bindingNote, /thread-123/);
   assert.match(mobile.suggestedAction, /\u7b49\u5f85|\u7eed\u8dd1|\u7ed1\u5b9a/);
 });

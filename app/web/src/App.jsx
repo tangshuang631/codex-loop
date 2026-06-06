@@ -209,6 +209,26 @@ export function App() {
   const transcriptEntries = mobileView?.transcriptEntries || [];
   const mobileSummary = mobileView?.summary?.recentSummary || latestSummary;
   const latestPrompt = mobileView?.latestPrompt || snapshot?.thread.lastDispatchPrompt;
+  const mobileLauncherPhase =
+    launcherPhaseTextMap[mobileView?.launcher?.phase] ||
+    launcherPhaseTextMap[launcherStatus?.phase] ||
+    "未知";
+  const mobileLauncherNote = formatValue(
+    mobileView?.launcher?.note || launcherStatus?.note,
+    "等待启动状态更新",
+  );
+  const mobileLauncherWebUrl = formatValue(
+    mobileView?.launcher?.webUrl || launcherStatus?.webUrl,
+    "暂无",
+  );
+  const mobileLauncherApiUrl = formatValue(
+    mobileView?.launcher?.apiBaseUrl || launcherStatus?.apiBaseUrl,
+    "暂无",
+  );
+  const mobileLauncherError = formatValue(
+    mobileView?.launcher?.error || launcherStatus?.error,
+    "无",
+  );
   const primaryThreadName = formatValue(snapshot?.thread.threadTitle, "未绑定线程");
   const bindingNote = mobileView?.bindingNote || formatValue(snapshot?.thread.note, "暂无");
   const suggestedAction = mobileView?.suggestedAction || "建议先完成线程绑定，再开始循环。";
@@ -572,6 +592,21 @@ export function App() {
                 label="手机端绑定线程"
                 value={formatValue(mobileView?.thread?.title || primaryThreadName, "未绑定")}
               />
+            </div>
+
+            <div className="mobile-panel-top">
+              <Metric label="控制台阶段" value={mobileLauncherPhase} />
+              <Metric label="前端地址" value={mobileLauncherWebUrl} muted={!mobileView?.launcher?.webUrl} />
+            </div>
+
+            <div className="status-card">
+              <span className="status-label">控制台状态说明</span>
+              <p>{mobileLauncherNote}</p>
+            </div>
+
+            <div className="status-card">
+              <span className="status-label">接口地址 / 启动错误</span>
+              <p>{`${mobileLauncherApiUrl}\n${mobileLauncherError === "无" ? "" : mobileLauncherError}`.trim()}</p>
             </div>
 
             <div className="status-card">
