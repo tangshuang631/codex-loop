@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { findAvailablePortPair } from "../app/server/lib/network.mjs";
+import { findAvailablePort, findAvailablePortPair } from "../app/server/lib/network.mjs";
 
 test("findAvailablePortPair keeps api and web ports aligned when defaults are free", async () => {
   const ports = await findAvailablePortPair("127.0.0.1", {
@@ -41,5 +41,25 @@ test("findAvailablePortPair throws when no aligned pair is available", async () 
         canListen: async () => false,
       }),
     /Could not find an available local port pair/i,
+  );
+});
+
+test("findAvailablePort keeps an explicitly requested port when strict mode is enabled", async () => {
+  const port = await findAvailablePort("127.0.0.1", 3000, 5, {
+    strict: true,
+    canListen: async (_host, candidate) => candidate === 3000,
+  });
+
+  assert.equal(port, 3000);
+});
+
+test("findAvailablePort throws when an explicitly requested port is unavailable in strict mode", async () => {
+  await assert.rejects(
+    () =>
+      findAvailablePort("127.0.0.1", 3000, 5, {
+        strict: true,
+        canListen: async () => false,
+      }),
+    /Requested local port 3000 is not available/i,
   );
 });

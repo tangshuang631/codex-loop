@@ -36,10 +36,25 @@ export async function findAvailablePortPair(
   );
 }
 
-export async function findAvailablePort(host, preferredPort, attempts = 10) {
+export async function findAvailablePort(host, preferredPort, attempts = 10, options = {}) {
+  const {
+    strict = false,
+    canListen = defaultCanListen,
+  } = options;
+
+  if (strict) {
+    const available = await canListen(host, preferredPort);
+    if (!available) {
+      throw new Error(
+        `Requested local port ${preferredPort} is not available on ${host}.`,
+      );
+    }
+    return preferredPort;
+  }
+
   for (let offset = 0; offset < attempts; offset += 1) {
     const port = preferredPort + offset;
-    const available = await defaultCanListen(host, port);
+    const available = await canListen(host, port);
     if (available) {
       return port;
     }

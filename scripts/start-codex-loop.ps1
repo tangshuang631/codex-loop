@@ -24,6 +24,32 @@ function Write-Fail {
   Write-Host "[error] $Message" -ForegroundColor Red
 }
 
+function Stop-ExistingLoopProcesses {
+  param([Parameter(Mandatory = $true)][string]$LoopRoot)
+
+  $normalizedRoot = $LoopRoot.ToLowerInvariant()
+  $candidates = Get-CimInstance Win32_Process | Where-Object {
+    ($_.Name -ieq "cmd.exe" -or $_.Name -ieq "node.exe") -and
+    $_.CommandLine -and
+    (
+      $_.CommandLine.ToLowerInvariant().Contains($normalizedRoot) -or
+      $_.CommandLine -like "*scripts/dev.mjs*" -or
+      $_.CommandLine -like "*app/server/index.mjs*" -or
+      $_.CommandLine -like "*app/web/vite.config.mjs*"
+    )
+  }
+
+  if (-not $candidates) {
+    return
+  }
+
+  $ids = @($candidates | Select-Object -ExpandProperty ProcessId)
+  Write-Step "Stopping existing codex-loop dev processes: $($ids -join ', ')"
+  foreach ($id in $ids) {
+    cmd /c "taskkill /PID $id /T /F >nul 2>nul" | Out-Null
+  }
+}
+
 function Invoke-CheckedCommand {
   param(
     [Parameter(Mandatory = $true)][string]$FilePath,
@@ -65,7 +91,8 @@ try {
 
   $workspaceRoot = (Resolve-Path $workspaceRoot).Path
   $hostName = if ($env:CODEX_LOOP_HOST) { $env:CODEX_LOOP_HOST } else { "127.0.0.1" }
-  $webPort = if ($env:CODEX_LOOP_WEB_PORT) { $env:CODEX_LOOP_WEB_PORT } else { "3001" }
+  $apiPort = $null
+  $webPort = $null
 
   $Host.UI.RawUI.WindowTitle = "codex-loop launcher"
 
@@ -89,6 +116,9 @@ try {
 
   Write-Step "Running environment check..."
   Invoke-CheckedCommand -FilePath "npm" -Arguments @("--prefix", $loopRoot, "run", "loop:check") -FailureMessage "codex-loop environment check failed."
+  $checkResult = & node (Join-Path $loopRoot "scripts\check-env.mjs") | ConvertFrom-Json
+  $apiPort = [string]$checkResult.ports.apiPort
+  $webPort = [string]$checkResult.ports.webPort
 
   if ($mode -ieq "check") {
     Write-Ok "Environment check passed."
@@ -97,6 +127,7 @@ try {
 
   Write-Step "Initializing loop runtime..."
   Invoke-CheckedCommand -FilePath "npm" -Arguments @("--prefix", $loopRoot, "run", "loop:init") -FailureMessage "Loop initialization failed."
+  Stop-ExistingLoopProcesses -LoopRoot $loopRoot
 
   Write-Info "Expected console URL: http://${hostName}:$webPort"
   Write-Info "Use one persistent Codex thread for this loop."
@@ -106,7 +137,7 @@ try {
   Write-Host "        3. 开发进度清单2026.6.6-22-48.md"
   Write-Step "Opening codex-loop console window..."
 
-  $command = "chcp 65001>nul && cd /d `"$loopRoot`" && npm run dev"
+  $command = "chcp 65001>nul && cd /d `"$loopRoot`" && set CODEX_LOOP_HOST=$hostName && set CODEX_LOOP_PORT=$apiPort && set CODEX_LOOP_WEB_PORT=$webPort && npm run dev"
   Start-Process -FilePath "cmd.exe" -ArgumentList "/k", $command -WorkingDirectory $loopRoot
 
   Write-Ok "codex-loop launch requested."
