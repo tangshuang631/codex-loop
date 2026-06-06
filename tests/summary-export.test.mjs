@@ -10,6 +10,8 @@ import {
   exportLoopSummary,
   recordHeartbeat,
   saveThreadBinding,
+  startRun,
+  requestGracefulStop,
 } from "../app/server/lib/runtime-store.mjs";
 
 async function createWorkspace() {
@@ -106,4 +108,39 @@ test("exportMobileView suggests binding a visible thread before starting when th
   assert.equal(mobile.thread.threadId, "");
   assert.match(mobile.bindingNote, /\u672a\u7ed1\u5b9a|\u7ebf\u7a0b/);
   assert.match(mobile.suggestedAction, /\u5148.*\u7ed1\u5b9a|\u542f\u52a8/);
+});
+
+test("exportMobileView shows a clear finish-oriented action after stop is requested", async () => {
+  const configRoot = await createWorkspace();
+  await ensureLoopArtifacts(configRoot);
+  await saveThreadBinding(configRoot, {
+    workspaceName: "demo",
+    threadTitle: "收尾线程",
+    threadId: "thread-finish",
+    singleThreadMode: true,
+  });
+  await startRun(configRoot);
+  await requestGracefulStop(configRoot, {
+    reason: "manual stop",
+  });
+
+  const mobile = await exportMobileView(configRoot);
+
+  assert.equal(mobile.loop.mode, "finalize_after_current");
+  assert.match(mobile.suggestedAction, /\u6536\u5c3e|\u603b\u7ed3|\u9a8c\u8bc1/);
+});
+
+test("exportMobileView keeps finish-oriented guidance even when no thread is bound", async () => {
+  const configRoot = await createWorkspace();
+  await ensureLoopArtifacts(configRoot);
+  await startRun(configRoot);
+  await requestGracefulStop(configRoot, {
+    reason: "manual stop",
+  });
+
+  const mobile = await exportMobileView(configRoot);
+
+  assert.equal(mobile.loop.mode, "finalize_after_current");
+  assert.match(mobile.suggestedAction, /\u6536\u5c3e|\u603b\u7ed3|\u9a8c\u8bc1/);
+  assert.doesNotMatch(mobile.suggestedAction, /\u5f00\u59cb\u5faa\u73af/);
 });

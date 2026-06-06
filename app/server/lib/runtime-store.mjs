@@ -19,6 +19,7 @@ const OPENCOW_THREAD_TITLE = "按清单继续开发";
 const OPENCOW_PROGRESS_FILENAME = "开发进度清单2026.6.6-22-48.md";
 const HEARTBEAT_STALE_MS = 15 * 60 * 1000;
 const CONTINUATION_STALLED_MS = 5 * 60 * 1000;
+const TRANSCRIPT_STALE_MS = 15 * 60 * 1000;
 
 async function readJson(filePath, fallbackValue = null) {
   try {
@@ -408,13 +409,18 @@ export async function exportMobileView(startDir = process.cwd()) {
       ? `当前已绑定线程：${snapshot.thread.threadTitle || snapshot.thread.threadId}（${snapshot.thread.threadId}）`
       : "当前还没有绑定可见线程，请先绑定线程再启动或续跑。",
   );
-  const suggestedAction = snapshot.thread.threadId
-    ? snapshot.state.mode === "running"
-      ? snapshot.thread.continuationStatus === "dispatching"
-        ? "Codex 正在当前线程处理中，先等待这一轮完成。"
-        : "线程已绑定，可以继续观察进展或手动续跑一轮。"
-      : "线程已绑定，建议先点击开始循环，再观察后续续发记录。"
-    : "建议先完成线程绑定，再开始循环，这样桌面端和手机端都能看到连续记录。";
+  const suggestedAction =
+    snapshot.state.mode === "finalize_after_current"
+      ? "循环正在收尾，建议等待这一轮结束后查看总结、验证结果和下一步建议。"
+      : snapshot.state.mode === "stopped"
+        ? snapshot.thread.threadId
+          ? "线程已绑定，循环已停下。可以查看总结，或在确认上下文后重新开始。"
+          : "循环已停下。建议先查看本轮总结；如果要继续，再绑定线程后重新开始。"
+        : snapshot.thread.threadId
+          ? snapshot.thread.continuationStatus === "dispatching"
+            ? "Codex 正在当前线程处理中，先等待这一轮完成。"
+            : "线程已绑定，可以继续观察进展或手动续跑一轮。"
+          : "建议先完成线程绑定，再开始循环，这样桌面端和手机端都能看到连续记录。";
 
   return {
     loop: {
@@ -597,6 +603,16 @@ function buildHealthSummary(checks, state, thread, errorState) {
     now - dispatchAt > CONTINUATION_STALLED_MS
   ) {
     issues.push("continuation:stalled");
+  }
+
+  const transcriptCheck = checks.find((item) => item.key === "transcript");
+  const transcriptUpdatedAt = Date.parse(transcriptCheck?.updatedAt || "");
+  if (
+    state.mode === "running" &&
+    Number.isFinite(transcriptUpdatedAt) &&
+    now - transcriptUpdatedAt > TRANSCRIPT_STALE_MS
+  ) {
+    issues.push("transcript:stale");
   }
 
   if (thread.continuationStatus === "error" && thread.lastContinuationError) {

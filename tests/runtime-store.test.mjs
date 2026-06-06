@@ -507,3 +507,19 @@ test("readLoopSnapshot marks health issue when continuation dispatch is stalled"
   assert.equal(refreshed.health.ok, false);
   assert.match(refreshed.health.issues.join(","), /continuation:stalled/);
 });
+
+test("readLoopSnapshot marks health issue when transcript is stale during an active run", async () => {
+  const configRoot = await createWorkspace();
+  const snapshot = await startRun(configRoot);
+  const staleAt = new Date(Date.now() - 1000 * 60 * 20).toISOString();
+
+  await fs.utimes(
+    snapshot.paths.transcriptPath,
+    new Date(staleAt),
+    new Date(staleAt),
+  );
+
+  const refreshed = await readLoopSnapshot(configRoot);
+  assert.equal(refreshed.health.ok, false);
+  assert.match(refreshed.health.issues.join(","), /transcript:stale/);
+});
