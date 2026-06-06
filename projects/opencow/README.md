@@ -15,9 +15,19 @@ The acceptance target is not just "documents exist". The target is:
 
 Read in this order:
 
-1. [`OPENCOW_CORE_RULES.md`](E:/2026/opencow/OPENCOW_CORE_RULES.md)
-2. Relevant docs under [`docs/v1.0`](E:/2026/opencow/docs/v1.0)
-3. Existing local module docs if the task touches them
+1. `OPENCOW_CORE_RULES.md`
+2. Relevant docs under `docs/v1.0`
+3. Starting context file: `开发进度清单2026.6.6-22-48.md`
+4. Existing local module docs if the task touches them
+
+## First Loop Baseline
+
+- Loop name: `按清单继续开发`
+- Run id: `opencow-continue-from-checklist`
+- Branch: `dev`
+- Primary Codex thread title: `按清单继续开发`
+- Primary Codex thread id: `019e9db5-73ae-7292-877f-83b6bf6ab13a`
+- Required start context: `OPENCOW_CORE_RULES.md`, `docs/v1.0`, `开发进度清单2026.6.6-22-48.md`
 
 ## Acceptance Focus
 

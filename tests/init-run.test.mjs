@@ -9,10 +9,13 @@ import { initializeRun } from "../scripts/lib/init-run.mjs";
 test("initializeRun scaffolds runtime files for a new loop", async () => {
   const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), "codex-loop-"));
   const workspaceRoot = path.join(tempRoot, "workspace");
+  const codexLoopRoot = path.join(tempRoot, "codex-loop");
   await fs.mkdir(workspaceRoot, { recursive: true });
+  await fs.mkdir(codexLoopRoot, { recursive: true });
 
   const result = await initializeRun({
     workspaceRoot,
+    codexLoopRoot,
     config: {
       projectName: "demo",
       branch: "dev",
@@ -31,5 +34,8 @@ test("initializeRun scaffolds runtime files for a new loop", async () => {
   const logText = await fs.readFile(result.logPath, "utf8");
 
   assert.match(stateText, /"projectName": "demo"/);
+  assert.match(stateText, /"startedAt": "2026-06-06T10:00:00.000Z"/);
+  assert.match(stateText, /waiting for the first heartbeat or Codex progress sync/i);
   assert.match(logText, /run_initialized/);
+  assert.match(result.runtimeRoot, /codex-loop[\\/]runtime[\\/]run-001$/);
 });

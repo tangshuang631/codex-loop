@@ -16,7 +16,9 @@ Expected:
 
 ## opencow project verification baseline
 
-Follow [`docs/v1.0/08-testing-acceptance.md`](E:/2026/opencow/docs/v1.0/08-testing-acceptance.md).
+Follow `docs/v1.0/08-testing-acceptance.md`.
+
+Tie verification back to the active checklist item in `开发进度清单2026.6.6-22-48.md` before claiming the batch is ready to push.
 
 Minimum baseline before pushing `dev`:
 

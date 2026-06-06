@@ -6,6 +6,7 @@ import os from "node:os";
 
 import {
   ensureLoopArtifacts,
+  exportMobileView,
   exportLoopSummary,
   recordHeartbeat,
   saveThreadBinding,
@@ -39,7 +40,7 @@ async function createWorkspace() {
 
 test("exportLoopSummary writes mobile-friendly summary json", async () => {
   const configRoot = await createWorkspace();
-  await ensureLoopArtifacts(configRoot);
+  const snapshot = await ensureLoopArtifacts(configRoot);
   await saveThreadBinding(configRoot, {
     workspaceName: "opencow",
     threadTitle: "\u8bc4\u4f30\u957f\u65f6\u5f00\u53d1\u65b9\u6848",
@@ -62,12 +63,34 @@ test("exportLoopSummary writes mobile-friendly summary json", async () => {
   assert.equal(exported.modeLabel, "\u8fd0\u884c\u4e2d");
 
   const summaryPath = path.join(
-    configRoot,
-    "codex_loop",
-    "runtime",
-    "run-summary",
+    snapshot.paths.runtimeDir,
     "summary.json",
   );
   const summaryText = await fs.readFile(summaryPath, "utf8");
   assert.match(summaryText, /"threadId": "thread-123"/);
+});
+
+test("exportMobileView returns recent transcript entries for mobile readers", async () => {
+  const configRoot = await createWorkspace();
+  await ensureLoopArtifacts(configRoot);
+  await saveThreadBinding(configRoot, {
+    workspaceName: "opencow",
+    threadTitle: "评估长时开发方案",
+    threadId: "thread-123",
+    singleThreadMode: true,
+  });
+  await recordHeartbeat(configRoot, {
+    activeTask: "Review mobile transcript",
+    note: "Verification still green",
+    progressSummary: "Prepared a mobile-friendly activity feed",
+    consumedTokens: 5200,
+  });
+
+  const mobile = await exportMobileView(configRoot);
+
+  assert.equal(mobile.loop.id, "run-summary");
+  assert.equal(mobile.thread.threadId, "thread-123");
+  assert.equal(mobile.summary.recentSummary, "Prepared a mobile-friendly activity feed");
+  assert.equal(mobile.transcriptEntries.length > 0, true);
+  assert.equal(mobile.transcriptEntries[0].activeTask, "Review mobile transcript");
 });

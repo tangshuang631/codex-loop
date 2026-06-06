@@ -27,3 +27,20 @@ test("resolveWorkspaceAndLoopRoot detects workspace cwd correctly", async () => 
   assert.equal(resolved.workspaceRoot, tempRoot);
   assert.equal(resolved.codexLoopRoot, loopRoot);
 });
+
+test("resolveWorkspaceAndLoopRoot supports standalone codex-loop with explicit workspaceRoot", async () => {
+  const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), "codex-loop-root-"));
+  const loopRoot = path.join(tempRoot, "codex-loop");
+  const workspaceRoot = path.join(tempRoot, "opencow");
+  await fs.mkdir(loopRoot, { recursive: true });
+  await fs.mkdir(workspaceRoot, { recursive: true });
+  await fs.writeFile(
+    path.join(loopRoot, "config.json"),
+    `${JSON.stringify({ workspaceRoot }, null, 2)}\n`,
+    "utf8",
+  );
+
+  const resolved = await resolveWorkspaceAndLoopRoot(loopRoot);
+  assert.equal(resolved.workspaceRoot, workspaceRoot);
+  assert.equal(resolved.codexLoopRoot, loopRoot);
+});

@@ -1,15 +1,22 @@
 import {
+  createLoop,
+  deleteLoop,
+  exportMobileView,
   exportLoopSummary,
+  listLoops,
   readLoopSnapshot,
+  selectLoop,
   recordHeartbeat,
   recordError,
   renameLoop,
   requestGracefulStop,
+  runLoopTurn,
   saveThreadBinding,
   startRun,
   syncCodexThreadMirror,
   updateBudgets,
 } from "./lib/runtime-store.mjs";
+import { createLoopController } from "./lib/loop-controller.mjs";
 import { saveUserOverrides } from "./lib/adapter-store.mjs";
 
 function sendJson(response, statusCode, value) {
@@ -36,12 +43,19 @@ async function readBody(request) {
 }
 
 export function buildHandler({
+  loopController = createLoopController(),
   operations = {
       readLoopSnapshot,
       exportLoopSummary,
+      exportMobileView,
       startRun,
       renameLoop,
+      listLoops,
+      createLoop,
+      selectLoop,
+      deleteLoop,
       requestGracefulStop,
+      runLoopTurn,
       updateBudgets,
       saveThreadBinding,
       syncCodexThreadMirror,
@@ -63,7 +77,13 @@ export function buildHandler({
 
     try {
       if (request.method === "GET" && request.url === "/api/health") {
-        sendJson(response, 200, { ok: true });
+        const snapshot = await operations.readLoopSnapshot(process.cwd());
+        sendJson(response, 200, {
+          ok: Boolean(snapshot.health?.ok),
+          mode: snapshot.state.mode,
+          continuationStatus: snapshot.thread.continuationStatus,
+          issues: snapshot.health?.issues || [],
+        });
         return;
       }
 
@@ -77,8 +97,28 @@ export function buildHandler({
         return;
       }
 
+      if (request.method === "GET" && request.url === "/api/mobile") {
+        sendJson(response, 200, await operations.exportMobileView());
+        return;
+      }
+
+      if (request.method === "GET" && request.url === "/api/loops") {
+        sendJson(response, 200, await operations.listLoops());
+        return;
+      }
+
       if (request.method === "POST" && request.url === "/api/start") {
-        sendJson(response, 200, await operations.startRun());
+        const snapshot = await operations.startRun(process.cwd());
+        const loopStarted = await loopController.start(process.cwd());
+        sendJson(response, 200, {
+          ...snapshot,
+          loopControllerStarted: loopStarted,
+        });
+        return;
+      }
+
+      if (request.method === "POST" && request.url === "/api/run-turn") {
+        sendJson(response, 200, await operations.runLoopTurn(process.cwd()));
         return;
       }
 
@@ -92,8 +132,39 @@ export function buildHandler({
         return;
       }
 
+      if (request.method === "POST" && request.url === "/api/loops") {
+        const body = await readBody(request);
+        sendJson(
+          response,
+          200,
+          await operations.createLoop(process.cwd(), body),
+        );
+        return;
+      }
+
+      if (request.method === "POST" && request.url === "/api/loops/select") {
+        const body = await readBody(request);
+        sendJson(
+          response,
+          200,
+          await operations.selectLoop(process.cwd(), body),
+        );
+        return;
+      }
+
+      if (request.method === "POST" && request.url === "/api/loops/delete") {
+        const body = await readBody(request);
+        sendJson(
+          response,
+          200,
+          await operations.deleteLoop(process.cwd(), body),
+        );
+        return;
+      }
+
       if (request.method === "POST" && request.url === "/api/stop") {
         const body = await readBody(request);
+        loopController.stop(process.cwd());
         sendJson(
           response,
           200,

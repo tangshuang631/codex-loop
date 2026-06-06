@@ -6,5 +6,9 @@
     "maxTokens": 120000,
     "finalizeLeadMinutes": 30,
     "finalizeLeadTokens": 15000
-  }
+  },
+  "projectAdapter": "opencow",
+  "currentRunId": "opencow-continue-from-checklist",
+  "loopName": "按清单继续开发",
+  "threadTitle": "按清单继续开发"
 }

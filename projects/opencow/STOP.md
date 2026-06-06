@@ -27,3 +27,9 @@ When the trigger appears:
 3. avoid expanding scope
 4. prefer shipping the cleanest verified batch
 5. leave the Codex thread with a clear final status update before stopping
+
+## First loop stop target
+
+- Primary thread: `按清单继续开发`
+- Primary run id: `opencow-continue-from-checklist`
+- Before stop, sync what was finished against `开发进度清单2026.6.6-22-48.md`

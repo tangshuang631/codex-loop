@@ -11,6 +11,7 @@
     "loop:summary": "node scripts/export-summary.mjs",
     "loop:scaffold": "node scripts/scaffold-project.mjs",
     "loop:bind-thread": "node scripts/bind-thread.mjs",
+    "loop:start": "start-codex-loop.bat",
     "dev": "node scripts/dev.mjs",
     "dev:server": "node app/server/index.mjs",
     "dev:web": "vite --config app/web/vite.config.mjs",

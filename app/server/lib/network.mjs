@@ -9,10 +9,37 @@ export function normalizePort(value, fallback = 4318) {
   return Math.trunc(numeric);
 }
 
+export async function findAvailablePortPair(
+  host,
+  {
+    apiPreferredPort,
+    webPreferredPort,
+    attempts = 10,
+    canListen = defaultCanListen,
+  },
+) {
+  for (let offset = 0; offset < attempts; offset += 1) {
+    const apiPort = apiPreferredPort + offset;
+    const webPort = webPreferredPort + offset;
+    const [apiAvailable, webAvailable] = await Promise.all([
+      canListen(host, apiPort),
+      canListen(host, webPort),
+    ]);
+
+    if (apiAvailable && webAvailable) {
+      return { apiPort, webPort };
+    }
+  }
+
+  throw new Error(
+    `Could not find an available local port pair starting at ${apiPreferredPort}/${webPreferredPort} on ${host}.`,
+  );
+}
+
 export async function findAvailablePort(host, preferredPort, attempts = 10) {
   for (let offset = 0; offset < attempts; offset += 1) {
     const port = preferredPort + offset;
-    const available = await canListen(host, port);
+    const available = await defaultCanListen(host, port);
     if (available) {
       return port;
     }
@@ -23,7 +50,7 @@ export async function findAvailablePort(host, preferredPort, attempts = 10) {
   );
 }
 
-function canListen(host, port) {
+function defaultCanListen(host, port) {
   return new Promise((resolve) => {
     const probe = net.createServer();
 

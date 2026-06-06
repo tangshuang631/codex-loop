@@ -20,7 +20,7 @@ This creates a practical bridge between:
 
 1. Choose or create the target repository.
 2. Give the AI:
-   - [`codex_loop/templates/LOOP_TEMPLATE.md`](E:/2026/opencow/codex_loop/templates/LOOP_TEMPLATE.md)
+   - `templates/LOOP_TEMPLATE.md`
    - this setup guide
    - the repository docs and rules
 3. Ask the AI to fill the template from real project context only.

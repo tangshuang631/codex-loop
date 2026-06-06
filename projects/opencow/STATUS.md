@@ -1,6 +1,6 @@
 # opencow Loop Status
 
-- Current goal: Build a reusable `codex_loop` tool plus strict `opencow` adaptation.
-- Current phase: Initial scaffold and verification.
-- Resume point: Read `THREAD.md` and `README.md`, then continue from the current active task in `QUEUE.md`.
-- Latest expectation: The loop tool should enter graceful finalize before hard budget exhaustion and leave traceable logs behind.
+- Current goal: Continue `opencow` from `开发进度清单2026.6.6-22-48.md` using the reusable `codex_loop` contract.
+- Current phase: First production loop bound to the real Codex thread.
+- Resume point: Read `OPENCOW_CORE_RULES.md`, `docs/v1.0`, `开发进度清单2026.6.6-22-48.md`, then `THREAD.md` and `QUEUE.md`.
+- Latest expectation: The loop should keep one visible Codex thread, follow strict verification, checkpoint coherent batches, and finalize gracefully before budget exhaustion.

@@ -9,6 +9,7 @@ coverage/
 
 # Local user and machine state
 settings/local/
+settings/loops.json
 settings/*.local.json
 config.local.json
 

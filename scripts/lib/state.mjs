@@ -2,12 +2,13 @@ function asBudgetValue(value, fallback) {
   return Number.isFinite(value) ? value : fallback;
 }
 
-export function createInitialState({ projectName, branch, budgets }) {
+export function createInitialState({ projectName, loopName, branch, budgets }) {
   return {
     version: 1,
     projectName,
-    loopName: projectName,
+    loopName: loopName || projectName,
     branch,
+    startedAt: "",
     mode: "running",
     stopRequested: false,
     finalizeRequested: false,

@@ -6,13 +6,22 @@ Run long-lived `opencow` development in a persistent Codex thread without unnece
 
 ## Required Reading Order
 
-1. [`OPENCOW_CORE_RULES.md`](E:/2026/opencow/OPENCOW_CORE_RULES.md)
-2. Relevant files under [`docs/v1.0`](E:/2026/opencow/docs/v1.0)
-3. [`codex_loop/projects/opencow/THREAD.md`](E:/2026/opencow/codex_loop/projects/opencow/THREAD.md)
-4. [`codex_loop/projects/opencow/QUEUE.md`](E:/2026/opencow/codex_loop/projects/opencow/QUEUE.md)
-5. [`codex_loop/projects/opencow/STATUS.md`](E:/2026/opencow/codex_loop/projects/opencow/STATUS.md)
-6. [`codex_loop/projects/opencow/VERIFY.md`](E:/2026/opencow/codex_loop/projects/opencow/VERIFY.md)
-7. [`codex_loop/projects/opencow/STOP.md`](E:/2026/opencow/codex_loop/projects/opencow/STOP.md)
+1. `OPENCOW_CORE_RULES.md`
+2. Relevant files under `docs/v1.0`
+3. `开发进度清单2026.6.6-22-48.md`
+4. `projects/opencow/THREAD.md`
+5. `projects/opencow/QUEUE.md`
+6. `projects/opencow/STATUS.md`
+7. `projects/opencow/VERIFY.md`
+8. `projects/opencow/STOP.md`
+
+## First Loop Identity
+
+- Loop name: `按清单继续开发`
+- Run id: `opencow-continue-from-checklist`
+- Primary branch: `dev`
+- Primary Codex thread title: `按清单继续开发`
+- Primary Codex thread id: `019e9db5-73ae-7292-877f-83b6bf6ab13a`
 
 ## Transcript Contract
 

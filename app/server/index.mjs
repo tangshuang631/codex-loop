@@ -4,7 +4,7 @@ import { findAvailablePort, normalizePort } from "./lib/network.mjs";
 import { buildHandler } from "./server.mjs";
 
 const host = process.env.CODEX_LOOP_HOST || "127.0.0.1";
-const preferredPort = normalizePort(process.env.CODEX_LOOP_PORT, 4318);
+const preferredPort = normalizePort(process.env.CODEX_LOOP_PORT, 3000);
 
 async function main() {
   const port = await findAvailablePort(host, preferredPort, 20);

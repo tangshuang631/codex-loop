@@ -1,5 +1,6 @@
+import path from "node:path";
 import { spawn } from "node:child_process";
-import { findAvailablePort, normalizePort } from "../app/server/lib/network.mjs";
+import { findAvailablePortPair, normalizePort } from "../app/server/lib/network.mjs";
 
 function run(command, args, extraEnv = {}) {
   const child = spawn(command, args, {
@@ -27,16 +28,21 @@ function run(command, args, extraEnv = {}) {
 
 async function main() {
   const host = process.env.CODEX_LOOP_HOST || "127.0.0.1";
-  const preferredPort = normalizePort(process.env.CODEX_LOOP_PORT, 4318);
-  const webPort = normalizePort(process.env.CODEX_LOOP_WEB_PORT, 4173);
-  const apiPort = await findAvailablePort(host, preferredPort, 20);
+  const preferredPort = normalizePort(process.env.CODEX_LOOP_PORT, 3000);
+  const preferredWebPort = normalizePort(process.env.CODEX_LOOP_WEB_PORT, 3001);
+  const { apiPort, webPort } = await findAvailablePortPair(host, {
+    apiPreferredPort: preferredPort,
+    webPreferredPort: preferredWebPort,
+    attempts: 50,
+  });
 
   const server = run("node", ["app/server/index.mjs"], {
     CODEX_LOOP_HOST: host,
     CODEX_LOOP_PORT: String(apiPort),
   });
 
-  const web = run("vite", ["--config", "app/web/vite.config.mjs", "--port", String(webPort)], {
+  const viteEntry = path.join(process.cwd(), "node_modules", "vite", "bin", "vite.js");
+  const web = run("node", [viteEntry, "--config", "app/web/vite.config.mjs", "--host", host, "--port", String(webPort)], {
     VITE_CODEX_LOOP_API_BASE: `http://${host}:${apiPort}/api`,
   });
 

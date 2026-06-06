@@ -1,7 +1,8 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 
-import { findAvailablePort, normalizePort } from "../app/server/lib/network.mjs";
+import { findAvailablePortPair, normalizePort } from "../app/server/lib/network.mjs";
+import { loadLoopConfig } from "./lib/config-loader.mjs";
 import { resolveWorkspaceAndLoopRoot } from "./lib/workspace-context.mjs";
 
 async function exists(targetPath) {
@@ -39,7 +40,7 @@ async function findProgressFile(workspaceRoot) {
 
 async function main() {
   const { workspaceRoot, codexLoopRoot } = await resolveWorkspaceAndLoopRoot(process.cwd());
-  const configPath = path.join(codexLoopRoot, "config.json");
+  const { config, configPath, localConfigPath } = await loadLoopConfig(codexLoopRoot);
   const packagePath = path.join(codexLoopRoot, "package.json");
   const opencowRulesPath = path.join(workspaceRoot, "OPENCOW_CORE_RULES.md");
   const docsRoot = path.join(workspaceRoot, "docs", "v1.0");
@@ -51,7 +52,6 @@ async function main() {
   await assertPath(docsRoot, `Missing project docs directory: ${docsRoot}`);
   await assertPath(progressPath, `Missing starting progress file: ${progressPath}`);
 
-  const config = JSON.parse(await fs.readFile(configPath, "utf8"));
   if (!config.projectName || !config.branch || !config.budgets) {
     throw new Error("codex_loop/config.json is missing required fields: projectName, branch, budgets.");
   }
@@ -65,8 +65,13 @@ async function main() {
   };
 
   try {
-    apiPort = await findAvailablePort(host, normalizePort(process.env.CODEX_LOOP_PORT, 4318), 20);
-    webPort = await findAvailablePort(host, normalizePort(process.env.CODEX_LOOP_WEB_PORT, 4173), 20);
+    const pair = await findAvailablePortPair(host, {
+      apiPreferredPort: normalizePort(process.env.CODEX_LOOP_PORT, 3000),
+      webPreferredPort: normalizePort(process.env.CODEX_LOOP_WEB_PORT, 3001),
+      attempts: 50,
+    });
+    apiPort = pair.apiPort;
+    webPort = pair.webPort;
   } catch (error) {
     portCheck = {
       ok: false,
@@ -84,6 +89,8 @@ async function main() {
       projectName: config.projectName,
       branch: config.branch,
       budgets: config.budgets,
+      workspaceRoot: config.workspaceRoot || "",
+      localConfigPath,
     },
     ports: {
       host,

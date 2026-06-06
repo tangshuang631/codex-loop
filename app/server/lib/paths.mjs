@@ -1,5 +1,6 @@
 import fs from "node:fs/promises";
 import path from "node:path";
+import { loadLoopConfig } from "../../../scripts/lib/config-loader.mjs";
 
 async function exists(targetPath) {
   try {
@@ -8,6 +9,11 @@ async function exists(targetPath) {
   } catch {
     return false;
   }
+}
+
+async function readJson(filePath) {
+  const text = await fs.readFile(filePath, "utf8");
+  return JSON.parse(text);
 }
 
 export async function resolveCodexLoopRoot(startDir = process.cwd()) {
@@ -29,17 +35,23 @@ export async function resolveCodexLoopRoot(startDir = process.cwd()) {
 
 export async function resolveWorkspaceRoot(startDir = process.cwd()) {
   const codexLoopRoot = await resolveCodexLoopRoot(startDir);
-  return path.dirname(codexLoopRoot);
+  const { config } = await loadLoopConfig(codexLoopRoot);
+  return config.workspaceRoot
+    ? path.resolve(config.workspaceRoot)
+    : path.dirname(codexLoopRoot);
 }
 
 export async function resolveProjectLayout(startDir = process.cwd()) {
   const codexLoopRoot = await resolveCodexLoopRoot(startDir);
-  const workspaceRoot = path.dirname(codexLoopRoot);
+  const { config, configPath } = await loadLoopConfig(codexLoopRoot);
+  const workspaceRoot = config.workspaceRoot
+    ? path.resolve(config.workspaceRoot)
+    : path.dirname(codexLoopRoot);
 
   return {
     codexLoopRoot,
     workspaceRoot,
-    configPath: path.join(codexLoopRoot, "config.json"),
+    configPath,
     runtimeRoot: path.join(codexLoopRoot, "runtime"),
   };
 }

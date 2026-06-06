@@ -40,11 +40,11 @@ dist/            Built web output (ignored in git)
 ## Quick Start
 
 1. Install dependencies with `npm install`.
-2. Run `npm run loop:check`.
-3. Run `npm test`.
-4. Run `npm run build:web`.
-5. Start the local console with `npm run dev`.
-6. Initialize a run with `npm run loop:init`.
+2. Copy `config.local.example.json` to `config.local.json`, then set `workspaceRoot` to the target repository you want to drive.
+3. Run `npm run loop:check`.
+4. Run `npm test`.
+5. Run `npm run build:web`.
+6. Start the launcher with `start-codex-loop.bat` or `npm run loop:start`.
 7. Bind the loop to one dedicated Codex thread with `npm run loop:bind-thread`.
 
 ## Main Commands
@@ -56,6 +56,7 @@ dist/            Built web output (ignored in git)
 - `npm run loop:summary`
 - `npm run loop:scaffold`
 - `npm run loop:bind-thread`
+- `npm run loop:start`
 - `npm run dev`
 - `npm run build:web`
 - `npm test`
@@ -89,6 +90,12 @@ The last verified local checks in this workspace were:
 - `npm run build:web`
 
 Environment-specific local port restrictions may still block the local web console on some machines, so `npm run loop:check` should be treated as the first real machine-level validation step.
+
+## Local Configuration
+
+- Keep portable defaults in `config.json`.
+- Put machine-specific values such as `workspaceRoot` in `config.local.json` or `CODEX_LOOP_WORKSPACE_ROOT`.
+- `config.local.json` is ignored by git so the repository stays clone-safe.
 
 ## License
 

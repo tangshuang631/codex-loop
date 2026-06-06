@@ -2,18 +2,19 @@ import fs from "node:fs/promises";
 import path from "node:path";
 
 import { appendJsonLine, writeJson } from "./lib/fs-helpers.mjs";
+import { loadLoopConfig } from "./lib/config-loader.mjs";
+import { resolveWorkspaceAndLoopRoot } from "./lib/workspace-context.mjs";
 
 async function main() {
-  const workspaceRoot = process.cwd();
-  const configPath = path.join(workspaceRoot, "codex_loop", "config.json");
-  const config = JSON.parse(await fs.readFile(configPath, "utf8"));
+  const { codexLoopRoot } = await resolveWorkspaceAndLoopRoot(process.cwd());
+  const { config } = await loadLoopConfig(codexLoopRoot);
   const runId = config.currentRunId;
 
   if (!runId) {
     throw new Error("config.currentRunId is required");
   }
 
-  const runtimeRoot = path.join(workspaceRoot, "codex_loop", "runtime", runId);
+  const runtimeRoot = path.join(codexLoopRoot, "runtime", runId);
   const statePath = path.join(runtimeRoot, "state.json");
   const logPath = path.join(runtimeRoot, "logs", "events.jsonl");
   const state = JSON.parse(await fs.readFile(statePath, "utf8"));

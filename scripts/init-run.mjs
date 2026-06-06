@@ -1,18 +1,20 @@
 import fs from "node:fs/promises";
-import path from "node:path";
 
 import { initializeRun } from "./lib/init-run.mjs";
+import { loadLoopConfig } from "./lib/config-loader.mjs";
+import { resolveWorkspaceAndLoopRoot } from "./lib/workspace-context.mjs";
 
 async function main() {
-  const workspaceRoot = process.cwd();
-  const configPath = path.join(workspaceRoot, "codex_loop", "config.json");
-  const configText = await fs.readFile(configPath, "utf8");
-  const config = JSON.parse(configText);
+  const { workspaceRoot, codexLoopRoot } = await resolveWorkspaceAndLoopRoot(
+    process.cwd(),
+  );
+  const { config } = await loadLoopConfig(codexLoopRoot);
   const runId = config.currentRunId || `run-${Date.now()}`;
   const nowIso = new Date().toISOString();
 
   const result = await initializeRun({
     workspaceRoot,
+    codexLoopRoot,
     config,
     runId,
     nowIso,
