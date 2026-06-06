@@ -16,6 +16,16 @@ const continuationTextMap = {
   error: "续发失败",
 };
 
+const launcherPhaseTextMap = {
+  idle: "未启动",
+  starting: "启动中",
+  server_ready: "后端已就绪",
+  web_ready: "前端已就绪",
+  ready: "前后端已就绪",
+  failed: "启动失败",
+  stopped: "已停止",
+};
+
 function formatValue(value, fallback = "未设置") {
   if (value === null || value === undefined || value === "") {
     return fallback;
@@ -82,6 +92,7 @@ function FeedCard({ title, body, meta, quiet = false }) {
 export function App() {
   const [snapshot, setSnapshot] = useState(null);
   const [mobileView, setMobileView] = useState(null);
+  const [launcherStatus, setLauncherStatus] = useState(null);
   const [loopRegistry, setLoopRegistry] = useState({ currentLoopId: "", loops: [] });
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
@@ -109,14 +120,16 @@ export function App() {
     setUiError("");
 
     try {
-      const [nextSnapshot, nextLoops, nextMobile] = await Promise.all([
+      const [nextSnapshot, nextLoops, nextMobile, nextLauncherStatus] = await Promise.all([
         requestJson("/snapshot"),
         requestJson("/loops"),
         requestJson("/mobile"),
+        requestJson("/launcher-status"),
       ]);
       setSnapshot(nextSnapshot);
       setLoopRegistry(nextLoops);
       setMobileView(nextMobile);
+      setLauncherStatus(nextLauncherStatus);
       setThreadForm({
         workspaceName: nextSnapshot.thread.workspaceName || "",
         threadTitle: nextSnapshot.thread.threadTitle || "",
@@ -199,6 +212,12 @@ export function App() {
   const primaryThreadName = formatValue(snapshot?.thread.threadTitle, "未绑定线程");
   const bindingNote = mobileView?.bindingNote || formatValue(snapshot?.thread.note, "暂无");
   const suggestedAction = mobileView?.suggestedAction || "建议先完成线程绑定，再开始循环。";
+  const launcherPhase =
+    launcherPhaseTextMap[launcherStatus?.phase] || formatValue(launcherStatus?.phase, "未知");
+  const launcherApiUrl = formatValue(launcherStatus?.apiBaseUrl, "暂无");
+  const launcherWebUrl = formatValue(launcherStatus?.webUrl, "暂无");
+  const launcherNote = formatValue(launcherStatus?.note, "等待启动状态更新");
+  const launcherError = formatValue(launcherStatus?.error, "无");
 
   return (
     <main className="app-shell">
@@ -593,6 +612,43 @@ export function App() {
               )}
             </div>
           </div>
+        </Section>
+
+        <Section
+          title="启动状态"
+          desc="直接显示 dev 控制台当前启动到哪一步、真实端口是什么，以及是否已经可访问。"
+        >
+          <div className="summary-stack">
+            <Metric label="当前阶段" value={launcherPhase} />
+            <Metric
+              label="后端地址"
+              value={launcherApiUrl}
+              muted={!launcherStatus?.apiBaseUrl}
+            />
+            <Metric
+              label="前端地址"
+              value={launcherWebUrl}
+              muted={!launcherStatus?.webUrl}
+            />
+            <Metric label="状态说明" value={launcherNote} muted={!launcherStatus?.note} />
+          </div>
+
+          <details className="meta-details">
+            <summary>展开启动细节</summary>
+            <div className="meta-grid">
+              <Metric label="后端就绪" value={launcherStatus?.serverReady ? "是" : "否"} />
+              <Metric label="前端就绪" value={launcherStatus?.webReady ? "是" : "否"} />
+              <Metric
+                label="启动错误"
+                value={launcherError}
+                muted={!launcherStatus?.error}
+              />
+              <Metric
+                label="状态更新时间"
+                value={formatValue(launcherStatus?.updatedAt, "暂无")}
+              />
+            </div>
+          </details>
         </Section>
 
         <Section

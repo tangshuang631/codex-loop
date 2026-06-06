@@ -3,7 +3,7 @@ import http from "node:http";
 import { findAvailablePort, normalizePort } from "./lib/network.mjs";
 import { buildHandler } from "./server.mjs";
 
-const host = process.env.CODEX_LOOP_HOST || "127.0.0.1";
+const host = (process.env.CODEX_LOOP_HOST || "127.0.0.1").trim();
 const preferredPort = normalizePort(process.env.CODEX_LOOP_PORT, 3000);
 const hasExplicitPort = Boolean(process.env.CODEX_LOOP_PORT);
 

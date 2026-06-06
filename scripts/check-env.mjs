@@ -56,7 +56,7 @@ async function main() {
     throw new Error("codex_loop/config.json is missing required fields: projectName, branch, budgets.");
   }
 
-  const host = process.env.CODEX_LOOP_HOST || "127.0.0.1";
+  const host = (process.env.CODEX_LOOP_HOST || "127.0.0.1").trim();
   let apiPort = null;
   let webPort = null;
   let portCheck = {

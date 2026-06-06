@@ -179,6 +179,7 @@ test("handler dispatches mobile route", async () => {
       readLoopSnapshot: async () => ({}),
       exportLoopSummary: async () => ({}),
       exportMobileView: async () => ({ mobile: true }),
+      readLauncherStatus: async () => ({ phase: "ready" }),
       startRun: async () => ({}),
       renameLoop: async () => ({}),
       requestGracefulStop: async () => ({}),
@@ -213,6 +214,54 @@ test("handler dispatches mobile route", async () => {
 
   assert.equal(response.statusCode, 200);
   assert.match(chunks.join(""), /"mobile":true/);
+});
+
+test("handler dispatches launcher status route", async () => {
+  const handler = buildHandler({
+    operations: {
+      readLoopSnapshot: async () => ({}),
+      exportLoopSummary: async () => ({}),
+      exportMobileView: async () => ({}),
+      readLauncherStatus: async () => ({
+        phase: "ready",
+        apiPort: 3000,
+        webPort: 3001,
+      }),
+      startRun: async () => ({}),
+      renameLoop: async () => ({}),
+      requestGracefulStop: async () => ({}),
+      updateBudgets: async () => ({}),
+      saveThreadBinding: async () => ({}),
+      syncCodexThreadMirror: async () => ({}),
+      recordHeartbeat: async () => ({}),
+      recordError: async () => ({}),
+      saveUserOverrides: async () => ({}),
+    },
+  });
+
+  const chunks = [];
+  const response = {
+    writeHead(statusCode, headers) {
+      this.statusCode = statusCode;
+      this.headers = headers;
+    },
+    end(text) {
+      chunks.push(text);
+    },
+  };
+
+  await handler(
+    {
+      method: "GET",
+      url: "/api/launcher-status",
+      [Symbol.asyncIterator]: async function* iterator() {},
+    },
+    response,
+  );
+
+  assert.equal(response.statusCode, 200);
+  assert.match(chunks.join(""), /"phase":"ready"/);
+  assert.match(chunks.join(""), /"apiPort":3000/);
 });
 
 test("handler dispatches start route and reports whether controller was newly started", async () => {

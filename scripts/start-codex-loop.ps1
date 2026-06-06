@@ -137,7 +137,7 @@ try {
   Write-Host "        3. 开发进度清单2026.6.6-22-48.md"
   Write-Step "Opening codex-loop console window..."
 
-  $command = "chcp 65001>nul && cd /d `"$loopRoot`" && set CODEX_LOOP_HOST=$hostName && set CODEX_LOOP_PORT=$apiPort && set CODEX_LOOP_WEB_PORT=$webPort && npm run dev"
+  $command = "chcp 65001>nul && cd /d `"$loopRoot`" && set `"CODEX_LOOP_HOST=$hostName`" && set `"CODEX_LOOP_PORT=$apiPort`" && set `"CODEX_LOOP_WEB_PORT=$webPort`" && npm run dev"
   Start-Process -FilePath "cmd.exe" -ArgumentList "/k", $command -WorkingDirectory $loopRoot
 
   Write-Ok "codex-loop launch requested."

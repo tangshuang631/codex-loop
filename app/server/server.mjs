@@ -17,6 +17,7 @@ import {
   updateBudgets,
 } from "./lib/runtime-store.mjs";
 import { createLoopController } from "./lib/loop-controller.mjs";
+import { readLauncherStatus } from "./lib/launcher-status.mjs";
 import { saveUserOverrides } from "./lib/adapter-store.mjs";
 
 function sendJson(response, statusCode, value) {
@@ -48,6 +49,7 @@ export function buildHandler({
       readLoopSnapshot,
       exportLoopSummary,
       exportMobileView,
+      readLauncherStatus,
       startRun,
       renameLoop,
       listLoops,
@@ -99,6 +101,11 @@ export function buildHandler({
 
       if (request.method === "GET" && request.url === "/api/mobile") {
         sendJson(response, 200, await operations.exportMobileView());
+        return;
+      }
+
+      if (request.method === "GET" && request.url === "/api/launcher-status") {
+        sendJson(response, 200, await operations.readLauncherStatus());
         return;
       }
 
