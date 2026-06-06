@@ -1,0 +1,10 @@
+{
+  "projectName": "opencow",
+  "branch": "dev",
+  "budgets": {
+    "maxMinutes": 360,
+    "maxTokens": 120000,
+    "finalizeLeadMinutes": 30,
+    "finalizeLeadTokens": 15000
+  }
+}

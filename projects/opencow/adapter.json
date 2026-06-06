@@ -1,0 +1,37 @@
+{
+  "adapterId": "opencow",
+  "displayName": "opencow",
+  "description": "opencow generated adapter profile",
+  "singleThread": {
+    "required": true,
+    "reason": "Keep Codex history continuous and recoverable."
+  },
+  "stopPolicy": {
+    "allowFinishCurrentTask": true,
+    "requireVerificationBeforeStop": true,
+    "requireCommitBeforeStop": true,
+    "requirePushBeforeStop": false
+  },
+  "budgets": {
+    "maxMinutes": 180,
+    "maxTokens": 120000,
+    "finalizeLeadMinutes": 20,
+    "finalizeLeadTokens": 15000
+  },
+  "verification": {
+    "strictness": "high",
+    "commands": [
+      "npm run test",
+      "npm run test:unit",
+      "npm run build",
+      "npm run verify:all"
+    ],
+    "notes": [
+      "Review generated commands and tighten them for this repository before regular use."
+    ]
+  },
+  "threadPolicy": {
+    "preferHeartbeatContinuation": true,
+    "requireVisiblePrimaryThread": true
+  }
+}

@@ -1,0 +1,17 @@
+node_modules/
+dist/
+runtime/
+.DS_Store
+Thumbs.db
+*.log
+coverage/
+.vite/
+
+# Local user and machine state
+settings/local/
+settings/*.local.json
+config.local.json
+
+# Temporary or generated project scaffolds
+codex_loop/
+projects/codex_loop/

@@ -1,0 +1,27 @@
+{
+  "name": "codex-loop",
+  "private": false,
+  "type": "module",
+  "scripts": {
+    "test": "node --test tests/*.test.mjs",
+    "loop:check": "node scripts/check-env.mjs",
+    "loop:init": "node scripts/init-run.mjs",
+    "loop:heartbeat": "node scripts/heartbeat.mjs",
+    "loop:finalize": "node scripts/finalize-run.mjs",
+    "loop:summary": "node scripts/export-summary.mjs",
+    "loop:scaffold": "node scripts/scaffold-project.mjs",
+    "loop:bind-thread": "node scripts/bind-thread.mjs",
+    "dev": "node scripts/dev.mjs",
+    "dev:server": "node app/server/index.mjs",
+    "dev:web": "vite --config app/web/vite.config.mjs",
+    "build:web": "vite build --config app/web/vite.config.mjs"
+  },
+  "dependencies": {
+    "react": "^19.1.0",
+    "react-dom": "^19.1.0"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-react": "^5.0.0",
+    "vite": "^7.0.0"
+  }
+}

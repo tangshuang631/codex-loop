@@ -1,0 +1,32 @@
+{
+  "adapterId": "generic",
+  "displayName": "通用项目",
+  "description": "适用于大多数本地代码仓库的默认严格 loop 方案。",
+  "singleThread": {
+    "required": true,
+    "reason": "保持 Codex 主历史连续，避免多线程割裂。"
+  },
+  "stopPolicy": {
+    "allowFinishCurrentTask": true,
+    "requireVerificationBeforeStop": true,
+    "requireCommitBeforeStop": true,
+    "requirePushBeforeStop": false
+  },
+  "budgets": {
+    "maxMinutes": 180,
+    "maxTokens": 120000,
+    "finalizeLeadMinutes": 20,
+    "finalizeLeadTokens": 15000
+  },
+  "verification": {
+    "strictness": "high",
+    "commands": [],
+    "notes": [
+      "先跑聚焦验证，再跑项目自己的完整基线。"
+    ]
+  },
+  "threadPolicy": {
+    "preferHeartbeatContinuation": true,
+    "requireVisiblePrimaryThread": true
+  }
+}
