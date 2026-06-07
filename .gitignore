@@ -12,6 +12,7 @@ settings/local/
 settings/loops.json
 settings/*.local.json
 settings/loop-creation-assistant.json
+settings/launcher-status.json
 config.local.json
 
 # Temporary or generated project scaffolds

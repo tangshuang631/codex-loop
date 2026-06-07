@@ -609,14 +609,83 @@ test("loop creation assistant can start from a natural-language planning intent"
     },
   });
 
-  assert.equal(state.step, "project_name");
+  assert.equal(state.step, "plan_review");
   assert.equal(state.draft.intent, "我要针对这个项目做自动化 loop 规划，先帮我设计第一个循环");
   assert.equal(state.draft.plan.objectiveSummary, "先围绕核心链路设计首个循环");
   assert.equal(state.draft.projectName, "opencow");
   assert.equal(state.draft.loopName, "首个核心链路循环");
   assert.equal(state.draft.branch, "dev");
+  assert.equal(state.currentQuestion.id, "plan_review");
+  assert.match(state.currentQuestion.prompt, /opencow|项目名/);
+  assert.equal(state.draft.plan.pendingField, "project_name");
+});
+
+test("loop creation assistant can review planner suggestions step by step before creation", async () => {
+  const configRoot = await createWorkspace();
+  const projectRoot = path.join(configRoot, "planner-project");
+  await fs.mkdir(projectRoot, { recursive: true });
+  await fs.writeFile(
+    path.join(projectRoot, "package.json"),
+    `${JSON.stringify({ name: "planner-project" }, null, 2)}\n`,
+    "utf8",
+  );
+  await fs.mkdir(path.join(projectRoot, ".git"), { recursive: true });
+  await fs.mkdir(path.join(projectRoot, "docs"), { recursive: true });
+  await fs.writeFile(path.join(projectRoot, "docs", "RULES.md"), "# rules\n", "utf8");
+
+  let state = await replyLoopCreationAssistant(configRoot, {
+    answer: projectRoot,
+  });
   assert.equal(state.currentQuestion.id, "project_name");
-  assert.match(state.currentQuestion.prompt, /opencow/);
+
+  state = await replyLoopCreationAssistant(configRoot, {
+    answer: "我要先规划这个项目的首个自动化循环",
+    planner: {
+      enabled: true,
+    },
+    planLoop: async () => ({
+      source: "template",
+      objectiveSummary: "先围绕启动、停止和可见状态搭建首个任务",
+      suggestedProjectName: "规划项目",
+      suggestedLoopName: "首个任务规划",
+      suggestedBranch: "dev",
+      checklist: ["确认项目名", "确认任务名", "确认分支", "确认文档来源"],
+      riskNotes: ["需要优先验证真实线程绑定"],
+      nextQuestion: "项目名先使用规划项目可以吗？",
+    }),
+  });
+
+  assert.equal(state.currentQuestion.id, "plan_review");
+  assert.equal(state.draft.plan.pendingField, "project_name");
+
+  state = await replyLoopCreationAssistant(configRoot, {
+    answer: "改成桌面控制台项目",
+  });
+  assert.equal(state.draft.projectName, "桌面控制台项目");
+  assert.equal(state.currentQuestion.id, "plan_review");
+  assert.equal(state.draft.plan.pendingField, "loop_name");
+
+  state = await replyLoopCreationAssistant(configRoot, {
+    answer: "使用建议",
+  });
+  assert.equal(state.draft.loopName, "首个任务规划");
+  assert.equal(state.currentQuestion.id, "plan_review");
+  assert.equal(state.draft.plan.pendingField, "branch");
+
+  state = await replyLoopCreationAssistant(configRoot, {
+    answer: "feature/desktop-loop",
+  });
+  assert.equal(state.draft.branch, "feature/desktop-loop");
+  assert.equal(state.currentQuestion.id, "docs_confirmed");
+
+  state = await replyLoopCreationAssistant(configRoot, {
+    answer: "confirm",
+  });
+
+  assert.equal(state.status, "completed");
+  assert.equal(state.createdLoop.loop.projectName, "桌面控制台项目");
+  assert.equal(state.createdLoop.loop.name, "首个任务规划");
+  assert.equal(state.createdLoop.loop.branch, "feature/desktop-loop");
 });
 
 test("loop creation assistant can detect git, docs, and create a grouped loop", async () => {

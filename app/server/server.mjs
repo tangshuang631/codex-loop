@@ -19,12 +19,15 @@ import {
   updateBudgets,
 } from "./lib/runtime-store.mjs";
 import { createLoopController } from "./lib/loop-controller.mjs";
-import { readLauncherStatus } from "./lib/launcher-status.mjs";
+import {
+  readLauncherStatus,
+  requestLauncherShutdown,
+} from "./lib/launcher-status.mjs";
 import { readRemoteAccessStatus } from "./lib/remote-access.mjs";
 import { listOllamaModels as defaultListOllamaModels } from "./lib/ollama-model-store.mjs";
 import {
   readAutomationStatusForThread,
-  updateAutomationIntervalForThread,
+      updateAutomationIntervalForThread,
 } from "./lib/automation-store.mjs";
 import { saveUserOverrides } from "./lib/adapter-store.mjs";
 
@@ -72,6 +75,35 @@ export function buildHandler({
       readAutomationStatus: async (startDir = process.cwd()) => {
         const snapshot = await readLoopSnapshot(startDir);
         return readAutomationStatusForThread(snapshot.thread);
+      },
+      shutdownLauncher: async (startDir = process.cwd(), payload = {}) => {
+        const snapshot = await readLoopSnapshot(startDir);
+        const activeLoopRunning =
+          snapshot.state?.mode === "running" &&
+          !snapshot.state?.stopRequested &&
+          !snapshot.state?.finalizeRequested;
+
+        let gracefulStop = null;
+        if (payload.force !== true && activeLoopRunning) {
+          gracefulStop = await requestGracefulStop(startDir, {
+            reason: payload.reason || "launcher shutdown requested",
+          });
+        }
+
+        const shutdown = await requestLauncherShutdown(startDir, {
+          reason: payload.reason || "launcher shutdown requested",
+          note: activeLoopRunning
+            ? "已请求当前任务先优雅停止，随后关闭 codex-loop。"
+            : "正在关闭 codex-loop 控制台。",
+          delayMs: activeLoopRunning ? 900 : 350,
+        });
+
+        return {
+          ok: true,
+          activeLoopRunning,
+          gracefulStop,
+          shutdown,
+        };
       },
       updateAutomationSettings: async (startDir = process.cwd(), payload = {}) => {
         const snapshot = await readLoopSnapshot(startDir);
@@ -246,6 +278,17 @@ export function buildHandler({
           response,
           200,
           await operations.requestGracefulStop(process.cwd(), body),
+        );
+        return;
+      }
+
+      if (request.method === "POST" && request.url === "/api/shutdown") {
+        const body = await readBody(request);
+        loopController.stop(process.cwd());
+        sendJson(
+          response,
+          200,
+          await operations.shutdownLauncher(process.cwd(), body),
         );
         return;
       }

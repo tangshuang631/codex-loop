@@ -319,10 +319,65 @@ select {
   gap: 12px;
 }
 
+.assistant-disclosure {
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  background: #fcfcfa;
+  overflow: hidden;
+}
+
+.assistant-disclosure summary {
+  cursor: pointer;
+  list-style: none;
+  padding: 14px 16px;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.assistant-disclosure summary::-webkit-details-marker {
+  display: none;
+}
+
+.assistant-disclosure[open] summary {
+  border-bottom: 1px solid var(--line);
+}
+
 .assistant-draft-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 10px;
+}
+
+.assistant-message-list {
+  display: grid;
+  gap: 10px;
+  padding: 14px 16px 16px;
+}
+
+.assistant-message {
+  display: grid;
+  gap: 6px;
+  padding: 12px 14px;
+  border-radius: 16px;
+  border: 1px solid var(--line);
+  background: #ffffff;
+}
+
+.assistant-message-user {
+  background: #f5f5f2;
+}
+
+.assistant-message-role {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.assistant-message p {
+  margin: 0;
+  color: var(--text);
+  font-size: 14px;
+  line-height: 1.7;
+  white-space: pre-wrap;
 }
 
 .assistant-reply-form {
@@ -602,6 +657,15 @@ select {
   cursor: pointer;
 }
 
+.danger-button {
+  border-radius: 14px;
+  padding: 11px 16px;
+  border: 1px solid #e9b7b2;
+  background: #fff5f3;
+  color: var(--danger);
+  cursor: pointer;
+}
+
 .primary-button {
   background: #111111;
   color: #ffffff;
@@ -618,7 +682,8 @@ select {
 
 .primary-button:disabled,
 .secondary-button:disabled,
-.ghost-button:disabled {
+.ghost-button:disabled,
+.danger-button:disabled {
   opacity: 0.55;
   cursor: not-allowed;
 }
@@ -726,6 +791,11 @@ select {
   border-radius: 18px;
   background: #fff4f2;
   color: var(--danger);
+}
+
+.danger-actions {
+  display: grid;
+  gap: 10px;
 }
 
 @keyframes shimmer {

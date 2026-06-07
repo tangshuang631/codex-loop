@@ -6,6 +6,7 @@ import os from "node:os";
 
 import {
   readLauncherStatus,
+  requestLauncherShutdown,
   writeLauncherStatus,
 } from "../app/server/lib/launcher-status.mjs";
 
@@ -57,4 +58,46 @@ test("writeLauncherStatus persists launcher visibility fields", async () => {
   );
   assert.equal(saved.note, "dev console is ready");
   assert.equal(saved.apiBaseUrl, "http://127.0.0.1:3000/api");
+});
+
+test("requestLauncherShutdown marks stopping state and schedules launcher termination", async () => {
+  const { tempRoot } = await createWorkspace();
+  const scheduled = [];
+  const killed = [];
+
+  await writeLauncherStatus(tempRoot, {
+    phase: "ready",
+    launcherPid: 43210,
+    note: "running",
+  });
+
+  const result = await requestLauncherShutdown(
+    tempRoot,
+    {
+      reason: "manual shutdown",
+      note: "closing from dashboard",
+      delayMs: 250,
+    },
+    {
+      schedule(callback, delayMs) {
+        scheduled.push(delayMs);
+        callback();
+        return { unref() {} };
+      },
+      killProcessTree(pid) {
+        killed.push(pid);
+        return true;
+      },
+    },
+  );
+
+  assert.equal(result.requested, true);
+  assert.equal(result.launcherPid, 43210);
+  assert.deepEqual(scheduled, [250]);
+  assert.deepEqual(killed, [43210]);
+
+  const nextStatus = await readLauncherStatus(tempRoot);
+  assert.equal(nextStatus.phase, "stopping");
+  assert.equal(nextStatus.shuttingDown, true);
+  assert.equal(nextStatus.shutdownReason, "manual shutdown");
 });

@@ -302,6 +302,8 @@ function createLoopAssistantDraft() {
       riskNotes: [],
       nextQuestion: "",
       error: "",
+      pendingField: "",
+      reviewNotes: [],
     },
     git: {
       hasGit: false,
@@ -321,6 +323,84 @@ function createLoopAssistantDraft() {
       strictness: "medium",
     },
   };
+}
+
+function appendAssistantMessage(history = [], role, text, meta = "") {
+  const content = safeText(text, "");
+  if (!content) {
+    return history;
+  }
+  return [
+    ...history,
+    {
+      role,
+      text: content,
+      meta: safeText(meta, ""),
+      at: nowIso(),
+    },
+  ].slice(-20);
+}
+
+function normalizeAssistantFieldAnswer(answer) {
+  const text = safeText(answer, "");
+  if (!text) {
+    return "";
+  }
+  return text
+    .replace(/^(改成|改为)\s*/u, "")
+    .trim();
+}
+
+function applyPlanReviewAnswer(draft, answer) {
+  const pendingField = safeText(draft.plan?.pendingField, "");
+  const normalizedAnswer = normalizeAssistantFieldAnswer(answer);
+  const useSuggested =
+    !normalizedAnswer ||
+    /^(好|可以|确认|使用建议|用建议|就这样|yes|ok)$/i.test(normalizedAnswer);
+
+  if (pendingField === "project_name") {
+    return {
+      ...draft,
+      projectName: useSuggested
+        ? safeText(draft.plan?.suggestedProjectName, draft.projectName)
+        : normalizedAnswer,
+      plan: {
+        ...draft.plan,
+        pendingField: "loop_name",
+      },
+    };
+  }
+
+  if (pendingField === "loop_name") {
+    return {
+      ...draft,
+      loopName: useSuggested
+        ? safeText(draft.plan?.suggestedLoopName, draft.loopName)
+        : normalizedAnswer,
+      plan: {
+        ...draft.plan,
+        pendingField: "branch",
+      },
+    };
+  }
+
+  if (pendingField === "branch") {
+    return {
+      ...draft,
+      branch: normalizeBranchName(
+        useSuggested
+          ? safeText(draft.plan?.suggestedBranch, draft.branch)
+          : normalizedAnswer,
+        draft.plan?.suggestedBranch || draft.git.branch || draft.branch || "dev",
+      ),
+      plan: {
+        ...draft.plan,
+        pendingField: "",
+      },
+    };
+  }
+
+  return draft;
 }
 
 function normalizeBranchName(value, fallback = "dev") {
@@ -363,6 +443,33 @@ function buildLoopAssistantQuestion(step, draft = createLoopAssistantDraft()) {
       prompt: draft.plan?.nextQuestion || "这个项目希望在左侧栏显示成什么项目名？",
       placeholder: suggestedName || draft.projectName || "例如 codex-loop",
     };
+  }
+
+  if (step === "plan_review") {
+    const pendingField = safeText(draft.plan?.pendingField, "project_name");
+    if (pendingField === "project_name") {
+      return {
+        id: "plan_review",
+        prompt: `我先整理了一版计划：目标是「${safeText(draft.plan?.objectiveSummary, "继续推进当前任务")}」。建议项目名使用「${safeText(draft.plan?.suggestedProjectName, draft.projectName || "当前项目")}」，确认可直接回复“使用建议”，也可以改成你想要的名字。`,
+        placeholder: safeText(draft.plan?.suggestedProjectName, draft.projectName || "输入项目名"),
+      };
+    }
+
+    if (pendingField === "loop_name") {
+      return {
+        id: "plan_review",
+        prompt: `接下来确认任务名。我建议使用「${safeText(draft.plan?.suggestedLoopName, draft.loopName || "当前任务")}」，这样左侧列表会更清楚。`,
+        placeholder: safeText(draft.plan?.suggestedLoopName, draft.loopName || "输入任务名"),
+      };
+    }
+
+    if (pendingField === "branch") {
+      return {
+        id: "plan_review",
+        prompt: `最后确认工作分支。当前建议是「${safeText(draft.plan?.suggestedBranch, draft.branch || "dev")}」，如果你有自己的分支名也可以直接改。`,
+        placeholder: safeText(draft.plan?.suggestedBranch, draft.branch || "dev"),
+      };
+    }
   }
 
   if (step === "loop_name") {
@@ -551,6 +658,14 @@ async function loadLoopAssistantState(layout) {
     draft: createLoopAssistantDraft(),
     currentQuestion: buildLoopAssistantQuestion("workspace_root"),
     createdLoop: null,
+    messages: [
+      {
+        role: "assistant",
+        text: "先告诉我项目路径，我会先帮你识别项目信息，再一起创建任务。",
+        meta: "开始创建",
+        at: nowIso(),
+      },
+    ],
     updatedAt: nowIso(),
   };
   await ensureDir(path.dirname(assistantPath));
@@ -1658,6 +1773,12 @@ export async function replyLoopCreationAssistant(startDir = process.cwd(), paylo
       ...(state.draft?.projectProfile || {}),
     },
   };
+  const messageHistory = appendAssistantMessage(
+    appendAssistantMessage(state.messages || [], "user", answer),
+    "assistant",
+    state.currentQuestion?.prompt || "",
+    state.currentQuestion?.id || "",
+  );
 
   if (state.step === "workspace_root") {
     const workspaceRoot = path.resolve(answer);
@@ -1677,6 +1798,12 @@ export async function replyLoopCreationAssistant(startDir = process.cwd(), paylo
         docs,
         projectProfile,
       },
+      messages: appendAssistantMessage(
+        state.messages || [],
+        "assistant",
+        `已识别项目路径：${workspaceRoot}，接下来我们先确认这个项目在左侧如何显示。`,
+        "workspace_root",
+      ),
       currentQuestion: buildLoopAssistantQuestion("project_name", {
         ...draft,
         projectName: projectProfile.detectedProjectName,
@@ -1715,13 +1842,20 @@ export async function replyLoopCreationAssistant(startDir = process.cwd(), paylo
         plan: {
           ...draft.plan,
           ...plan,
+          pendingField: "project_name",
         },
       };
       return saveLoopAssistantState(assistantPath, {
         ...state,
-        step: "project_name",
+        step: "plan_review",
         draft: nextDraft,
-        currentQuestion: buildLoopAssistantQuestion("project_name", nextDraft),
+        messages: appendAssistantMessage(
+          state.messages || [],
+          "assistant",
+          `我已经根据项目线索整理出首版计划：${safeText(plan.objectiveSummary, "继续推进当前任务")}。接下来我们逐项确认关键设置。`,
+          "plan_ready",
+        ),
+        currentQuestion: buildLoopAssistantQuestion("plan_review", nextDraft),
       });
     }
 
@@ -1733,7 +1867,44 @@ export async function replyLoopCreationAssistant(startDir = process.cwd(), paylo
       ...state,
       step: "loop_name",
       draft: nextDraft,
+      messages: appendAssistantMessage(
+        state.messages || [],
+        "assistant",
+        "项目名已记录，接下来确认这个任务的名称。",
+        "project_name",
+      ),
       currentQuestion: buildLoopAssistantQuestion("loop_name", nextDraft),
+    });
+  }
+
+  if (state.step === "plan_review") {
+    const nextDraft = applyPlanReviewAnswer(draft, answer);
+    const pendingField = safeText(nextDraft.plan?.pendingField, "");
+    if (pendingField) {
+      return saveLoopAssistantState(assistantPath, {
+        ...state,
+        draft: nextDraft,
+        messages: appendAssistantMessage(
+          state.messages || [],
+          "assistant",
+          "已记录这一项，我们继续确认下一项关键设置。",
+          pendingField,
+        ),
+        currentQuestion: buildLoopAssistantQuestion("plan_review", nextDraft),
+      });
+    }
+
+    return saveLoopAssistantState(assistantPath, {
+      ...state,
+      step: "docs_confirmed",
+      draft: nextDraft,
+      messages: appendAssistantMessage(
+        state.messages || [],
+        "assistant",
+        "关键设置已经确认完了。最后确认一下规则文档和补充说明，然后就可以创建任务。",
+        "plan_review_done",
+      ),
+      currentQuestion: buildLoopAssistantQuestion("docs_confirmed", nextDraft),
     });
   }
 
@@ -1746,6 +1917,12 @@ export async function replyLoopCreationAssistant(startDir = process.cwd(), paylo
       ...state,
       step: "branch",
       draft: nextDraft,
+      messages: appendAssistantMessage(
+        state.messages || [],
+        "assistant",
+        "任务名已记录，接下来确认工作分支。",
+        "loop_name",
+      ),
       currentQuestion: buildLoopAssistantQuestion("branch", nextDraft),
     });
   }
@@ -1762,6 +1939,12 @@ export async function replyLoopCreationAssistant(startDir = process.cwd(), paylo
       ...state,
       step: "docs_confirmed",
       draft: nextDraft,
+      messages: appendAssistantMessage(
+        state.messages || [],
+        "assistant",
+        "分支已记录。最后确认规则文档或补充说明，然后就可以创建任务。",
+        "branch",
+      ),
       currentQuestion: buildLoopAssistantQuestion("docs_confirmed", nextDraft),
     });
   }
@@ -1809,6 +1992,12 @@ export async function replyLoopCreationAssistant(startDir = process.cwd(), paylo
       docs,
     },
     currentQuestion: null,
+    messages: appendAssistantMessage(
+      state.messages || [],
+      "assistant",
+      `任务已创建：${createdLoop.name}，已归入项目 ${createdLoop.projectName}。`,
+      "completed",
+    ),
     createdLoop: {
       loop: createdLoop,
       summary: `已创建 loop「${createdLoop.name}」，归入项目「${createdLoop.projectName}」。`,

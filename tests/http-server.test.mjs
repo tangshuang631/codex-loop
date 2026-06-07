@@ -524,6 +524,68 @@ test("handler dispatches start route and reports whether controller was newly st
   assert.match(second.text, /"loopControllerStarted":false/);
 });
 
+test("handler dispatches shutdown route and stops loop controller first", async () => {
+  let stopCalls = 0;
+  let shutdownPayload = null;
+  const handler = buildHandler({
+    loopController: {
+      start: async () => true,
+      stop: () => {
+        stopCalls += 1;
+        return true;
+      },
+    },
+    operations: {
+      readLoopSnapshot: async () => ({}),
+      exportLoopSummary: async () => ({}),
+      startRun: async () => ({}),
+      renameLoop: async () => ({}),
+      requestGracefulStop: async () => ({}),
+      shutdownLauncher: async (_startDir, payload) => {
+        shutdownPayload = payload;
+        return { ok: true, shutdown: { requested: true } };
+      },
+      updateBudgets: async () => ({}),
+      saveThreadBinding: async () => ({}),
+      syncCodexThreadMirror: async () => ({}),
+      recordHeartbeat: async () => ({}),
+      recordError: async () => ({}),
+      saveUserOverrides: async () => ({}),
+    },
+  });
+
+  const chunks = [];
+  const response = {
+    writeHead(statusCode) {
+      this.statusCode = statusCode;
+    },
+    end(text) {
+      chunks.push(text);
+    },
+  };
+
+  await handler(
+    {
+      method: "POST",
+      url: "/api/shutdown",
+      [Symbol.asyncIterator]: async function* iterator() {
+        yield Buffer.from(
+          JSON.stringify({
+            reason: "manual shutdown from dashboard",
+          }),
+          "utf8",
+        );
+      },
+    },
+    response,
+  );
+
+  assert.equal(response.statusCode, 200);
+  assert.equal(stopCalls, 1);
+  assert.equal(shutdownPayload.reason, "manual shutdown from dashboard");
+  assert.match(chunks.join(""), /"requested":true/);
+});
+
 test("handler dispatches thread sync route", async () => {
   const handler = buildHandler({
     operations: {

@@ -89,6 +89,7 @@ async function main() {
 
   await syncLauncherStatus({
     phase: "starting",
+    launcherPid: process.pid,
     note: "正在启动 codex-loop 控制台。",
   });
 
@@ -149,6 +150,13 @@ async function main() {
     },
   });
 
+  await syncLauncherStatus({
+    phase: "starting",
+    launcherPid: process.pid,
+    serverPid: server.pid || 0,
+    note: "正在启动 codex-loop 控制台。",
+  });
+
   const viteEntry = path.join(process.cwd(), "node_modules", "vite", "bin", "vite.js");
   const web = run("node", [viteEntry, "--config", "app/web/vite.config.mjs", "--host", host, "--port", String(webPort)], {
     VITE_CODEX_LOOP_API_BASE: apiBaseUrl,
@@ -178,10 +186,22 @@ async function main() {
     },
   });
 
+  await syncLauncherStatus({
+    phase: "starting",
+    launcherPid: process.pid,
+    serverPid: server.pid || 0,
+    webPid: web.pid || 0,
+    note: "正在启动 codex-loop 控制台。",
+  });
+
   function shutdown() {
     shuttingDown = true;
     void syncLauncherStatus({
       phase: "stopped",
+      launcherPid: process.pid,
+      serverPid: server.pid || 0,
+      webPid: web.pid || 0,
+      shuttingDown: false,
       note: "开发控制台已停止。",
       error: "",
     });
