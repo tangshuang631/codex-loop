@@ -612,6 +612,76 @@ select {
   gap: 12px;
 }
 
+.workspace-hero-aside {
+  display: grid;
+  gap: 16px;
+}
+
+.workspace-guide-card {
+  display: grid;
+  gap: 16px;
+  margin-top: 24px;
+  padding: 20px 22px;
+  border: 1px solid var(--line);
+  border-radius: 24px;
+  background:
+    radial-gradient(circle at top right, rgba(17, 17, 17, 0.05), transparent 30%),
+    linear-gradient(180deg, #ffffff 0%, #f6f5f0 100%);
+}
+
+.workspace-guide-head {
+  display: grid;
+  gap: 6px;
+}
+
+.workspace-guide-label {
+  color: var(--muted);
+  font-size: 12px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.workspace-guide-head strong {
+  font-size: 22px;
+  line-height: 1.35;
+  letter-spacing: -0.02em;
+}
+
+.workspace-guide-summary {
+  margin: 0;
+  color: var(--muted);
+  font-size: 14px;
+  line-height: 1.8;
+}
+
+.workspace-guide-focus {
+  display: grid;
+  gap: 6px;
+  padding: 14px 16px;
+  border-radius: 18px;
+  background: rgba(17, 17, 17, 0.04);
+}
+
+.workspace-guide-focus span {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.workspace-guide-focus strong {
+  font-size: 16px;
+  line-height: 1.6;
+}
+
+.workspace-guide-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.workspace-guide-card.is-actions-only {
+  gap: 18px;
+}
+
 .workspace-thinking-card {
   display: grid;
   grid-template-columns: auto 1fr;
@@ -622,6 +692,14 @@ select {
   border: 1px solid var(--line);
   border-radius: 22px;
   background: linear-gradient(180deg, #ffffff 0%, #f7f7f3 100%);
+}
+
+.workspace-thinking-card.is-idle {
+  background: #ffffff;
+}
+
+.workspace-thinking-card.is-finalizing {
+  background: linear-gradient(180deg, #fffaf0 0%, #f7f7f3 100%);
 }
 
 .workspace-thinking-card strong {
@@ -647,12 +725,29 @@ select {
   background: #111111;
 }
 
+.thinking-pulse.is-idle {
+  background: #f0f0ec;
+}
+
+.thinking-pulse.is-finalizing {
+  background: #8a5a00;
+}
+
 .thinking-pulse span {
   width: 7px;
   height: 7px;
   border-radius: 999px;
   background: #ffffff;
   animation: thinkingBounce 1.2s ease-in-out infinite;
+}
+
+.thinking-pulse.is-idle span {
+  background: #999999;
+  animation: none;
+}
+
+.thinking-pulse.is-finalizing span {
+  animation-duration: 1.8s;
 }
 
 .thinking-pulse span:nth-child(2) {
@@ -710,6 +805,14 @@ select {
   display: flex;
   flex-wrap: wrap;
   gap: 10px;
+}
+
+.home-action-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.home-story-grid {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
 }
 
 .primary-button,
@@ -941,6 +1044,11 @@ select {
   }
 
   .workspace-thinking-card {
+    grid-template-columns: 1fr;
+  }
+
+  .home-action-grid,
+  .home-story-grid {
     grid-template-columns: 1fr;
   }
 

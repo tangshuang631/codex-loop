@@ -3,8 +3,16 @@ import { readLoopSnapshot, runLoopTurn } from "./runtime-store.mjs";
 export function createLoopController({
   readSnapshot = readLoopSnapshot,
   runTurn = runLoopTurn,
+  schedule = setTimeout,
+  cancel = clearTimeout,
 } = {}) {
   const activeLoops = new Map();
+
+  function scheduleNext(active, startDir, delayMs) {
+    active.timer = schedule(() => {
+      void executeLoop(startDir);
+    }, delayMs);
+  }
 
   async function executeLoop(startDir) {
     const active = activeLoops.get(startDir);
@@ -23,7 +31,30 @@ export function createLoopController({
         return;
       }
 
+      if (snapshot.thread?.continuationStatus === "dispatching") {
+        active.awaitingCompletion = true;
+        scheduleNext(active, startDir, 1500);
+        return;
+      }
+
+      if (snapshot.thread?.continuationStatus === "error") {
+        activeLoops.delete(startDir);
+        return;
+      }
+
+      if (active.awaitingCompletion) {
+        const completionAt = snapshot.thread?.lastCompletionAt || "";
+        if (!completionAt || completionAt === active.lastCompletionAt) {
+          scheduleNext(active, startDir, 1500);
+          return;
+        }
+
+        active.lastCompletionAt = completionAt;
+        active.awaitingCompletion = false;
+      }
+
       await runTurn(startDir);
+      active.awaitingCompletion = true;
 
       const nextSnapshot = await readSnapshot(startDir);
       if (
@@ -36,9 +67,7 @@ export function createLoopController({
       }
 
       if (activeLoops.has(startDir)) {
-        active.timer = setTimeout(() => {
-          void executeLoop(startDir);
-        }, 500);
+        scheduleNext(active, startDir, 1500);
       }
     } catch {
       activeLoops.delete(startDir);
@@ -55,11 +84,11 @@ export function createLoopController({
       const active = {
         stopped: false,
         timer: null,
+        awaitingCompletion: false,
+        lastCompletionAt: "",
       };
       activeLoops.set(startDir, active);
-      active.timer = setTimeout(() => {
-        void executeLoop(startDir);
-      }, 0);
+      scheduleNext(active, startDir, 0);
       return true;
     },
     stop(startDir) {
@@ -70,7 +99,7 @@ export function createLoopController({
 
       active.stopped = true;
       if (active.timer) {
-        clearTimeout(active.timer);
+        cancel(active.timer);
       }
       activeLoops.delete(startDir);
       return true;

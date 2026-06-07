@@ -46,10 +46,32 @@ export async function readLauncherStatus(startDir = process.cwd()) {
 
 export async function writeLauncherStatus(startDir = process.cwd(), payload = {}) {
   const statusPath = await resolveLauncherStatusPath(startDir);
+  const currentStatus = await readLauncherStatus(startDir);
+  const nextPayload = { ...payload };
+
+  for (const key of ["apiPort", "webPort", "launcherPid", "serverPid", "webPid"]) {
+    if ((nextPayload[key] ?? 0) <= 0 && (currentStatus[key] ?? 0) > 0) {
+      nextPayload[key] = currentStatus[key];
+    }
+  }
+
+  for (const key of ["host", "apiBaseUrl", "webUrl"]) {
+    if (!nextPayload[key] && currentStatus[key]) {
+      nextPayload[key] = currentStatus[key];
+    }
+  }
+
+  for (const key of ["serverReady", "webReady"]) {
+    if (nextPayload[key] === undefined && currentStatus[key] !== undefined) {
+      nextPayload[key] = currentStatus[key];
+    }
+  }
+
   const nextStatus = {
     ...createDefaultStatus(),
-    ...payload,
-    updatedAt: payload.updatedAt || new Date().toISOString(),
+    ...currentStatus,
+    ...nextPayload,
+    updatedAt: nextPayload.updatedAt || new Date().toISOString(),
   };
   await ensureDir(path.dirname(statusPath));
   await writeJson(statusPath, nextStatus);

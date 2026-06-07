@@ -60,6 +60,42 @@ test("writeLauncherStatus persists launcher visibility fields", async () => {
   assert.equal(saved.apiBaseUrl, "http://127.0.0.1:3000/api");
 });
 
+test("writeLauncherStatus preserves known ports and pids when later patches omit them", async () => {
+  const { tempRoot } = await createWorkspace();
+
+  await writeLauncherStatus(tempRoot, {
+    phase: "ready",
+    host: "127.0.0.1",
+    apiPort: 3000,
+    webPort: 3001,
+    apiBaseUrl: "http://127.0.0.1:3000/api",
+    webUrl: "http://127.0.0.1:3001",
+    launcherPid: 4100,
+    serverPid: 4200,
+    webPid: 4300,
+    serverReady: true,
+    webReady: true,
+    note: "running",
+  });
+
+  const written = await writeLauncherStatus(tempRoot, {
+    phase: "failed",
+    note: "frontend exited",
+    error: "web exited with code 1",
+    webPid: 0,
+  });
+
+  assert.equal(written.apiPort, 3000);
+  assert.equal(written.webPort, 3001);
+  assert.equal(written.apiBaseUrl, "http://127.0.0.1:3000/api");
+  assert.equal(written.webUrl, "http://127.0.0.1:3001");
+  assert.equal(written.launcherPid, 4100);
+  assert.equal(written.serverPid, 4200);
+  assert.equal(written.webPid, 4300);
+  assert.equal(written.phase, "failed");
+  assert.equal(written.error, "web exited with code 1");
+});
+
 test("requestLauncherShutdown marks stopping state and schedules launcher termination", async () => {
   const { tempRoot } = await createWorkspace();
   const scheduled = [];

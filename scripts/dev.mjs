@@ -6,7 +6,7 @@ import { writeLauncherStatus } from "../app/server/lib/launcher-status.mjs";
 function run(command, args, extraEnv = {}, handlers = {}) {
   const child = spawn(command, args, {
     stdio: ["ignore", "pipe", "pipe"],
-    shell: process.platform === "win32",
+    shell: false,
     env: {
       ...process.env,
       ...extraEnv,
@@ -81,6 +81,9 @@ async function main() {
       webPort,
       apiBaseUrl,
       webUrl,
+      shuttingDown: false,
+      shutdownRequestedAt: "",
+      shutdownReason: "",
       serverReady,
       webReady,
       ...patch,

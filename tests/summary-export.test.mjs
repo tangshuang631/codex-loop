@@ -125,7 +125,7 @@ test("exportMobileView suggests binding a visible thread before starting when th
   assert.match(mobile.suggestedAction, /\u5148.*\u7ed1\u5b9a|\u542f\u52a8/);
 });
 
-test("exportMobileView shows a clear finish-oriented action after stop is requested", async () => {
+test("exportMobileView shows a clear stopped action after stop completes", async () => {
   const configRoot = await createWorkspace();
   await ensureLoopArtifacts(configRoot);
   await saveThreadBinding(configRoot, {
@@ -141,11 +141,11 @@ test("exportMobileView shows a clear finish-oriented action after stop is reques
 
   const mobile = await exportMobileView(configRoot);
 
-  assert.equal(mobile.loop.mode, "finalize_after_current");
-  assert.match(mobile.suggestedAction, /\u6536\u5c3e|\u603b\u7ed3|\u9a8c\u8bc1/);
+  assert.equal(mobile.loop.mode, "stopped");
+  assert.match(mobile.suggestedAction, /\u67e5\u770b|\u786e\u8ba4|\u91cd\u65b0\u5f00\u59cb/);
 });
 
-test("exportMobileView keeps finish-oriented guidance even when no thread is bound", async () => {
+test("exportMobileView keeps stopped guidance even when no thread is bound", async () => {
   const configRoot = await createWorkspace();
   await ensureLoopArtifacts(configRoot);
   await startRun(configRoot);
@@ -155,7 +155,6 @@ test("exportMobileView keeps finish-oriented guidance even when no thread is bou
 
   const mobile = await exportMobileView(configRoot);
 
-  assert.equal(mobile.loop.mode, "finalize_after_current");
-  assert.match(mobile.suggestedAction, /\u6536\u5c3e|\u603b\u7ed3|\u9a8c\u8bc1/);
-  assert.doesNotMatch(mobile.suggestedAction, /\u5f00\u59cb\u5faa\u73af/);
+  assert.equal(mobile.loop.mode, "stopped");
+  assert.match(mobile.suggestedAction, /\u7ed1\u5b9a|\u67e5\u770b|\u91cd\u65b0\u5f00\u59cb/);
 });

@@ -1,5 +1,5 @@
 {
-  "projectName": "project",
+  "projectName": "按清单继续开发",
   "branch": "dev",
   "budgets": {
     "maxMinutes": 180,
@@ -8,7 +8,7 @@
     "finalizeLeadTokens": 15000
   },
   "projectAdapter": "generic",
-  "currentRunId": "default-run",
-  "loopName": "默认循环",
-  "threadTitle": "默认线程"
+  "currentRunId": "assistant-loop",
+  "loopName": "按清单继续开发",
+  "threadTitle": "按清单继续开发"
 }

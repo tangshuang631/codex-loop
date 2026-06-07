@@ -4,9 +4,11 @@ import {
   exportMobileView,
   exportLoopSummary,
   getLoopCreationAssistantState,
+  goBackLoopCreationAssistant,
   listLoops,
   readLoopSnapshot,
   replyLoopCreationAssistant,
+  restartLoopCreationAssistant,
   selectLoop,
   recordHeartbeat,
   recordError,
@@ -118,6 +120,8 @@ export function buildHandler({
       listLoops,
       createLoop,
       getLoopCreationAssistantState,
+      goBackLoopCreationAssistant,
+      restartLoopCreationAssistant,
       selectLoop,
       deleteLoop,
       replyLoopCreationAssistant,
@@ -254,6 +258,30 @@ export function buildHandler({
           response,
           200,
           await operations.deleteLoop(process.cwd(), body),
+        );
+        return;
+      }
+
+      if (
+        request.method === "POST" &&
+        request.url === "/api/loop-creation-assistant/back"
+      ) {
+        sendJson(
+          response,
+          200,
+          await operations.goBackLoopCreationAssistant(process.cwd()),
+        );
+        return;
+      }
+
+      if (
+        request.method === "POST" &&
+        request.url === "/api/loop-creation-assistant/reset"
+      ) {
+        sendJson(
+          response,
+          200,
+          await operations.restartLoopCreationAssistant(process.cwd()),
         );
         return;
       }

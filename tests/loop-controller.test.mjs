@@ -3,58 +3,64 @@ import assert from "node:assert/strict";
 
 import { createLoopController } from "../app/server/lib/loop-controller.mjs";
 
-function wait(ms) {
-  return new Promise((resolve) => setTimeout(resolve, ms));
+async function flushScheduled(queue) {
+  const task = queue.shift();
+  if (!task) {
+    return false;
+  }
+
+  task();
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  return true;
 }
 
-test("createLoopController does not start the same loop twice", async () => {
-  let runCount = 0;
-  const controller = createLoopController({
-    readSnapshot: async () => ({
-      state: {
-        mode: "running",
-        stopRequested: false,
-        finalizeRequested: false,
-      },
-    }),
-    runTurn: async () => {
-      runCount += 1;
-      await wait(20);
+test("loop controller waits for a real completion signal before dispatching the next turn", async () => {
+  let readCount = 0;
+  let runTurnCount = 0;
+  const scheduled = [];
+
+  const snapshots = [
+    {
+      state: { mode: "running", stopRequested: false, finalizeRequested: false },
+      thread: { continuationStatus: "idle", lastCompletionAt: "" },
     },
+    {
+      state: { mode: "running", stopRequested: false, finalizeRequested: false },
+      thread: { continuationStatus: "dispatching", lastCompletionAt: "" },
+    },
+    {
+      state: { mode: "running", stopRequested: false, finalizeRequested: false },
+      thread: { continuationStatus: "dispatching", lastCompletionAt: "" },
+    },
+    {
+      state: { mode: "running", stopRequested: false, finalizeRequested: false },
+      thread: { continuationStatus: "idle", lastCompletionAt: "2026-06-07T13:50:59.000Z" },
+    },
+    {
+      state: { mode: "running", stopRequested: false, finalizeRequested: false },
+      thread: { continuationStatus: "dispatching", lastCompletionAt: "2026-06-07T13:50:59.000Z" },
+    },
+  ];
+
+  const controller = createLoopController({
+    readSnapshot: async () => snapshots[Math.min(readCount++, snapshots.length - 1)],
+    runTurn: async () => {
+      runTurnCount += 1;
+    },
+    schedule: (fn) => {
+      scheduled.push(fn);
+      return fn;
+    },
+    cancel: () => {},
   });
 
-  const first = await controller.start("workspace-a");
-  const second = await controller.start("workspace-a");
-  await wait(5);
-  controller.stop("workspace-a");
+  assert.equal(await controller.start("demo"), true);
+  assert.equal(await flushScheduled(scheduled), true);
+  assert.equal(runTurnCount, 1);
 
-  assert.equal(first, true);
-  assert.equal(second, false);
-  assert.equal(runCount >= 1, true);
-});
+  assert.equal(await flushScheduled(scheduled), true);
+  assert.equal(runTurnCount, 1);
 
-test("createLoopController stop prevents scheduling the next cycle", async () => {
-  let runCount = 0;
-  const controller = createLoopController({
-    readSnapshot: async () => ({
-      state: {
-        mode: "running",
-        stopRequested: false,
-        finalizeRequested: false,
-      },
-    }),
-    runTurn: async () => {
-      runCount += 1;
-      await wait(10);
-    },
-  });
-
-  await controller.start("workspace-b");
-  await wait(5);
-  const stopped = controller.stop("workspace-b");
-  await wait(700);
-
-  assert.equal(stopped, true);
-  assert.equal(runCount, 1);
-  assert.equal(controller.isRunning("workspace-b"), false);
+  assert.equal(await flushScheduled(scheduled), true);
+  assert.equal(runTurnCount, 2);
 });

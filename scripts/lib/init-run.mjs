@@ -1,3 +1,4 @@
+import fs from "node:fs/promises";
 import { ensureDir, writeJson, appendJsonLine, joinWithin } from "./fs-helpers.mjs";
 import { createInitialState } from "./state.mjs";
 
@@ -7,27 +8,46 @@ export async function initializeRun({ workspaceRoot, codexLoopRoot, config, runI
 
   await ensureDir(logsRoot);
 
-  const state = createInitialState({
-    projectName: config.projectName,
-    loopName: config.loopName,
-    branch: config.branch,
-    budgets: config.budgets,
-  });
-  state.startedAt = nowIso;
-  state.recentSummary =
-    "Loop initialized; waiting for the first heartbeat or Codex progress sync.";
-
   const statePath = joinWithin(runtimeRoot, "state.json");
   const logPath = joinWithin(logsRoot, "events.jsonl");
+  let hasState = true;
+  let hasLog = true;
 
-  await writeJson(statePath, state);
-  await appendJsonLine(logPath, {
-    type: "run_initialized",
-    at: nowIso,
-    runId,
-    projectName: config.projectName,
-    branch: config.branch,
-  });
+  try {
+    await fs.access(statePath);
+  } catch {
+    hasState = false;
+  }
+
+  try {
+    await fs.access(logPath);
+  } catch {
+    hasLog = false;
+  }
+
+  if (!hasState) {
+    const state = createInitialState({
+      projectName: config.projectName,
+      loopName: config.loopName,
+      branch: config.branch,
+      budgets: config.budgets,
+    });
+    state.startedAt = nowIso;
+    state.recentSummary =
+      "Loop initialized; waiting for the first heartbeat or Codex progress sync.";
+
+    await writeJson(statePath, state);
+  }
+
+  if (!hasLog) {
+    await appendJsonLine(logPath, {
+      type: "run_initialized",
+      at: nowIso,
+      runId,
+      projectName: config.projectName,
+      branch: config.branch,
+    });
+  }
 
   return {
     runtimeRoot,

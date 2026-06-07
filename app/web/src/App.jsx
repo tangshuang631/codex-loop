@@ -1,7 +1,27 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 
-const API_BASE =
-  import.meta.env.VITE_CODEX_LOOP_API_BASE || "http://127.0.0.1:4318/api";
+import { deriveDashboardGuide } from "./dashboard-guide.mjs";
+
+function resolveApiBase() {
+  if (import.meta.env.VITE_CODEX_LOOP_API_BASE) {
+    return import.meta.env.VITE_CODEX_LOOP_API_BASE;
+  }
+
+  if (typeof window !== "undefined") {
+    const { protocol, hostname, port } = window.location;
+    const numericPort = Number(port);
+    if (Number.isFinite(numericPort) && numericPort > 0) {
+      const pairedApiPort = numericPort - 1;
+      if (pairedApiPort > 0) {
+        return `${protocol}//${hostname}:${pairedApiPort}/api`;
+      }
+    }
+  }
+
+  return "http://127.0.0.1:3000/api";
+}
+
+const API_BASE = resolveApiBase();
 const REQUEST_TIMEOUT_MS = 8000;
 const ACTIVE_POLL_MS = 5000;
 const IDLE_POLL_MS = 12000;
@@ -9,13 +29,13 @@ const IDLE_POLL_MS = 12000;
 const modeTextMap = {
   running: "运行中",
   finalize_after_current: "收尾中",
-  stopped: "已停止",
+  stopped: "已暂停",
 };
 
 const continuationTextMap = {
   idle: "等待下一轮",
-  dispatching: "正在发送下一条消息",
-  error: "续发失败",
+  dispatching: "已发送，等待 Codex 回复",
+  error: "续跑失败",
 };
 
 const launcherPhaseTextMap = {
@@ -58,6 +78,49 @@ function groupLoopsByProject(loops = []) {
   }, {});
 }
 
+function filterVisibleLoops(loops = []) {
+  return loops.filter((loop) => {
+    if (loop.isCurrent) {
+      return true;
+    }
+    const staleDefaultLoop =
+      loop.id === "default-run" &&
+      loop.name === "默认循环" &&
+      loop.projectName === "project";
+    return !staleDefaultLoop;
+  });
+}
+
+async function requestJsonLegacyUnused(targetPath, options = {}) {
+  const controller = new AbortController();
+  const timeoutId = window.setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+
+  try {
+    const response = await fetch(`${API_BASE}${targetPath}`, {
+      headers: {
+        "Content-Type": "application/json",
+      },
+      signal: controller.signal,
+      ...options,
+    });
+    const rawText = await response.text();
+    let data = {};
+    if (rawText.trim()) {
+      try {
+        data = JSON.parse(rawText);
+      } catch {
+        throw new Error("服务返回内容不完整，请稍后重试。");
+      }
+    }
+    if (!response.ok) {
+      throw new Error(data.error || "请求失败");
+    }
+    return data;
+  } finally {
+    window.clearTimeout(timeoutId);
+  }
+}
+
 async function requestJson(targetPath, options = {}) {
   const controller = new AbortController();
   const timeoutId = window.setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
@@ -70,9 +133,21 @@ async function requestJson(targetPath, options = {}) {
       signal: controller.signal,
       ...options,
     });
-    const data = await response.json();
+    const rawText = await response.text();
+    const hasBody = rawText.trim().length > 0;
+    let data = {};
+    if (hasBody) {
+      try {
+        data = JSON.parse(rawText);
+      } catch {
+        throw new Error("服务返回内容不完整，请稍后重试。");
+      }
+    }
     if (!response.ok) {
-      throw new Error(data.error || "请求失败");
+      throw new Error(data.error || "请求失败，请稍后重试。");
+    }
+    if (!hasBody && response.status !== 204) {
+      throw new Error("服务暂时没有返回结果，请稍后重试。");
     }
     return data;
   } finally {
@@ -97,6 +172,76 @@ function DetailCard({ title, body, meta, quiet = false }) {
       <p>{body}</p>
     </article>
   );
+}
+
+function summarizeVisibleText(value, fallback = "暂无", maxLength = 120) {
+  const text = formatValue(value, "").replace(/\[(.*?)\]\((.*?)\)/g, "$1").trim();
+  if (!text) {
+    return fallback;
+  }
+  if (
+    text === "Loop initialized; waiting for the first heartbeat or Codex progress sync."
+  ) {
+    return "刚开始运行，等待第一轮进展。";
+  }
+  const firstParagraph = text
+    .split(/\n\s*\n/)
+    .map((item) => item.trim())
+    .find(Boolean) || text;
+  const firstLine = firstParagraph.split("\n").map((item) => item.trim()).find(Boolean) || firstParagraph;
+  const compact = firstLine.replace(/\s+/g, " ").trim();
+  return compact.length > maxLength ? `${compact.slice(0, maxLength)}…` : compact;
+}
+
+function translateHealthIssue(issue) {
+  const value = formatValue(issue, "");
+  if (value === "transcript:stale") {
+    return "最近记录还没同步到面板，请等待这一轮完成后再查看。";
+  }
+  if (value === "continuation:stalled") {
+    return "这一轮等待时间过长，建议检查对应线程是否还在继续输出。";
+  }
+  if (value === "heartbeat:stale") {
+    return "运行心跳超过预期时间未更新。";
+  }
+  return value || "暂无";
+}
+
+function isUsefulTranscriptEntry(entry) {
+  const summary = formatValue(entry?.summary, "");
+  if (!summary) {
+    return false;
+  }
+  if (summary.includes("???") || summary.includes("�")) {
+    return false;
+  }
+  if (summary.includes("循环已启动，正在等待第一轮")) {
+    return false;
+  }
+  if (summary.includes("正在向绑定的 Codex 线程发送")) {
+    return false;
+  }
+  if (summary.includes("下一条循环消息已发送到 Codex 线程")) {
+    return false;
+  }
+  return true;
+}
+
+function deriveActionHint(snapshot, suggestedAction) {
+  if (!snapshot?.thread?.threadId) {
+    return "先去管理页绑定线程。";
+  }
+  if (snapshot?.thread?.continuationStatus === "dispatching") {
+    return "先等待这一轮完成，再决定是否继续。";
+  }
+  if (snapshot?.state?.stopRequested || snapshot?.state?.finalizeRequested) {
+    return "当前正在收尾，先等待结束。";
+  }
+  if (snapshot?.state?.mode === "running") {
+    return "先看最近记录，再决定是否停止或调整设置。";
+  }
+  const fallback = summarizeVisibleText(suggestedAction, "");
+  return fallback || "先开始循环。";
 }
 
 function Section({ title, desc, actions, children }) {
@@ -132,14 +277,32 @@ function StatusPill({ text, tone = "default", active = false }) {
   );
 }
 
+function QuickActionButton({ action, onAction, variant = "secondary", disabled = false }) {
+  if (!action?.id || !action?.label) {
+    return null;
+  }
+
+  return (
+    <button
+      type="button"
+      className={`${variant}-button`}
+      disabled={disabled}
+      onClick={() => onAction(action.id)}
+    >
+      {action.label}
+    </button>
+  );
+}
+
 function SidebarSummary({ currentLoop, loopRegistry, snapshot, pollStatus }) {
+  const visibleLoops = filterVisibleLoops(loopRegistry.loops || []);
   return (
     <div className="sidebar-summary-card">
       <span className="sidebar-summary-label">当前焦点</span>
       <strong>{formatValue(currentLoop?.name || snapshot?.config?.loopName, "未命名任务")}</strong>
       <p>{formatValue(currentLoop?.projectName || snapshot?.config?.projectName, "未命名项目")}</p>
       <div className="sidebar-summary-meta">
-        <span>{loopRegistry.loops.length} 个任务</span>
+        <span>{visibleLoops.length} 个任务</span>
         <span>{snapshot?.thread?.threadId ? "已连接窗口" : "待连接窗口"}</span>
         <span>{pollStatus}</span>
       </div>
@@ -169,6 +332,8 @@ function LoopCreationAssistantPane({
   setAssistantAnswer,
   submitting,
   onSubmit,
+  onBack,
+  onReset,
 }) {
   const currentQuestion = assistantState?.currentQuestion;
   const draft = assistantState?.draft || {};
@@ -178,9 +343,9 @@ function LoopCreationAssistantPane({
 
   return (
     <div className="sidebar-form assistant-pane">
-      <h3>对话创建任务</h3>
+      <h3>创建 loop</h3>
       <p className="sidebar-help">
-        说清项目和目标，助手会带你一步步完成创建。
+        先确认项目、任务名和分支，再开始循环。
       </p>
 
       {assistantState?.status === "completed" && createdLoop ? (
@@ -196,7 +361,7 @@ function LoopCreationAssistantPane({
       {currentQuestion ? (
         <>
           <div className="assistant-thread">
-            <DetailCard meta="当前步骤" title="继续创建" body={currentQuestion.prompt} quiet />
+            <DetailCard meta="当前步骤" title="继续填写" body={currentQuestion.prompt} quiet />
 
             {messages.length ? (
               <details className="assistant-disclosure" open>
@@ -278,9 +443,27 @@ function LoopCreationAssistantPane({
               onChange={(event) => setAssistantAnswer(event.target.value)}
               rows={4}
             />
-            <button type="submit" className="primary-button" disabled={submitting || !assistantAnswer.trim()}>
-              发送回答
-            </button>
+            <div className="workspace-guide-actions">
+              <button type="submit" className="primary-button" disabled={submitting || !assistantAnswer.trim()}>
+                下一步
+              </button>
+              <button
+                type="button"
+                className="secondary-button"
+                disabled={submitting}
+                onClick={() => void onBack()}
+              >
+                上一步
+              </button>
+              <button
+                type="button"
+                className="ghost-button"
+                disabled={submitting}
+                onClick={() => void onReset()}
+              >
+                重新开始
+              </button>
+            </div>
           </form>
         </>
       ) : null}
@@ -326,10 +509,33 @@ function ManagePane({
   withSubmit,
   onRequestShutdown,
 }) {
+  const isDispatching = snapshot?.thread?.continuationStatus === "dispatching";
+  const isFinalizing = snapshot?.state?.stopRequested || snapshot?.state?.finalizeRequested;
+  const isRunning = snapshot?.state?.mode === "running";
+  const runningHeadline = isFinalizing
+    ? "正在等待 Codex 收尾"
+    : isDispatching
+      ? "已发送，等待 Codex 完成"
+      : isRunning
+        ? "自动循环已开启"
+        : "当前 loop 已停止";
+  const runningDescription = isFinalizing
+    ? "不会再发送新指令；等 Codex 输出完成摘要后会自动停住。"
+    : isDispatching
+      ? "Codex 还在处理这一轮，中途回复只展示，不会触发下一轮。"
+      : isRunning
+        ? "系统会等 Codex 完整结束一轮后，再决定是否继续发送。"
+        : "需要继续时点击开始循环；如需让本地模型整理下一条指令，请先配置 Ollama。";
+  const thinkingStateClass = isFinalizing
+    ? "is-finalizing"
+    : isDispatching || isRunning
+      ? "is-active"
+      : "is-idle";
+
   return (
     <div className="sidebar-pane-stack">
       <details className="sidebar-disclosure">
-        <summary>连接窗口</summary>
+        <summary>绑定线程</summary>
         <form
           className="sidebar-form"
           onSubmit={(event) => {
@@ -343,7 +549,7 @@ function ManagePane({
           }}
         >
           <p className="sidebar-help">
-            平时一般不用打开，只有首次连接或切换窗口时才需要。
+            只有在第一次接入，或者想把 loop 切换到另一个可见线程时，才需要来这里修改。
           </p>
           <label>
             <span>显示名称</span>
@@ -358,7 +564,7 @@ function ManagePane({
             />
           </label>
           <label>
-            <span>窗口名称</span>
+            <span>线程名称</span>
             <input
               value={threadForm.threadTitle}
               onChange={(event) =>
@@ -370,7 +576,7 @@ function ManagePane({
             />
           </label>
           <label>
-            <span>窗口编号</span>
+            <span>线程 ID</span>
             <input
               value={threadForm.threadId}
               onChange={(event) =>
@@ -405,10 +611,10 @@ function ManagePane({
                 }))
               }
             />
-            <span>只在当前窗口里持续续发</span>
+            <span>只在当前线程里持续续跑</span>
           </label>
           <button type="submit" className="primary-button" disabled={submitting}>
-            保存连接
+            保存线程绑定
           </button>
         </form>
       </details>
@@ -491,7 +697,7 @@ function ManagePane({
                     }))
                   }
                 />
-                <span>启用本地模型生成下一条续发</span>
+                <span>启用本地模型生成下一条续跑提示</span>
               </label>
               <label>
                 <span>模型名称</span>
@@ -544,7 +750,7 @@ function ManagePane({
             </div>
             {!ollamaModels.length ? (
               <p className="sidebar-help">
-                还没有检测到可用本地模型。你可以继续使用默认模式，不会影响日常任务运行。
+                还没有检测到可用的本地模型。你可以继续使用默认模式，不会影响日常任务运行。
               </p>
             ) : null}
           </details>
@@ -554,75 +760,79 @@ function ManagePane({
             <Metric
               label="自动节奏"
               value={automationStatus?.connected ? `${automationStatus.intervalMinutes} 分钟` : "未连接"}
-              muted={!automationStatus?.connected}
             />
-            <Metric label="续发生成" value={promptGeneratorStatus} />
-            <Metric label="当前状态" value={launcherPhase} />
+            <Metric label="提示词增强" value={promptGeneratorStatus} />
+            <Metric label="启动状态" value={launcherPhase} />
           </div>
 
           <button type="submit" className="primary-button" disabled={submitting}>
-            保存设置
+            保存自动续跑设置
           </button>
         </form>
       </details>
 
       <details className="sidebar-disclosure">
-        <summary>健康与重启</summary>
+        <summary>运行与安全</summary>
         <div className="sidebar-form">
           <div className="metric-grid compact-metric-grid">
-            <Metric label="整体状态" value={snapshot?.health?.ok ? "正常" : "需要关注"} />
-            <Metric label="最近记录" value={latestEvent} />
-            <Metric label="查看方式" value={remoteTransport} />
-            <Metric label="访问地址" value={launcherWebUrl} />
-          </div>
-          <div className="detail-stack">
-            <DetailCard
-              meta="异常提醒"
-              title={healthIssues.length ? "发现需要处理的状态" : "当前稳定"}
-              body={
-                healthIssues.length
-                  ? healthIssues.join("\n")
-                  : "没有发现明显异常。"
-              }
-              quiet
-            />
-            <DetailCard
-              meta="手机查看"
-              title={
-                remoteAccessStatus?.remoteReady ? "已具备手机查看条件" : "尚未准备手机查看入口"
-              }
-              body={formatValue(
-                (remoteAccessStatus?.recommendedSteps || []).join("\n"),
-                "如需在手机上查看任务进度，可按建议步骤接入访问入口。",
-              )}
-              quiet
+            <Metric label="最近事件" value={latestEvent} />
+            <Metric label="远程访问" value={remoteTransport} />
+            <Metric label="控制台地址" value={launcherWebUrl} />
+            <Metric
+              label="健康状态"
+              value={healthIssues.length ? `${healthIssues.length} 个提醒` : "当前正常"}
             />
           </div>
-          <div className="danger-actions">
-            <button
-              type="button"
-              className="danger-button"
-              disabled={submitting || launcherPhase === "已停止"}
-              onClick={() => void onRequestShutdown()}
-            >
-              彻底关闭控制台
-            </button>
-            <p className="sidebar-help">
-              如果当前任务还在运行，这里会先请求优雅停止，再自动关闭整组进程，方便你重启。
-            </p>
-          </div>
+          {healthIssues.length ? (
+            <div className="detail-stack">
+              {healthIssues.map((issue, index) => (
+                <DetailCard
+                  key={`${issue}-${index}`}
+                  meta="健康提示"
+                  title="需要留意"
+                  body={issue}
+                  quiet
+                />
+              ))}
+            </div>
+          ) : (
+            <p className="sidebar-help">当前没有明显异常，可以继续推进。</p>
+          )}
+          {remoteAccessStatus?.url ? (
+            <DetailCard
+              meta="远程入口"
+              title={remoteAccessStatus.url}
+              body="如果你需要在别的设备上查看状态，可以直接使用这个地址。"
+              quiet
+            />
+          ) : null}
+          <DetailCard
+            meta="当前线程"
+            title={formatValue(snapshot?.thread?.threadTitle, "尚未绑定线程")}
+            body={formatValue(snapshot?.thread?.threadId, "还没有保存线程 ID")}
+            quiet
+          />
+          <button
+            type="button"
+            className="ghost-button danger-zone-button"
+            disabled={submitting}
+            onClick={() => void onRequestShutdown()}
+          >
+            关闭当前控制台
+          </button>
         </div>
       </details>
     </div>
   );
 }
-
 function CreateWorkspaceView({
   assistantState,
   assistantAnswer,
   setAssistantAnswer,
   submitting,
   onSubmit,
+  onBack,
+  onReset,
 }) {
   return (
     <section className="workspace-focus">
@@ -638,6 +848,8 @@ function CreateWorkspaceView({
         setAssistantAnswer={setAssistantAnswer}
         submitting={submitting}
         onSubmit={onSubmit}
+        onBack={onBack}
+        onReset={onReset}
       />
     </section>
   );
@@ -654,6 +866,464 @@ function ManageWorkspaceView(props) {
 
       <ManagePane {...props} />
     </section>
+  );
+}
+
+function DashboardHomeLegacy({
+  currentLoop,
+  snapshot,
+  modeText,
+  continuationStatus,
+  launcherPhase,
+  pollStatus,
+  pollState,
+  dashboardGuide,
+  submitting,
+  handleDashboardAction,
+  setActiveSidebarPane,
+  automationSchedule,
+  automationStatus,
+  threadLabel,
+  latestSummary,
+  changeSummary,
+  suggestedAction,
+  transcriptEntries,
+  latestPrompt,
+  mobileSummary,
+  bindingNote,
+  strategy,
+  settingsForm,
+  healthIssues,
+  uiError,
+}) {
+  return (
+    <>
+      <section className="workspace-hero">
+        <div className="workspace-hero-copy">
+          <span className="workspace-hero-project">
+            {formatValue(currentLoop?.projectName || snapshot?.config?.projectName, "当前项目")}
+          </span>
+          <h1>{formatValue(currentLoop?.name || snapshot?.config?.loopName, "当前任务")}</h1>
+          <p>这里用来确认当前 loop 是否在推进、上一条消息是否发到绑定线程，以及 Codex 是否已经完成一轮。</p>
+          <div className="workspace-status-row">
+            <StatusPill text={modeText} active={snapshot?.state?.mode === "running"} />
+            <StatusPill
+              text={continuationStatus}
+              tone={snapshot?.thread?.continuationStatus === "error" ? "danger" : "soft"}
+              active={snapshot?.thread?.continuationStatus === "dispatching"}
+            />
+            <StatusPill text={launcherPhase} tone="soft" />
+            <StatusPill text={pollStatus} tone="soft" active={pollState.syncing} />
+          </div>
+          <div className="workspace-guide-card is-actions-only">
+            <div className="workspace-guide-head">
+              <span className="workspace-guide-label">操作</span>
+              <strong>控制当前 loop</strong>
+            </div>
+            <div className="workspace-guide-actions">
+              <button
+                type="button"
+                className="primary-button"
+                disabled={submitting}
+                onClick={() => void handleDashboardAction("start-loop")}
+              >
+                开始循环
+              </button>
+              <button
+                type="button"
+                className="secondary-button"
+                disabled={submitting}
+                onClick={() => void handleDashboardAction("stop-loop")}
+              >
+                停止
+              </button>
+              <button
+                type="button"
+                className="ghost-button"
+                disabled={submitting}
+                onClick={() => setActiveSidebarPane("create")}
+              >
+                新建 loop
+              </button>
+              <button
+                type="button"
+                className="ghost-button"
+                disabled={submitting}
+                onClick={() => setActiveSidebarPane("manage")}
+              >
+                配置 Ollama
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <div className="workspace-hero-aside">
+          <div className="workspace-hero-metrics">
+            {dashboardGuide.supportingMetrics.map((item) => (
+              <Metric
+                key={item.label}
+                label={item.label}
+                value={item.value}
+                muted={!item.value || item.value === "暂无"}
+              />
+            ))}
+          </div>
+
+          <div className={`workspace-thinking-card ${thinkingStateClass}`}>
+            <div className={`thinking-pulse ${thinkingStateClass}`} aria-hidden="true">
+              <span />
+              <span />
+              <span />
+            </div>
+            <div>
+              <strong>{runningHeadline}</strong>
+              <p>{runningDescription}</p>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      {uiError ? <div className="error-banner">{uiError}</div> : null}
+
+      <div className="workspace-columns">
+        <div className="workspace-primary">
+          <Section
+            title="最近记录"
+            desc="这里集中看最近发出去的续跑消息、最近回复，以及 transcript 镜像。"
+          >
+            <div className="detail-stack">
+              <DetailCard
+                meta="最近发出的消息"
+                title={continuationStatus}
+                body={formatValue(latestPrompt, "暂时还没有续跑内容。")}
+              />
+              <DetailCard
+                meta="最新回复摘要"
+                title={formatValue(snapshot?.thread?.latestCodexSummary, "暂无")}
+                body={formatValue(changeSummary, "等待下一次可见反馈。")}
+                quiet
+              />
+            </div>
+
+            <div className="transcript-stream">
+              {transcriptEntries.length === 0 ? (
+                <DetailCard
+                  title="暂时还没有聊天镜像"
+                  body="绑定线程并开始运行后，这里会持续显示最近的 loop 记录。"
+                />
+              ) : (
+                transcriptEntries.map((entry, index) => (
+                  <DetailCard
+                    key={`${entry.at}-${entry.activeTask}-${index}`}
+                    meta={formatTime(entry.at, "未知时间")}
+                    title={formatValue(entry.activeTask, "未记录任务")}
+                    body={`${formatValue(entry.summary, "暂无摘要")}\n\n${formatValue(entry.note, "暂无备注")}`}
+                  />
+                ))
+              )}
+            </div>
+          </Section>
+        </div>
+
+        <aside className="workspace-secondary">
+          <Section
+            title="运行摘要"
+            desc="保留能帮助你判断 loop 是否健康、是否值得继续推进的最少信息。"
+          >
+            <div className="metric-grid">
+              <Metric label="为什么继续" value={formatValue(strategy.contextCard?.whyContinue, "暂无")} />
+              <Metric label="预计下一步" value={formatValue(strategy.contextCard?.nextAction, "暂无")} />
+              <Metric label="续跑方式" value={settingsForm.promptGeneratorEnabled ? "智能增强" : "默认模式"} />
+              <Metric label="停止条件" value={formatValue(strategy.guardrailCard?.stopRule, "暂无")} />
+            </div>
+            <div className="detail-stack">
+              <DetailCard
+                meta="最近改动"
+                title={formatValue(changeSummary, "暂无")}
+                body={formatValue(mobileSummary, "等待新的摘要更新。")}
+              />
+              <DetailCard
+                meta="线程说明"
+                title={formatValue(bindingNote, "暂无")}
+                body={formatValue(suggestedAction, "等待下一步")}
+                quiet
+              />
+              <DetailCard
+                meta="健康提示"
+                title={healthIssues.length ? "有需要留意的状态" : "当前没有明显异常"}
+                body={
+                  healthIssues.length
+                    ? healthIssues.join("\n")
+                    : "页面、状态和基础运行记录都处于可继续推进的状态。"
+                }
+                quiet
+              />
+            </div>
+          </Section>
+        </aside>
+      </div>
+    </>
+  );
+}
+
+function DashboardHome({
+  currentLoop,
+  snapshot,
+  modeText,
+  continuationStatus,
+  launcherPhase,
+  pollStatus,
+  pollState,
+  dashboardGuide,
+  submitting,
+  handleDashboardAction,
+  setActiveSidebarPane,
+  automationSchedule,
+  automationStatus,
+  threadLabel,
+  latestSummary,
+  changeSummary,
+  suggestedAction,
+  transcriptEntries,
+  latestPrompt,
+  mobileSummary,
+  bindingNote,
+  strategy,
+  settingsForm,
+  healthIssues,
+  uiError,
+}) {
+  const currentProjectName = formatValue(
+    currentLoop?.projectName || snapshot?.config?.projectName,
+    "当前项目",
+  );
+  const currentLoopName = formatValue(
+    currentLoop?.name || snapshot?.config?.loopName,
+    "当前任务",
+  );
+  const latestVisibleSummary = summarizeVisibleText(
+    snapshot?.thread?.latestCodexSummary || latestSummary,
+    "等待第一轮可见进展",
+  );
+  const shortChangeSummary = summarizeVisibleText(changeSummary, "还没有新的推进摘要。");
+  const shortLatestPrompt = summarizeVisibleText(
+    latestPrompt.replace(/\s*\n+\s*/g, " "),
+    "暂时还没有续跑内容。",
+  );
+  const shortBindingNote = summarizeVisibleText(bindingNote, "暂无");
+  const visibleTranscriptEntries = transcriptEntries
+    .filter(isUsefulTranscriptEntry)
+    .slice(0, 3);
+  const codexConversation = snapshot?.codexConversation || {};
+  const latestCodexUser = codexConversation.latestUser || null;
+  const latestCodexAssistant = codexConversation.latestAssistant || null;
+  const codexConversationEntries = (codexConversation.entries || []).slice(0, 5);
+  const isDispatching = snapshot?.thread?.continuationStatus === "dispatching";
+  const isFinalizing = snapshot?.state?.stopRequested || snapshot?.state?.finalizeRequested;
+  const isRunning = snapshot?.state?.mode === "running";
+  const healthSummary = healthIssues.length
+    ? healthIssues.join("\n")
+    : "当前没有明显异常，可以继续推进。";
+  const runningHeadline = isFinalizing
+    ? "正在等待 Codex 收尾"
+    : isDispatching
+      ? "已发送，等待 Codex 完成"
+      : isRunning
+        ? "自动循环已开启"
+        : "当前 loop 已停止";
+  const runningDescription = isFinalizing
+    ? "不会再发送新指令；等 Codex 输出完成摘要后会自动停住。"
+    : isDispatching
+      ? "Codex 还在处理这一轮，中途回复只展示，不会触发下一轮。"
+      : isRunning
+        ? "系统会等 Codex 完整结束一轮后，再决定是否继续发送。"
+        : "需要继续时点击开始循环；如需让本地模型整理下一条指令，请先配置 Ollama。";
+  const thinkingStateClass = isFinalizing
+    ? "is-finalizing"
+    : isDispatching || isRunning
+      ? "is-active"
+      : "is-idle";
+
+  return (
+    <>
+      <section className="workspace-hero">
+        <div className="workspace-hero-copy">
+          <span className="workspace-hero-project">{currentProjectName}</span>
+          <h1>{currentLoopName}</h1>
+          <p>这里用来确认当前 loop 是否在推进、上一条消息是否真的发到绑定线程，以及 Codex 是否已经完成一轮。</p>
+          <div className="workspace-status-row">
+            <StatusPill text={modeText} active={snapshot?.state?.mode === "running"} />
+            <StatusPill
+              text={continuationStatus}
+              tone={snapshot?.thread?.continuationStatus === "error" ? "danger" : "soft"}
+              active={snapshot?.thread?.continuationStatus === "dispatching"}
+            />
+            <StatusPill text={launcherPhase} tone="soft" />
+            <StatusPill text={pollStatus} tone="soft" active={pollState.syncing} />
+          </div>
+          <div className="workspace-guide-card is-actions-only">
+            <div className="workspace-guide-head">
+              <span className="workspace-guide-label">操作</span>
+              <strong>控制当前 loop</strong>
+            </div>
+            <div className="workspace-guide-actions">
+              <button
+                type="button"
+                className="primary-button"
+                disabled={submitting}
+                onClick={() => void handleDashboardAction("start-loop")}
+              >
+                开始循环
+              </button>
+              <button
+                type="button"
+                className="secondary-button"
+                disabled={submitting}
+                onClick={() => void handleDashboardAction("stop-loop")}
+              >
+                停止
+              </button>
+              <button
+                type="button"
+                className="ghost-button"
+                disabled={submitting}
+                onClick={() => setActiveSidebarPane("create")}
+              >
+                新建 loop
+              </button>
+              <button
+                type="button"
+                className="ghost-button"
+                disabled={submitting}
+                onClick={() => setActiveSidebarPane("manage")}
+              >
+                配置 Ollama
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <div className="workspace-hero-aside">
+          <div className="workspace-hero-metrics">
+            {dashboardGuide.supportingMetrics.map((item) => (
+              <Metric
+                key={item.label}
+                label={item.label}
+                value={item.value}
+                muted={!item.value || item.value === "暂无"}
+              />
+            ))}
+          </div>
+
+          <div className={`workspace-thinking-card ${thinkingStateClass}`}>
+            <div className={`thinking-pulse ${thinkingStateClass}`} aria-hidden="true">
+              <span />
+              <span />
+              <span />
+            </div>
+            <div>
+              <strong>{runningHeadline}</strong>
+              <p>{runningDescription}</p>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      {uiError ? <div className="error-banner">{uiError}</div> : null}
+
+      <div className="workspace-columns">
+        <div className="workspace-primary">
+          <Section
+            title="最近记录"
+            desc="这里直接读取绑定 Codex 线程的本机记录：发出的指令、Codex 回复、最近进展。"
+          >
+            <div className="detail-stack">
+              <DetailCard
+                meta={formatTime(snapshot?.thread?.lastDispatchAt, "还没有发送记录")}
+                title={`已绑定：${formatValue(snapshot?.thread?.threadTitle, "未绑定线程")}`}
+                body={`线程 ID：${formatValue(snapshot?.thread?.threadId, "暂无")}`}
+                quiet
+              />
+              <DetailCard
+                meta="最后发出的消息"
+                title={continuationStatus}
+                body={summarizeVisibleText(
+                  latestCodexUser?.text || shortLatestPrompt,
+                  "暂时还没有续跑内容。",
+                  260,
+                )}
+              />
+              <DetailCard
+                meta={formatTime(latestCodexAssistant?.at || snapshot?.thread?.lastCompletionAt, "等待回复")}
+                title="Codex 最新回复"
+                body={summarizeVisibleText(
+                  latestCodexAssistant?.text || latestVisibleSummary,
+                  "等待 Codex 返回新进展。",
+                  360,
+                )}
+                quiet
+              />
+            </div>
+
+            <div className="transcript-stream">
+              {codexConversationEntries.length > 0 ? (
+                codexConversationEntries.map((entry, index) => (
+                  <DetailCard
+                    key={`${entry.at}-${entry.role}-${index}`}
+                    meta={formatTime(entry.at, "未知时间")}
+                    title={entry.label || (entry.role === "user" ? "发出的指令" : "Codex 回复")}
+                    body={summarizeVisibleText(entry.text, "暂无摘要", 260)}
+                    quiet={entry.role === "user"}
+                  />
+                ))
+              ) : visibleTranscriptEntries.length === 0 ? (
+                <DetailCard
+                  title="暂时还没有线程记录"
+                  body="绑定线程并开始运行后，这里会持续显示最近的 loop 记录。"
+                />
+              ) : (
+                visibleTranscriptEntries.map((entry, index) => (
+                  <DetailCard
+                    key={`${entry.at}-${entry.activeTask}-${index}`}
+                    meta="记录"
+                    title={formatTime(entry.at, "未知时间")}
+                    body={formatValue(entry.summary, "暂无摘要")}
+                  />
+                ))
+              )}
+            </div>
+          </Section>
+        </div>
+
+        <aside className="workspace-secondary">
+          <Section
+            title="状态"
+            desc="只保留必要判断，不展示内部调试信息。"
+          >
+            <div className="metric-grid">
+              <Metric label="当前 loop" value={currentLoopName} />
+              <Metric label="当前线程" value={threadLabel} muted={!snapshot?.thread?.threadTitle} />
+              <Metric label="本地模型" value={settingsForm.promptGeneratorEnabled ? "已开启" : "未开启"} />
+              <Metric label="自动间隔" value={automationSchedule} muted={!automationStatus?.connected} />
+            </div>
+            <div className="detail-stack">
+              <DetailCard
+                meta="绑定说明"
+                title={shortBindingNote}
+                body="切换线程、开启 Ollama 或关闭服务都在管理页。"
+                quiet
+              />
+              <DetailCard
+                meta="运行提示"
+                title={healthIssues.length ? "有需要留意的状态" : "当前没有明显异常"}
+                body={healthSummary}
+                quiet
+              />
+            </div>
+          </Section>
+        </aside>
+      </div>
+    </>
   );
 }
 
@@ -769,10 +1439,13 @@ export function App() {
         lastDurationMs: Math.round(performance.now() - startedAt),
       });
     } catch (error) {
+      const rawMessage = String(error?.message || "");
       setUiError(
         error.name === "AbortError"
           ? "请求超时，请检查本地控制台服务是否仍在运行。"
-          : error.message,
+          : rawMessage.includes("Unexpected end of JSON input")
+            ? "服务返回内容不完整，请稍后重试。"
+            : rawMessage,
       );
       setPollState((current) => ({
         ...current,
@@ -850,7 +1523,7 @@ export function App() {
   }
 
   const loopGroups = useMemo(
-    () => groupLoopsByProject(loopRegistry.loops || []),
+    () => groupLoopsByProject(filterVisibleLoops(loopRegistry.loops || [])),
     [loopRegistry],
   );
 
@@ -860,6 +1533,10 @@ export function App() {
       loopRegistry.loops.find((loop) => loop.id === loopRegistry.currentLoopId) ||
       null,
     [loopRegistry, selectedLoopId],
+  );
+  const visibleLoops = useMemo(
+    () => filterVisibleLoops(loopRegistry.loops || []),
+    [loopRegistry],
   );
 
   const modeText =
@@ -878,7 +1555,7 @@ export function App() {
     rhythmCard: {},
     guardrailCard: {},
   };
-  const healthIssues = snapshot?.health?.issues || [];
+  const healthIssues = (snapshot?.health?.issues || []).map(translateHealthIssue);
   const bindingNote = mobileView?.bindingNote || "尚未生成";
   const suggestedAction = mobileView?.suggestedAction || "等待下一步";
   const launcherPhase =
@@ -908,6 +1585,43 @@ export function App() {
     latestSummary;
   const mobileSummary =
     mobileView?.summary?.recentSummary || latestSummary;
+  const dashboardGuide = deriveDashboardGuide({
+    snapshot,
+    currentLoop,
+    mobileView,
+    pollStatus,
+  });
+
+  async function handleDashboardAction(actionId) {
+    if (actionId === "open-manage") {
+      setActiveSidebarPane("manage");
+      return;
+    }
+
+    if (actionId === "open-create") {
+      setActiveSidebarPane("create");
+      return;
+    }
+
+    if (actionId === "start-loop") {
+      await withSubmit(async () => {
+        await requestJson("/start", { method: "POST" });
+      });
+      return;
+    }
+
+    if (actionId === "stop-loop") {
+      await withSubmit(async () => {
+        await requestJson("/stop", {
+          method: "POST",
+          body: JSON.stringify({
+            reason: "manual stop from dashboard",
+          }),
+        });
+      });
+      return;
+    }
+  }
 
   if (loading && !snapshot) {
     return <SkeletonBlock />;
@@ -1079,7 +1793,7 @@ export function App() {
           </>
         ) : (
           <div className="sidebar-collapsed-list">
-            {(loopRegistry.loops || []).map((loop) => (
+            {visibleLoops.map((loop) => (
               <button
                 key={loop.id}
                 type="button"
@@ -1117,6 +1831,22 @@ export function App() {
                 setAssistantAnswer("");
               })
             }
+            onBack={() =>
+              withSubmit(async () => {
+                await requestJson("/loop-creation-assistant/back", {
+                  method: "POST",
+                });
+                setAssistantAnswer("");
+              })
+            }
+            onReset={() =>
+              withSubmit(async () => {
+                await requestJson("/loop-creation-assistant/reset", {
+                  method: "POST",
+                });
+                setAssistantAnswer("");
+              })
+            }
           />
         ) : null}
 
@@ -1144,203 +1874,36 @@ export function App() {
         ) : null}
 
         {activeSidebarPane === "loops" ? (
-        <>
-        <section className="workspace-hero">
-          <div className="workspace-hero-copy">
-            <span className="workspace-hero-project">
-              {formatValue(currentLoop?.projectName || snapshot?.config?.projectName, "当前项目")}
-            </span>
-            <h1>{formatValue(currentLoop?.name || snapshot?.config?.loopName, "当前任务")}</h1>
-            <p>
-              只看最重要的信息：任务状态、聊天记录、最近进展。
-            </p>
-            <div className="workspace-status-row">
-              <StatusPill text={modeText} active={snapshot?.state?.mode === "running"} />
-              <StatusPill
-                text={continuationStatus}
-                tone={snapshot?.thread?.continuationStatus === "error" ? "danger" : "soft"}
-                active={snapshot?.thread?.continuationStatus === "dispatching"}
-              />
-              <StatusPill text={launcherPhase} tone="soft" />
-              <StatusPill text={pollStatus} tone="soft" active={pollState.syncing} />
-            </div>
-            <div className="workspace-thinking-card">
-              <div className="thinking-pulse" aria-hidden="true">
-                <span />
-                <span />
-                <span />
-              </div>
-              <div>
-                <strong>
-                  {snapshot?.thread?.continuationStatus === "dispatching"
-                    ? "正在整理并准备下一条消息"
-                    : snapshot?.state?.mode === "running"
-                      ? "任务正在后台持续推进"
-                      : "当前没有活跃续发"}
-                </strong>
-                <p>
-                  {snapshot?.thread?.continuationStatus === "dispatching"
-                    ? "前端会持续刷新状态，避免长任务时误以为卡死。"
-                    : "即使暂时没有新内容，界面也会继续刷新状态。"}
-                </p>
-              </div>
-            </div>
-          </div>
-
-          <div className="workspace-hero-metrics">
-            <Metric label="最后成功同步" value={formatTime(pollState.lastSuccessAt)} muted={!pollState.lastSuccessAt} />
-            <Metric label="最近心跳" value={formatTime(snapshot?.thread?.latestHeartbeatAt || snapshot?.state?.lastHeartbeatAt)} muted={!(snapshot?.thread?.latestHeartbeatAt || snapshot?.state?.lastHeartbeatAt)} />
-            <Metric label="当前窗口" value={threadLabel} muted={!snapshot?.thread?.threadTitle} />
-            <Metric label="自动化间隔" value={automationSchedule} muted={!automationStatus?.connected} />
-          </div>
-        </section>
-
-        {uiError ? <div className="error-banner">{uiError}</div> : null}
-
-        <div className="workspace-columns">
-          <div className="workspace-primary">
-            <Section
-              title="运行面板"
-              desc="开始、停止、续跑，以及当前任务的关键信号都集中在这里。"
-              actions={
-                <>
-                  <button
-                    type="button"
-                    className="primary-button"
-                    disabled={submitting}
-                    onClick={() =>
-                      withSubmit(async () => {
-                        await requestJson("/start", { method: "POST" });
-                      })
-                    }
-                  >
-                    开始循环
-                  </button>
-                  <button
-                    type="button"
-                    className="secondary-button"
-                    disabled={submitting}
-                    onClick={() =>
-                      withSubmit(async () => {
-                        await requestJson("/run-turn", { method: "POST" });
-                      })
-                    }
-                  >
-                    手动续跑一轮
-                  </button>
-                  <button
-                    type="button"
-                    className="ghost-button"
-                    disabled={submitting}
-                    onClick={() =>
-                      withSubmit(async () => {
-                        await requestJson("/stop", {
-                          method: "POST",
-                          body: JSON.stringify({ reason: "manual stop from dashboard" }),
-                        });
-                      })
-                    }
-                  >
-                    停止并收尾
-                  </button>
-                </>
-              }
-            >
-              <div className="metric-grid">
-                <Metric label="当前模式" value={modeText} />
-                <Metric label="续发状态" value={continuationStatus} />
-                <Metric label="当前窗口" value={threadLabel} muted={!snapshot?.thread?.threadTitle} />
-                <Metric
-                  label="最后异常"
-                  value={formatValue(snapshot?.thread?.lastContinuationError, "无")}
-                  muted={!snapshot?.thread?.lastContinuationError}
-                />
-              </div>
-              <div className="detail-stack">
-                <DetailCard
-                  meta="最新摘要"
-                    title={formatValue(snapshot?.thread?.latestCodexSummary || latestSummary, "等待第一轮进展")}
-                  body={formatValue(changeSummary, "等待下一轮反馈")}
-                />
-                <DetailCard
-                  meta="当前建议"
-                  title={formatValue(suggestedAction, "等待更新")}
-                  body={formatValue(strategy.contextCard?.nextAction || bindingNote, "暂无")}
-                  quiet
-                />
-              </div>
-            </Section>
-
-            <Section
-              title="对话记录"
-              desc="这里查看最近发送内容和聊天记录。"
-            >
-              <div className="detail-stack">
-                <DetailCard
-                  meta="最近发出的消息"
-                  title={continuationStatus}
-                  body={formatValue(latestPrompt, "暂时还没有续发内容。")}
-                />
-                <DetailCard
-                  meta="最新回复摘要"
-                  title={formatValue(snapshot?.thread?.latestCodexSummary, "暂无")}
-                  body={formatValue(
-                    changeSummary,
-                    "等待下一次可见反馈。",
-                  )}
-                  quiet
-                />
-              </div>
-
-              <div className="transcript-stream">
-                {transcriptEntries.length === 0 ? (
-                  <DetailCard
-                    title="暂无聊天镜像"
-                    body="开始运行后，这里会持续显示最近的聊天记录。"
-                  />
-                ) : (
-                  transcriptEntries.map((entry, index) => (
-                    <DetailCard
-                      key={`${entry.at}-${entry.activeTask}-${index}`}
-                      meta={formatTime(entry.at, "未知时间")}
-                      title={formatValue(entry.activeTask, "未记录任务")}
-                      body={`${formatValue(entry.summary, "暂无摘要")}\n\n${formatValue(entry.note, "暂无备注")}`}
-                    />
-                  ))
-                )}
-              </div>
-            </Section>
-          </div>
-
-          <aside className="workspace-secondary">
-            <Section
-              title="进展概览"
-              desc="这里看最近改动和下一步。"
-            >
-              <div className="metric-grid">
-                <Metric label="为什么继续" value={formatValue(strategy.contextCard?.whyContinue, "暂无")} />
-                <Metric label="预计下一步" value={formatValue(strategy.contextCard?.nextAction, "暂无")} />
-                <Metric label="续发方式" value={settingsForm.promptGeneratorEnabled ? "智能增强" : "默认模式"} />
-                <Metric label="停止条件" value={formatValue(strategy.guardrailCard?.stopRule, "暂无")} />
-              </div>
-              <div className="detail-stack">
-                <DetailCard
-                  meta="最近改动"
-                  title={formatValue(changeSummary, "暂无")}
-                  body={formatValue(mobileSummary, "等待新的摘要更新。")}
-                />
-                <DetailCard
-                  meta="窗口说明"
-                  title={formatValue(bindingNote, "暂无")}
-                  body={formatValue(suggestedAction, "等待下一步")}
-                  quiet
-                />
-              </div>
-            </Section>
-          </aside>
-        </div>
-        </>
+          <DashboardHome
+            currentLoop={currentLoop}
+            snapshot={snapshot}
+            modeText={modeText}
+            continuationStatus={continuationStatus}
+            launcherPhase={launcherPhase}
+            pollStatus={pollStatus}
+            pollState={pollState}
+            dashboardGuide={dashboardGuide}
+            submitting={submitting}
+            handleDashboardAction={handleDashboardAction}
+            setActiveSidebarPane={setActiveSidebarPane}
+            automationSchedule={automationSchedule}
+            automationStatus={automationStatus}
+            threadLabel={threadLabel}
+            latestSummary={latestSummary}
+            changeSummary={changeSummary}
+            suggestedAction={suggestedAction}
+            transcriptEntries={transcriptEntries}
+            latestPrompt={latestPrompt}
+            mobileSummary={mobileSummary}
+            bindingNote={bindingNote}
+            strategy={strategy}
+            settingsForm={settingsForm}
+            healthIssues={healthIssues}
+            uiError={uiError}
+          />
         ) : null}
+
+        
       </section>
     </main>
   );

@@ -8,11 +8,14 @@ import {
   createLoop,
   deleteLoop,
   exportLoopSummary,
+  exportMobileView,
   ensureLoopArtifacts,
+  goBackLoopCreationAssistant,
   getLoopCreationAssistantState,
   listLoops,
   readLoopSnapshot,
   replyLoopCreationAssistant,
+  restartLoopCreationAssistant,
   runLoopTurn,
   startRun,
   selectLoop,
@@ -51,6 +54,16 @@ async function createWorkspace() {
   return configRoot;
 }
 
+async function writeCodexSession(tempRoot, threadId, records) {
+  const sessionDir = path.join(tempRoot, "sessions", "2026", "06", "07");
+  await fs.mkdir(sessionDir, { recursive: true });
+  await fs.writeFile(
+    path.join(sessionDir, `rollout-${threadId}.jsonl`),
+    `${records.map((record) => JSON.stringify(record)).join("\n")}\n`,
+    "utf8",
+  );
+}
+
 test("ensureLoopArtifacts creates thread metadata and transcript mirror", async () => {
   const configRoot = await createWorkspace();
   const snapshot = await ensureLoopArtifacts(configRoot);
@@ -59,7 +72,7 @@ test("ensureLoopArtifacts creates thread metadata and transcript mirror", async 
   assert.match(snapshot.paths.transcriptPath, /transcript\.md$/);
 });
 
-test("requestGracefulStop flips stopRequested and enters finalize mode", async () => {
+test("requestGracefulStop clears stop flags and enters stopped mode when no continuation is active", async () => {
   const configRoot = await createWorkspace();
 
   await ensureLoopArtifacts(configRoot);
@@ -67,8 +80,21 @@ test("requestGracefulStop flips stopRequested and enters finalize mode", async (
     reason: "manual stop",
   });
 
-  assert.equal(nextSnapshot.state.stopRequested, true);
-  assert.equal(nextSnapshot.state.mode, "finalize_after_current");
+  assert.equal(nextSnapshot.state.stopRequested, false);
+  assert.equal(nextSnapshot.state.finalizeRequested, false);
+  assert.equal(nextSnapshot.state.mode, "stopped");
+});
+
+test("requestGracefulStop appends a transcript entry for the stop request", async () => {
+  const configRoot = await createWorkspace();
+  const initialSnapshot = await ensureLoopArtifacts(configRoot);
+
+  await requestGracefulStop(configRoot, {
+    reason: "manual stop",
+  });
+
+  const transcriptText = await fs.readFile(initialSnapshot.paths.transcriptPath, "utf8");
+  assert.match(transcriptText, /manual stop/);
 });
 
 test("saveThreadBinding persists project and title display metadata", async () => {
@@ -124,8 +150,8 @@ test("requestGracefulStop updates thread mirror mode", async () => {
     reason: "manual stop",
   });
 
-  assert.equal(snapshot.thread.latestMode, "finalize_after_current");
-  assert.equal(snapshot.thread.latestModeLabel, "\u6536\u5c3e\u4e2d");
+  assert.equal(snapshot.thread.latestMode, "stopped");
+  assert.equal(snapshot.thread.latestModeLabel, "\u5df2\u505c\u6b62");
 });
 
 test("requestGracefulStop writes a visible finalizing summary for the UI", async () => {
@@ -136,13 +162,65 @@ test("requestGracefulStop writes a visible finalizing summary for the UI", async
     reason: "manual stop",
   });
 
-  assert.match(snapshot.thread.latestSummary, /\u6536\u5c3e|\u505c\u6b62/);
-  assert.equal(snapshot.thread.latestEventType, "graceful_stop_requested");
+  assert.match(snapshot.thread.latestSummary, /\u505c\u6b62/);
+  assert.equal(snapshot.thread.latestEventType, "graceful_stop_completed");
+});
+
+test("requestGracefulStop stops immediately when no continuation is in flight", async () => {
+  const configRoot = await createWorkspace();
+  await ensureLoopArtifacts(configRoot);
+  await startRun(configRoot);
+
+  const snapshot = await requestGracefulStop(configRoot, {
+    reason: "manual stop",
+  });
+
+  assert.equal(snapshot.state.mode, "stopped");
+  assert.equal(snapshot.state.stopRequested, false);
+  assert.equal(snapshot.state.finalizeRequested, false);
+  assert.equal(snapshot.thread.latestMode, "stopped");
+  assert.equal(snapshot.thread.continuationStatus, "idle");
+});
+
+test("exportMobileView gives user-facing next-step guidance for an unbound loop", async () => {
+  const configRoot = await createWorkspace();
+  await ensureLoopArtifacts(configRoot);
+
+  const mobileView = await exportMobileView(configRoot);
+
+  assert.match(mobileView.bindingNote, /\u8fd8\u6ca1\u6709\u7ed1\u5b9a|\u7ebf\u7a0b/);
+  assert.match(mobileView.suggestedAction, /\u5148.*\u7ed1\u5b9a.*\u7ebf\u7a0b/);
+});
+
+test("exportMobileView falls back to thread summaries when transcript mirror is still empty", async () => {
+  const configRoot = await createWorkspace();
+  const initialSnapshot = await ensureLoopArtifacts(configRoot);
+  await saveThreadBinding(configRoot, {
+    workspaceName: "demo",
+    threadTitle: "fallback thread",
+    threadId: "thread-fallback-mobile",
+    singleThreadMode: true,
+  });
+  await syncCodexThreadMirror(configRoot, {
+    latestCodexSummary: "Completed a real visible batch for the current loop",
+  });
+
+  const mobileView = await exportMobileView(configRoot);
+
+  assert.equal(mobileView.transcriptEntries.length > 0, true);
+  assert.match(
+    mobileView.transcriptEntries[0].summary,
+    /Completed a real visible batch for the current loop/,
+  );
+  assert.match(
+    await fs.readFile(initialSnapshot.paths.transcriptPath, "utf8"),
+    /Transcript Mirror/,
+  );
 });
 
 test("startRun records a visible launch signal before the first heartbeat", async () => {
   const configRoot = await createWorkspace();
-  await ensureLoopArtifacts(configRoot);
+  const initialSnapshot = await ensureLoopArtifacts(configRoot);
 
   const snapshot = await startRun(configRoot);
 
@@ -151,11 +229,194 @@ test("startRun records a visible launch signal before the first heartbeat", asyn
   assert.equal(snapshot.state.lastHeartbeatAt, "");
   assert.equal(snapshot.thread.latestEventType, "run_started_from_console");
   assert.match(snapshot.thread.latestSummary, /heartbeat/i);
+
+  const transcriptText = await fs.readFile(initialSnapshot.paths.transcriptPath, "utf8");
+  assert.match(transcriptText, /run_started_from_console/);
+});
+
+test("startRun preserves an active Codex dispatch instead of reopening it as idle", async () => {
+  const configRoot = await createWorkspace();
+  const initialSnapshot = await ensureLoopArtifacts(configRoot);
+  await saveThreadBinding(configRoot, {
+    workspaceName: "demo",
+    threadTitle: "active dispatch thread",
+    threadId: "thread-active-dispatch",
+    singleThreadMode: true,
+  });
+  const boundSnapshot = await readLoopSnapshot(configRoot);
+  await fs.writeFile(
+    boundSnapshot.paths.threadPath,
+    `${JSON.stringify(
+      {
+        ...boundSnapshot.thread,
+        continuationStatus: "dispatching",
+        continuationEnabled: true,
+        latestEventType: "codex_followup_dispatched",
+        latestSummary: "已发送到 Codex，等待回复",
+        lastDispatchAt: new Date().toISOString(),
+      },
+      null,
+      2,
+    )}\n`,
+    "utf8",
+  );
+
+  const snapshot = await startRun(configRoot);
+
+  assert.equal(snapshot.thread.continuationStatus, "dispatching");
+  assert.equal(snapshot.thread.latestEventType, "codex_followup_dispatched");
+  assert.match(snapshot.thread.latestSummary, /Codex|等待/);
+
+  const transcriptText = await fs.readFile(initialSnapshot.paths.transcriptPath, "utf8");
+  assert.match(transcriptText, /run_started_from_console/);
+});
+
+test("ensureLoopArtifacts auto-recovers stale finalize mode into stopped when nothing is dispatching", async () => {
+  const configRoot = await createWorkspace();
+  const initialSnapshot = await ensureLoopArtifacts(configRoot);
+  const forcedState = {
+    ...initialSnapshot.state,
+    mode: "finalize_after_current",
+    stopRequested: true,
+    finalizeRequested: true,
+  };
+  const forcedThread = {
+    ...initialSnapshot.thread,
+    latestMode: "finalize_after_current",
+    continuationStatus: "idle",
+  };
+
+  await fs.writeFile(initialSnapshot.paths.statePath, `${JSON.stringify(forcedState, null, 2)}\n`, "utf8");
+  await fs.writeFile(initialSnapshot.paths.threadPath, `${JSON.stringify(forcedThread, null, 2)}\n`, "utf8");
+
+  const recovered = await ensureLoopArtifacts(configRoot);
+
+  assert.equal(recovered.state.mode, "stopped");
+  assert.equal(recovered.state.stopRequested, false);
+  assert.equal(recovered.state.finalizeRequested, false);
+  assert.equal(recovered.thread.latestMode, "stopped");
+});
+
+test("ensureLoopArtifacts keeps dispatching while Codex only has an in-progress reply", async () => {
+  const configRoot = await createWorkspace();
+  const previousCodexHome = process.env.CODEX_HOME;
+  const codexHome = await fs.mkdtemp(path.join(os.tmpdir(), "codex-loop-home-"));
+  process.env.CODEX_HOME = codexHome;
+
+  try {
+    const initialSnapshot = await ensureLoopArtifacts(configRoot);
+    const threadId = "thread-commentary-only";
+    await saveThreadBinding(configRoot, {
+      workspaceName: "demo",
+      threadTitle: "开发主线",
+      threadId,
+      singleThreadMode: true,
+    });
+
+    const forcedState = {
+      ...initialSnapshot.state,
+      mode: "running",
+      stopRequested: false,
+      finalizeRequested: false,
+    };
+    const forcedThread = {
+      ...(await readLoopSnapshot(configRoot)).thread,
+      continuationStatus: "dispatching",
+      lastDispatchAt: new Date().toISOString(),
+      lastCompletionAt: "",
+    };
+
+    await writeCodexSession(codexHome, threadId, [
+      {
+        timestamp: "2026-06-07T15:01:00.000Z",
+        type: "event_msg",
+        payload: {
+          type: "agent_message",
+          message: "我正在验证这一批改动，还没完成。",
+          phase: "commentary",
+        },
+      },
+    ]);
+    await fs.writeFile(initialSnapshot.paths.statePath, `${JSON.stringify(forcedState, null, 2)}\n`, "utf8");
+    await fs.writeFile(initialSnapshot.paths.threadPath, `${JSON.stringify(forcedThread, null, 2)}\n`, "utf8");
+
+    const snapshot = await ensureLoopArtifacts(configRoot);
+
+    assert.equal(snapshot.thread.continuationStatus, "dispatching");
+    assert.equal(snapshot.thread.lastCompletionAt, "");
+    assert.equal(snapshot.codexConversation.latestAssistant.text, "我正在验证这一批改动，还没完成。");
+    assert.equal(snapshot.codexConversation.latestCompletion, null);
+  } finally {
+    if (previousCodexHome === undefined) {
+      delete process.env.CODEX_HOME;
+    } else {
+      process.env.CODEX_HOME = previousCodexHome;
+    }
+    await fs.rm(codexHome, { recursive: true, force: true });
+  }
+});
+
+test("ensureLoopArtifacts stops after a requested stop once Codex writes task_complete", async () => {
+  const configRoot = await createWorkspace();
+  const previousCodexHome = process.env.CODEX_HOME;
+  const codexHome = await fs.mkdtemp(path.join(os.tmpdir(), "codex-loop-home-"));
+  process.env.CODEX_HOME = codexHome;
+
+  try {
+    const initialSnapshot = await ensureLoopArtifacts(configRoot);
+    const threadId = "thread-final-complete";
+    await saveThreadBinding(configRoot, {
+      workspaceName: "demo",
+      threadTitle: "开发主线",
+      threadId,
+      singleThreadMode: true,
+    });
+
+    const forcedState = {
+      ...initialSnapshot.state,
+      mode: "finalize_after_current",
+      stopRequested: true,
+      finalizeRequested: true,
+    };
+    const forcedThread = {
+      ...(await readLoopSnapshot(configRoot)).thread,
+      continuationStatus: "dispatching",
+      lastDispatchAt: new Date().toISOString(),
+      lastCompletionAt: "",
+    };
+
+    await writeCodexSession(codexHome, threadId, [
+      {
+        timestamp: "2026-06-07T15:02:00.000Z",
+        type: "event_msg",
+        payload: {
+          type: "task_complete",
+          last_agent_message: "这一轮已完成，测试通过。",
+        },
+      },
+    ]);
+    await fs.writeFile(initialSnapshot.paths.statePath, `${JSON.stringify(forcedState, null, 2)}\n`, "utf8");
+    await fs.writeFile(initialSnapshot.paths.threadPath, `${JSON.stringify(forcedThread, null, 2)}\n`, "utf8");
+
+    const snapshot = await ensureLoopArtifacts(configRoot);
+
+    assert.equal(snapshot.state.mode, "stopped");
+    assert.equal(snapshot.state.stopRequested, false);
+    assert.equal(snapshot.thread.continuationStatus, "idle");
+    assert.equal(snapshot.thread.latestMode, "stopped");
+  } finally {
+    if (previousCodexHome === undefined) {
+      delete process.env.CODEX_HOME;
+    } else {
+      process.env.CODEX_HOME = previousCodexHome;
+    }
+    await fs.rm(codexHome, { recursive: true, force: true });
+  }
 });
 
 test("runLoopTurn sends the next message to the bound Codex thread and stores visible status", async () => {
   const configRoot = await createWorkspace();
-  await ensureLoopArtifacts(configRoot);
+  const initialSnapshot = await ensureLoopArtifacts(configRoot);
   await saveThreadBinding(configRoot, {
     workspaceName: "demo",
     threadTitle: "持续开发主线",
@@ -172,7 +433,7 @@ test("runLoopTurn sends the next message to the bound Codex thread and stores vi
   const snapshot = await runLoopTurn(configRoot, {
     dispatchThreadMessage: async ({ threadId, prompt }) => {
       assert.equal(threadId, "thread-123");
-      assert.match(prompt, /Continue from the current checklist and rules/);
+      assert.match(prompt, /下一步：Previous turn completed the launch feedback fix/);
       return {
         lastMessage:
           "Completed the next loop turn and prepared the following verified task.",
@@ -183,14 +444,15 @@ test("runLoopTurn sends the next message to the bound Codex thread and stores vi
   assert.equal(snapshot.thread.continuationStatus, "idle");
   assert.equal(snapshot.thread.continuationCycleCount, 1);
   assert.equal(snapshot.thread.latestEventType, "codex_followup_completed");
-  assert.match(snapshot.thread.lastDispatchPrompt, /Continue from the current checklist and rules/);
+  assert.match(snapshot.thread.lastDispatchPrompt, /下一步：Previous turn completed the launch feedback fix/);
   assert.match(snapshot.thread.lastDispatchPrompt, /Previous turn completed the launch feedback fix/);
-  assert.match(
-    snapshot.thread.latestCodexSummary,
-    /Completed the next loop turn and prepared the following verified task\./,
-  );
+  assert.match(snapshot.thread.latestCodexSummary, /Completed the next loop turn/);
   assert.ok(snapshot.thread.lastDispatchAt);
   assert.ok(snapshot.thread.lastCompletionAt);
+
+  const transcriptText = await fs.readFile(initialSnapshot.paths.transcriptPath, "utf8");
+  assert.match(transcriptText, /已发送到 Codex 线程/);
+  assert.match(transcriptText, /codex_followup_completed/);
 });
 
 test("runLoopTurn uses Chinese follow-up prompt by default", async () => {
@@ -216,8 +478,9 @@ test("runLoopTurn uses Chinese follow-up prompt by default", async () => {
     },
   });
 
-  assert.match(dispatchedPrompt, /当前循环上下文/);
-  assert.match(dispatchedPrompt, /继续推进核心链路/);
+  assert.match(dispatchedPrompt, /继续在同一个 Codex 线程中推进。/u);
+  assert.match(dispatchedPrompt, /下一步：/u);
+  assert.match(dispatchedPrompt, /上一轮已修复启动状态展示/u);
   assert.doesNotMatch(
     dispatchedPrompt,
     /Continue the same Codex thread from its latest verified checkpoint\./,
@@ -252,12 +515,9 @@ test("runLoopTurn switches to English follow-up prompt when configured", async (
     },
   });
 
-  assert.match(
-    dispatchedPrompt,
-    /Continue the same Codex thread from its latest verified checkpoint\./,
-  );
-  assert.match(dispatchedPrompt, /Current loop context:/);
-  assert.match(dispatchedPrompt, /Continue the current loop/);
+  assert.match(dispatchedPrompt, /Continue in this same Codex thread./);
+  assert.match(dispatchedPrompt, /Next:/);
+  assert.match(dispatchedPrompt, /launcher status fix|Continue the current loop/i);
 });
 
 test("runLoopTurn uses ollama-generated prompt when advanced continuation is enabled", async () => {
@@ -288,7 +548,7 @@ test("runLoopTurn uses ollama-generated prompt when advanced continuation is ena
   let dispatchedPrompt = "";
   const snapshot = await runLoopTurn(configRoot, {
     generateFollowupPrompt: async ({ fallbackPrompt, snapshot: currentSnapshot }) => {
-      assert.match(fallbackPrompt, /当前循环上下文/);
+      assert.match(fallbackPrompt, /下一步：/u);
       assert.equal(
         currentSnapshot.profile.resolved.conversation.promptGenerator.enabled,
         true,
@@ -306,6 +566,7 @@ test("runLoopTurn uses ollama-generated prompt when advanced continuation is ena
     "请基于上一轮已完成内容，继续推进日志健康检查，并先完成最小可验证批次。",
   );
   assert.equal(snapshot.thread.continuationStatus, "idle");
+  assert.equal(snapshot.thread.latestEventType, "codex_followup_completed");
 });
 
 test("runLoopTurn falls back to template prompt when ollama generation fails", async () => {
@@ -332,20 +593,201 @@ test("runLoopTurn falls back to template prompt when ollama generation fails", a
     latestCodexSummary: "上一轮已经补完主要接口",
   });
 
+  await assert.rejects(
+    () =>
+      runLoopTurn(configRoot, {
+        generateFollowupPrompt: async () => {
+          throw new Error("ollama unavailable");
+        },
+      }),
+    /本地模型生成续跑消息失败，请检查 Ollama 和模型配置。/,
+  );
+
+  const snapshot = await readLoopSnapshot(configRoot);
+  assert.match(snapshot.thread.lastContinuationError, /ollama unavailable/);
+  assert.equal(snapshot.thread.continuationStatus, "error");
+});
+
+test("syncCodexThreadMirror appends a transcript entry when a real Codex summary arrives", async () => {
+  const configRoot = await createWorkspace();
+  const initialSnapshot = await ensureLoopArtifacts(configRoot);
+
+  await saveThreadBinding(configRoot, {
+    workspaceName: "demo",
+    threadTitle: "summary thread",
+    threadId: "thread-summary",
+    singleThreadMode: true,
+  });
+  await syncCodexThreadMirror(configRoot, {
+    latestCodexSummary: "Completed the latest verified Codex batch",
+  });
+
+  const transcriptText = await fs.readFile(initialSnapshot.paths.transcriptPath, "utf8");
+  assert.match(transcriptText, /Completed the latest verified Codex batch/);
+});
+
+test("syncCodexThreadMirror keeps completion state after the next snapshot reload", async () => {
+  const configRoot = await createWorkspace();
+  await ensureLoopArtifacts(configRoot);
+  await saveThreadBinding(configRoot, {
+    workspaceName: "demo",
+    threadTitle: "completion thread",
+    threadId: "thread-completion",
+    singleThreadMode: true,
+  });
+  await syncCodexThreadMirror(configRoot, {
+    latestCodexSummary: "previous verified result",
+  });
+
+  await runLoopTurn(configRoot, {
+    dispatchThreadMessage: async () => ({ lastMessage: "dispatched" }),
+  });
+
+  const synced = await syncCodexThreadMirror(configRoot, {
+    latestCodexSummary: "new verified result",
+  });
+
+  assert.equal(synced.thread.continuationStatus, "idle");
+  assert.equal(synced.thread.latestEventType, "codex_followup_completed");
+  assert.equal(synced.thread.continuationCycleCount, 1);
+  assert.ok(synced.thread.lastCompletionAt);
+
+  const reloaded = await readLoopSnapshot(configRoot);
+  assert.equal(reloaded.thread.continuationStatus, "idle");
+  assert.equal(reloaded.thread.latestEventType, "codex_followup_completed");
+  assert.equal(reloaded.thread.continuationCycleCount, 1);
+  assert.match(reloaded.thread.latestSummary, /Codex|可开始下一轮/);
+});
+
+test("runLoopTurn writes completion immediately when the Codex dispatcher returns a finished message", async () => {
+  const configRoot = await createWorkspace();
+  await ensureLoopArtifacts(configRoot);
+  await saveThreadBinding(configRoot, {
+    workspaceName: "demo",
+    threadTitle: "dispatcher completion thread",
+    threadId: "thread-dispatch-complete",
+    singleThreadMode: true,
+  });
+  await syncCodexThreadMirror(configRoot, {
+    latestCodexSummary: "previous summary",
+  });
+
+  const snapshot = await runLoopTurn(configRoot, {
+    dispatchThreadMessage: async () => ({
+      lastMessage: "Completed the next verified Codex batch",
+      completionObserved: true,
+    }),
+  });
+
+  assert.equal(snapshot.thread.continuationStatus, "idle");
+  assert.equal(snapshot.thread.latestEventType, "codex_followup_completed");
+  assert.equal(snapshot.thread.continuationCycleCount, 1);
+  assert.match(snapshot.thread.latestCodexSummary, /Completed the next verified Codex batch/);
+});
+
+test("runLoopTurn rejects duplicate dispatch while a continuation is actively in flight", async () => {
+  const configRoot = await createWorkspace();
+  await ensureLoopArtifacts(configRoot);
+  await saveThreadBinding(configRoot, {
+    workspaceName: "demo",
+    threadTitle: "主线程",
+    threadId: "thread-busy",
+    singleThreadMode: true,
+  });
+
+  const busySnapshot = await readLoopSnapshot(configRoot);
+  await fs.writeFile(
+    busySnapshot.paths.threadPath,
+    `${JSON.stringify(
+      {
+        ...busySnapshot.thread,
+        continuationStatus: "dispatching",
+        lastDispatchAt: new Date().toISOString(),
+      },
+      null,
+      2,
+    )}\n`,
+    "utf8",
+  );
+
+  await assert.rejects(
+    () => runLoopTurn(configRoot),
+    /already dispatching/i,
+  );
+});
+
+test("runLoopTurn recovers a stalled dispatch and continues with the next turn", async () => {
+  const configRoot = await createWorkspace();
+  await ensureLoopArtifacts(configRoot);
+  await saveThreadBinding(configRoot, {
+    workspaceName: "demo",
+    threadTitle: "recovered thread",
+    threadId: "thread-recovered",
+    singleThreadMode: true,
+  });
+  await syncCodexThreadMirror(configRoot, {
+    lastUserInstructionSummary: "continue the core loop",
+    latestCodexSummary: "the previous continuation stalled while waiting for Codex",
+  });
+
+  const busySnapshot = await readLoopSnapshot(configRoot);
+  await fs.writeFile(
+    busySnapshot.paths.threadPath,
+    `${JSON.stringify(
+      {
+        ...busySnapshot.thread,
+        continuationEnabled: true,
+        continuationStatus: "dispatching",
+        lastDispatchAt: new Date(Date.now() - 1000 * 60 * 10).toISOString(),
+      },
+      null,
+      2,
+    )}\n`,
+    "utf8",
+  );
+
   let dispatchedPrompt = "";
   const snapshot = await runLoopTurn(configRoot, {
-    generateFollowupPrompt: async () => {
-      throw new Error("ollama unavailable");
-    },
+    generateFollowupPrompt: async ({ fallbackPrompt }) => fallbackPrompt,
     dispatchThreadMessage: async ({ prompt }) => {
       dispatchedPrompt = prompt;
-      return { lastMessage: "已回退到模板续发" };
+      return { lastMessage: "Recovered and completed the next continuation turn" };
     },
   });
 
-  assert.match(dispatchedPrompt, /当前循环上下文/);
-  assert.match(snapshot.thread.lastContinuationError, /ollama unavailable/);
+  assert.match(dispatchedPrompt, /下一步：|Next:/i);
   assert.equal(snapshot.thread.continuationStatus, "idle");
+  assert.equal(snapshot.thread.threadId, "thread-recovered");
+
+  const transcriptText = await fs.readFile(busySnapshot.paths.transcriptPath, "utf8");
+  assert.match(transcriptText, /codex_followup_recovered|Recovered|stalled|reset/i);
+});
+
+test("runLoopTurn rejects using the current Codex session thread as the loop target", async () => {
+  const configRoot = await createWorkspace();
+  await ensureLoopArtifacts(configRoot);
+  const originalThreadId = process.env.CODEX_THREAD_ID;
+  process.env.CODEX_THREAD_ID = "thread-self";
+
+  try {
+    await saveThreadBinding(configRoot, {
+      workspaceName: "demo",
+      threadTitle: "当前会话线程",
+      threadId: "thread-self",
+      singleThreadMode: true,
+    });
+
+    await assert.rejects(
+      () => runLoopTurn(configRoot),
+      /current Codex session/i,
+    );
+  } finally {
+    if (originalThreadId === undefined) {
+      delete process.env.CODEX_THREAD_ID;
+    } else {
+      process.env.CODEX_THREAD_ID = originalThreadId;
+    }
+  }
 });
 
 test("renameLoop updates loop name in config and runtime snapshot", async () => {
@@ -777,6 +1219,56 @@ test("syncCodexThreadMirror stores normalized Codex linkage summaries", async ()
   );
 });
 
+test("syncCodexThreadMirror ignores thread-id-only summaries", async () => {
+  const configRoot = await createWorkspace();
+  await ensureLoopArtifacts(configRoot);
+  await saveThreadBinding(configRoot, {
+    workspaceName: "demo",
+    threadTitle: "demo thread",
+    threadId: "019e9db5-73ae-7292-877f-83b6bf6ab13a",
+    singleThreadMode: true,
+  });
+  await syncCodexThreadMirror(configRoot, {
+    latestCodexSummary: "Meaningful previous summary",
+  });
+
+  const snapshot = await syncCodexThreadMirror(configRoot, {
+    latestCodexSummary:
+      "当前窗口的 thread id 是 `019e9db5-73ae-7292-877f-83b6bf6ab13a`。",
+  });
+
+  assert.equal(snapshot.thread.latestCodexSummary, "Meaningful previous summary");
+});
+
+test("loop creation assistant supports going back and restarting", async () => {
+  const configRoot = await createWorkspace();
+  const projectRoot = path.join(configRoot, "demo-project");
+  await fs.mkdir(projectRoot, { recursive: true });
+  await fs.mkdir(path.join(projectRoot, ".git"), { recursive: true });
+  await fs.writeFile(
+    path.join(projectRoot, ".git", "HEAD"),
+    "ref: refs/heads/dev\n",
+    "utf8",
+  );
+
+  let state = await replyLoopCreationAssistant(configRoot, {
+    answer: projectRoot,
+  });
+  assert.equal(state.step, "project_name");
+
+  state = await replyLoopCreationAssistant(configRoot, {
+    answer: "演示项目",
+  });
+  assert.equal(state.step, "loop_name");
+
+  state = await goBackLoopCreationAssistant(configRoot);
+  assert.equal(state.step, "project_name");
+
+  state = await restartLoopCreationAssistant(configRoot);
+  assert.equal(state.step, "workspace_root");
+  assert.equal(state.draft.workspaceRoot, "");
+});
+
 test("exportLoopSummary includes Codex linkage summaries", async () => {
   const configRoot = await createWorkspace();
   await ensureLoopArtifacts(configRoot);
@@ -823,7 +1315,7 @@ test("readLoopSnapshot marks health issue when heartbeat is stale", async () => 
   assert.match(refreshed.health.issues.join(","), /heartbeat:stale/);
 });
 
-test("readLoopSnapshot marks health issue when continuation dispatch is stalled", async () => {
+test("readLoopSnapshot recovers a stalled continuation dispatch so the loop can continue", async () => {
   const configRoot = await createWorkspace();
   const snapshot = await ensureLoopArtifacts(configRoot);
   const staleAt = new Date(Date.now() - 1000 * 60 * 10).toISOString();
@@ -874,8 +1366,12 @@ test("readLoopSnapshot marks health issue when continuation dispatch is stalled"
   );
 
   const refreshed = await readLoopSnapshot(configRoot);
-  assert.equal(refreshed.health.ok, false);
-  assert.match(refreshed.health.issues.join(","), /continuation:stalled/);
+  assert.equal(refreshed.thread.continuationStatus, "idle");
+  assert.match(refreshed.thread.lastContinuationError, /stalled|timed out|reset/i);
+  assert.equal(refreshed.health.ok, true);
+
+  const transcriptText = await fs.readFile(snapshot.paths.transcriptPath, "utf8");
+  assert.match(transcriptText, /stalled|reset|恢复/i);
 });
 
 test("readLoopSnapshot marks health issue when transcript is stale during an active run", async () => {

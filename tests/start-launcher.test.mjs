@@ -58,6 +58,40 @@ test("launcher cleanup handles missing launcher status safely", async () => {
   assert.equal(status, null);
 });
 
+test("launcher cleanup can recover stale status by using codex-loop process command lines", async () => {
+  const loopRoot = "E:\\2026\\codex-loop";
+  const processRows = [
+    {
+      ProcessId: 7101,
+      CommandLine: `node ${loopRoot}\\app\\server\\index.mjs`,
+    },
+    {
+      ProcessId: 7102,
+      CommandLine: `node ${loopRoot}\\node_modules\\vite\\bin\\vite.js --config ${loopRoot}\\app\\web\\vite.config.mjs`,
+    },
+    {
+      ProcessId: 7103,
+      CommandLine: `powershell -File ${loopRoot}\\scripts\\start-codex-loop.ps1 start`,
+    },
+    {
+      ProcessId: 7200,
+      CommandLine: "node E:\\other-project\\app\\server\\index.mjs",
+    },
+  ];
+
+  const matchingIds = processRows
+    .filter((row) => row.CommandLine.includes(loopRoot))
+    .filter((row) =>
+      /app[\\/]server[\\/]index\.mjs|app[\\/]web[\\/]vite\.config\.mjs|scripts[\\/]start-codex-loop\.ps1/i.test(
+        row.CommandLine,
+      ),
+    )
+    .map((row) => row.ProcessId)
+    .sort((a, b) => a - b);
+
+  assert.deepEqual(matchingIds, [7101, 7102, 7103]);
+});
+
 test("launcher browser target prefers the resolved ready web url", async () => {
   const fallbackUrl = "http://127.0.0.1:3001";
   const readyStatus = {

@@ -785,6 +785,73 @@ test("handler dispatches loop registry routes", async () => {
   assert.match(deleteResult.text, /"deleted":true/);
 });
 
+test("handler dispatches loop creation assistant back and reset routes", async () => {
+  let backCalls = 0;
+  let resetCalls = 0;
+  const handler = buildHandler({
+    operations: {
+      readLoopSnapshot: async () => ({}),
+      exportLoopSummary: async () => ({}),
+      startRun: async () => ({}),
+      renameLoop: async () => ({}),
+      requestGracefulStop: async () => ({}),
+      updateBudgets: async () => ({}),
+      saveThreadBinding: async () => ({}),
+      syncCodexThreadMirror: async () => ({}),
+      recordHeartbeat: async () => ({}),
+      recordError: async () => ({}),
+      saveUserOverrides: async () => ({}),
+      listLoops: async () => ({}),
+      createLoop: async () => ({}),
+      getLoopCreationAssistantState: async () => ({}),
+      goBackLoopCreationAssistant: async () => {
+        backCalls += 1;
+        return { step: "project_name" };
+      },
+      restartLoopCreationAssistant: async () => {
+        resetCalls += 1;
+        return { step: "workspace_root" };
+      },
+      selectLoop: async () => ({}),
+      deleteLoop: async () => ({}),
+      replyLoopCreationAssistant: async () => ({}),
+    },
+  });
+
+  async function request(url) {
+    const chunks = [];
+    const response = {
+      writeHead(statusCode) {
+        this.statusCode = statusCode;
+      },
+      end(text) {
+        chunks.push(text);
+      },
+    };
+
+    await handler(
+      {
+        method: "POST",
+        url,
+        [Symbol.asyncIterator]: async function* iterator() {},
+      },
+      response,
+    );
+
+    return { statusCode: response.statusCode, text: chunks.join("") };
+  }
+
+  const backResult = await request("/api/loop-creation-assistant/back");
+  const resetResult = await request("/api/loop-creation-assistant/reset");
+
+  assert.equal(backResult.statusCode, 200);
+  assert.equal(resetResult.statusCode, 200);
+  assert.equal(backCalls, 1);
+  assert.equal(resetCalls, 1);
+  assert.match(backResult.text, /"project_name"/);
+  assert.match(resetResult.text, /"workspace_root"/);
+});
+
 test("handler dispatches loop creation assistant routes", async () => {
   const handler = buildHandler({
     operations: {

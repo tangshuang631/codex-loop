@@ -1,10 +1,45 @@
-import { spawn } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 
+let cachedCodexCommand = "";
+
 function resolveCodexCommand() {
-  return process.platform === "win32" ? "codex.exe" : "codex";
+  if (cachedCodexCommand) {
+    return cachedCodexCommand;
+  }
+
+  if (process.env.CODEX_CLI_PATH) {
+    cachedCodexCommand = process.env.CODEX_CLI_PATH;
+    return cachedCodexCommand;
+  }
+
+  if (process.platform !== "win32") {
+    cachedCodexCommand = "codex";
+    return cachedCodexCommand;
+  }
+
+  for (const candidate of ["codex.exe", "codex"]) {
+    const result = spawnSync("where.exe", [candidate], {
+      stdio: ["ignore", "pipe", "ignore"],
+      windowsHide: true,
+      encoding: "utf8",
+    });
+    if (result.status === 0) {
+      const resolved = String(result.stdout || "")
+        .split(/\r?\n/)
+        .map((line) => line.trim())
+        .find(Boolean);
+      if (resolved) {
+        cachedCodexCommand = resolved;
+        return cachedCodexCommand;
+      }
+    }
+  }
+
+  cachedCodexCommand = "codex";
+  return cachedCodexCommand;
 }
 
 export async function dispatchThreadMessage({
@@ -78,5 +113,6 @@ export async function dispatchThreadMessage({
     exitCode,
     lastMessage: lastMessage.trim(),
     stdout: Buffer.concat(stdout).toString("utf8"),
+    completionObserved: Boolean(lastMessage.trim()),
   };
 }
