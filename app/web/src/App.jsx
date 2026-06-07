@@ -277,6 +277,109 @@ function StatusPill({ text, tone = "default", active = false }) {
   );
 }
 
+function StatusSummaryPanel({
+  modeText,
+  continuationStatus,
+  currentLoopName,
+  threadLabel,
+  modelStatus,
+  automationSchedule,
+  healthSummary,
+}) {
+  const rows = [
+    ["运行状态", `${modeText} · ${continuationStatus}`],
+    ["当前任务", currentLoopName],
+    ["绑定线程", threadLabel],
+    ["本地模型", modelStatus],
+    ["自动间隔", automationSchedule],
+    ["提示", healthSummary],
+  ];
+
+  return (
+    <div className="status-summary-panel">
+      {rows.map(([label, value]) => (
+        <div className="status-summary-row" key={label}>
+          <span>{label}</span>
+          <strong>{value}</strong>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function ConversationTimeline({
+  entries,
+  latestCodexUser,
+  latestCodexAssistant,
+  latestPrompt,
+  latestVisibleSummary,
+  fallbackEntries,
+}) {
+  const conversationEntries = entries.length
+    ? entries
+    : [
+        latestCodexUser
+          ? { ...latestCodexUser, label: "codex-loop 发出的指令", role: "user" }
+          : null,
+        latestCodexAssistant
+          ? { ...latestCodexAssistant, label: "Codex 回复", role: "assistant" }
+          : null,
+      ].filter(Boolean);
+
+  if (!conversationEntries.length && fallbackEntries.length) {
+    return (
+      <div className="conversation-timeline">
+        {fallbackEntries.map((entry, index) => (
+          <article className="conversation-row is-codex" key={`${entry.at}-${index}`}>
+            <div className="conversation-bubble">
+              <span className="conversation-meta">{formatTime(entry.at, "未知时间")} · 记录</span>
+              <strong>{summarizeVisibleText(entry.summary, "暂无摘要", 220)}</strong>
+            </div>
+          </article>
+        ))}
+      </div>
+    );
+  }
+
+  if (!conversationEntries.length) {
+    return (
+      <div className="conversation-empty">
+        绑定线程并开始循环后，这里会用对话形式展示发出的指令和 Codex 回复。
+      </div>
+    );
+  }
+
+  return (
+    <div className="conversation-timeline">
+      {conversationEntries.map((entry, index) => {
+        const isLoopMessage = entry.role === "user";
+        const fullText = formatValue(
+          entry.text,
+          isLoopMessage ? latestPrompt : latestVisibleSummary,
+        );
+        const summary = summarizeVisibleText(fullText, "暂无摘要", 220);
+        return (
+          <article
+            className={`conversation-row ${isLoopMessage ? "is-loop" : "is-codex"}`}
+            key={`${entry.at || index}-${entry.role}-${index}`}
+          >
+            <details className="conversation-bubble">
+              <summary>
+                <span className="conversation-meta">
+                  {formatTime(entry.at, "未知时间")} · {isLoopMessage ? "codex-loop 指令" : "Codex 回复"}
+                </span>
+                <strong>{summary}</strong>
+                <em>点击展开完整内容</em>
+              </summary>
+              <p>{fullText}</p>
+            </details>
+          </article>
+        );
+      })}
+    </div>
+  );
+}
+
 function QuickActionButton({ action, onAction, variant = "secondary", disabled = false }) {
   if (!action?.id || !action?.label) {
     return null;
@@ -896,6 +999,22 @@ function DashboardHomeLegacy({
   healthIssues,
   uiError,
 }) {
+  const legacyLoopName = formatValue(
+    currentLoop?.name || snapshot?.config?.loopName,
+    "当前任务",
+  );
+  const legacyCodexConversation = snapshot?.codexConversation || {};
+  const legacyConversationEntries = [...(legacyCodexConversation.entries || []).slice(0, 8)].reverse();
+  const legacyLatestCodexUser = legacyCodexConversation.latestUser || null;
+  const legacyLatestCodexAssistant = legacyCodexConversation.latestAssistant || null;
+  const legacyLatestVisibleSummary = summarizeVisibleText(
+    snapshot?.thread?.latestCodexSummary || latestSummary,
+    "等待第一轮可见进展",
+  );
+  const legacyHealthSummary = healthIssues.length
+    ? healthIssues.join("\n")
+    : "当前没有明显异常，可以继续推进。";
+
   return (
     <>
       <section className="workspace-hero">
@@ -989,76 +1108,33 @@ function DashboardHomeLegacy({
         <div className="workspace-primary">
           <Section
             title="最近记录"
-            desc="这里集中看最近发出去的续跑消息、最近回复，以及 transcript 镜像。"
+            desc="这里显示本机线程记录；桌面端没刷新时，按 Ctrl+R 重载 Codex，或退出后用 codex app 重开。"
           >
-            <div className="detail-stack">
-              <DetailCard
-                meta="最近发出的消息"
-                title={continuationStatus}
-                body={formatValue(latestPrompt, "暂时还没有续跑内容。")}
-              />
-              <DetailCard
-                meta="最新回复摘要"
-                title={formatValue(snapshot?.thread?.latestCodexSummary, "暂无")}
-                body={formatValue(changeSummary, "等待下一次可见反馈。")}
-                quiet
-              />
-            </div>
-
-            <div className="transcript-stream">
-              {transcriptEntries.length === 0 ? (
-                <DetailCard
-                  title="暂时还没有聊天镜像"
-                  body="绑定线程并开始运行后，这里会持续显示最近的 loop 记录。"
-                />
-              ) : (
-                transcriptEntries.map((entry, index) => (
-                  <DetailCard
-                    key={`${entry.at}-${entry.activeTask}-${index}`}
-                    meta={formatTime(entry.at, "未知时间")}
-                    title={formatValue(entry.activeTask, "未记录任务")}
-                    body={`${formatValue(entry.summary, "暂无摘要")}\n\n${formatValue(entry.note, "暂无备注")}`}
-                  />
-                ))
-              )}
-            </div>
+            <ConversationTimeline
+              entries={legacyConversationEntries}
+              latestCodexUser={legacyLatestCodexUser}
+              latestCodexAssistant={legacyLatestCodexAssistant}
+              latestPrompt={latestPrompt}
+              latestVisibleSummary={legacyLatestVisibleSummary}
+              fallbackEntries={transcriptEntries}
+            />
           </Section>
         </div>
 
         <aside className="workspace-secondary">
           <Section
-            title="运行摘要"
-            desc="保留能帮助你判断 loop 是否健康、是否值得继续推进的最少信息。"
+            title="状态"
+            desc="只看当前能不能继续。"
           >
-            <div className="metric-grid">
-              <Metric label="为什么继续" value={formatValue(strategy.contextCard?.whyContinue, "暂无")} />
-              <Metric label="预计下一步" value={formatValue(strategy.contextCard?.nextAction, "暂无")} />
-              <Metric label="续跑方式" value={settingsForm.promptGeneratorEnabled ? "智能增强" : "默认模式"} />
-              <Metric label="停止条件" value={formatValue(strategy.guardrailCard?.stopRule, "暂无")} />
-            </div>
-            <div className="detail-stack">
-              <DetailCard
-                meta="最近改动"
-                title={formatValue(changeSummary, "暂无")}
-                body={formatValue(mobileSummary, "等待新的摘要更新。")}
-              />
-              <DetailCard
-                meta="线程说明"
-                title={formatValue(bindingNote, "暂无")}
-                body={formatValue(suggestedAction, "等待下一步")}
-                quiet
-              />
-              <DetailCard
-                meta="健康提示"
-                title={healthIssues.length ? "有需要留意的状态" : "当前没有明显异常"}
-                body={
-                  healthIssues.length
-                    ? healthIssues.join("\n")
-                    : "页面、状态和基础运行记录都处于可继续推进的状态。"
-                }
-                quiet
-              />
-            </div>
+            <StatusSummaryPanel
+              modeText={modeText}
+              continuationStatus={continuationStatus}
+              currentLoopName={legacyLoopName}
+              threadLabel={threadLabel}
+              modelStatus={settingsForm.promptGeneratorEnabled ? `已开启 · ${settingsForm.promptGeneratorModel}` : "未开启"}
+              automationSchedule={automationSchedule}
+              healthSummary={legacyHealthSummary}
+            />
           </Section>
         </aside>
       </div>
@@ -1117,7 +1193,7 @@ function DashboardHome({
   const codexConversation = snapshot?.codexConversation || {};
   const latestCodexUser = codexConversation.latestUser || null;
   const latestCodexAssistant = codexConversation.latestAssistant || null;
-  const codexConversationEntries = (codexConversation.entries || []).slice(0, 5);
+  const codexConversationEntries = [...(codexConversation.entries || []).slice(0, 8)].reverse();
   const isDispatching = snapshot?.thread?.continuationStatus === "dispatching";
   const isFinalizing = snapshot?.state?.stopRequested || snapshot?.state?.finalizeRequested;
   const isRunning = snapshot?.state?.mode === "running";
@@ -1235,91 +1311,33 @@ function DashboardHome({
         <div className="workspace-primary">
           <Section
             title="最近记录"
-            desc="这里直接读取绑定 Codex 线程的本机记录：发出的指令、Codex 回复、最近进展。"
+            desc="这里显示本机线程记录；桌面端没刷新时，按 Ctrl+R 重载 Codex，或退出后用 codex app 重开。"
           >
-            <div className="detail-stack">
-              <DetailCard
-                meta={formatTime(snapshot?.thread?.lastDispatchAt, "还没有发送记录")}
-                title={`已绑定：${formatValue(snapshot?.thread?.threadTitle, "未绑定线程")}`}
-                body={`线程 ID：${formatValue(snapshot?.thread?.threadId, "暂无")}`}
-                quiet
-              />
-              <DetailCard
-                meta="最后发出的消息"
-                title={continuationStatus}
-                body={summarizeVisibleText(
-                  latestCodexUser?.text || shortLatestPrompt,
-                  "暂时还没有续跑内容。",
-                  260,
-                )}
-              />
-              <DetailCard
-                meta={formatTime(latestCodexAssistant?.at || snapshot?.thread?.lastCompletionAt, "等待回复")}
-                title="Codex 最新回复"
-                body={summarizeVisibleText(
-                  latestCodexAssistant?.text || latestVisibleSummary,
-                  "等待 Codex 返回新进展。",
-                  360,
-                )}
-                quiet
-              />
-            </div>
-
-            <div className="transcript-stream">
-              {codexConversationEntries.length > 0 ? (
-                codexConversationEntries.map((entry, index) => (
-                  <DetailCard
-                    key={`${entry.at}-${entry.role}-${index}`}
-                    meta={formatTime(entry.at, "未知时间")}
-                    title={entry.label || (entry.role === "user" ? "发出的指令" : "Codex 回复")}
-                    body={summarizeVisibleText(entry.text, "暂无摘要", 260)}
-                    quiet={entry.role === "user"}
-                  />
-                ))
-              ) : visibleTranscriptEntries.length === 0 ? (
-                <DetailCard
-                  title="暂时还没有线程记录"
-                  body="绑定线程并开始运行后，这里会持续显示最近的 loop 记录。"
-                />
-              ) : (
-                visibleTranscriptEntries.map((entry, index) => (
-                  <DetailCard
-                    key={`${entry.at}-${entry.activeTask}-${index}`}
-                    meta="记录"
-                    title={formatTime(entry.at, "未知时间")}
-                    body={formatValue(entry.summary, "暂无摘要")}
-                  />
-                ))
-              )}
-            </div>
+            <ConversationTimeline
+              entries={codexConversationEntries}
+              latestCodexUser={latestCodexUser}
+              latestCodexAssistant={latestCodexAssistant}
+              latestPrompt={latestPrompt || shortLatestPrompt}
+              latestVisibleSummary={latestVisibleSummary}
+              fallbackEntries={visibleTranscriptEntries}
+            />
           </Section>
         </div>
 
         <aside className="workspace-secondary">
           <Section
             title="状态"
-            desc="只保留必要判断，不展示内部调试信息。"
+            desc="只看当前能不能继续。"
           >
-            <div className="metric-grid">
-              <Metric label="当前 loop" value={currentLoopName} />
-              <Metric label="当前线程" value={threadLabel} muted={!snapshot?.thread?.threadTitle} />
-              <Metric label="本地模型" value={settingsForm.promptGeneratorEnabled ? "已开启" : "未开启"} />
-              <Metric label="自动间隔" value={automationSchedule} muted={!automationStatus?.connected} />
-            </div>
-            <div className="detail-stack">
-              <DetailCard
-                meta="绑定说明"
-                title={shortBindingNote}
-                body="切换线程、开启 Ollama 或关闭服务都在管理页。"
-                quiet
-              />
-              <DetailCard
-                meta="运行提示"
-                title={healthIssues.length ? "有需要留意的状态" : "当前没有明显异常"}
-                body={healthSummary}
-                quiet
-              />
-            </div>
+            <StatusSummaryPanel
+              modeText={modeText}
+              continuationStatus={continuationStatus}
+              currentLoopName={currentLoopName}
+              threadLabel={threadLabel}
+              modelStatus={settingsForm.promptGeneratorEnabled ? `已开启 · ${settingsForm.promptGeneratorModel}` : "未开启"}
+              automationSchedule={automationSchedule}
+              healthSummary={healthSummary}
+            />
           </Section>
         </aside>
       </div>

@@ -903,6 +903,117 @@ select {
   word-break: break-word;
 }
 
+.status-summary-panel {
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 22px;
+  background: #fbfbf8;
+}
+
+.status-summary-row {
+  display: grid;
+  grid-template-columns: 88px 1fr;
+  gap: 14px;
+  padding: 15px 16px;
+  border-bottom: 1px solid #e8e8e2;
+}
+
+.status-summary-row:last-child {
+  border-bottom: 0;
+}
+
+.status-summary-row span {
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.7;
+}
+
+.status-summary-row strong {
+  color: var(--text);
+  font-size: 14px;
+  line-height: 1.7;
+  word-break: break-word;
+}
+
+.conversation-timeline {
+  display: grid;
+  gap: 12px;
+}
+
+.conversation-row {
+  display: flex;
+}
+
+.conversation-row.is-codex {
+  justify-content: flex-start;
+}
+
+.conversation-row.is-loop {
+  justify-content: flex-end;
+}
+
+.conversation-bubble {
+  width: min(78%, 760px);
+  border: 1px solid var(--line);
+  border-radius: 22px;
+  background: #ffffff;
+  box-shadow: 0 12px 28px rgba(17, 17, 17, 0.04);
+}
+
+.conversation-row.is-loop .conversation-bubble {
+  background: #f5f5f0;
+}
+
+.conversation-bubble summary {
+  display: grid;
+  gap: 8px;
+  padding: 15px 17px;
+  cursor: pointer;
+  list-style: none;
+}
+
+.conversation-bubble summary::-webkit-details-marker {
+  display: none;
+}
+
+.conversation-meta {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.conversation-bubble strong {
+  color: var(--text);
+  font-size: 15px;
+  line-height: 1.8;
+  word-break: break-word;
+}
+
+.conversation-bubble em {
+  color: var(--muted);
+  font-size: 12px;
+  font-style: normal;
+}
+
+.conversation-bubble p {
+  margin: 0;
+  padding: 0 17px 16px;
+  border-top: 1px solid #edede8;
+  color: var(--text);
+  font-size: 14px;
+  line-height: 1.8;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.conversation-empty {
+  padding: 18px;
+  border: 1px dashed var(--line-strong);
+  border-radius: 18px;
+  color: var(--muted);
+  background: #fbfbf8;
+  font-size: 14px;
+}
+
 .settings-form {
   display: grid;
   gap: 16px;
@@ -1033,6 +1144,15 @@ select {
 
   .workspace-section-head {
     flex-direction: column;
+  }
+
+  .conversation-bubble {
+    width: 92%;
+  }
+
+  .status-summary-row {
+    grid-template-columns: 1fr;
+    gap: 4px;
   }
 
   .settings-grid {
