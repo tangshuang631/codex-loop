@@ -6,6 +6,7 @@ import { loadLoopConfig, saveLoopConfig } from "../../../scripts/lib/config-load
 import { initializeRun } from "../../../scripts/lib/init-run.mjs";
 import { applyHeartbeat, decideLoopMode } from "../../../scripts/lib/state.mjs";
 import { readResolvedLoopProfile } from "./adapter-store.mjs";
+import { deleteAutomationForThread } from "./automation-store.mjs";
 import { dispatchThreadMessage as defaultDispatchThreadMessage } from "./codex-dispatcher.mjs";
 import { readLauncherStatus } from "./launcher-status.mjs";
 import { planLoopWithFallback } from "./ollama-loop-planner.mjs";
@@ -1607,12 +1608,23 @@ export async function deleteLoop(startDir = process.cwd(), payload = {}) {
     throw new Error("cannot delete the active loop");
   }
 
+  const targetLoop = registry.loops.find((loop) => loop.id === payload.loopId);
+  if (!targetLoop) {
+    throw new Error(`loop not found: ${payload.loopId}`);
+  }
+
+  const automationResult = await deleteAutomationForThread(targetLoop.threadBinding || {});
+
   const nextRegistry = {
     ...registry,
     loops: registry.loops.filter((loop) => loop.id !== payload.loopId),
   };
   await writeJson(registryPath, nextRegistry);
-  return summarizeLoopRegistry(nextRegistry);
+  return {
+    ...summarizeLoopRegistry(nextRegistry),
+    deletedLoopId: payload.loopId,
+    automationCleanup: automationResult,
+  };
 }
 
 export async function getLoopCreationAssistantState(startDir = process.cwd()) {

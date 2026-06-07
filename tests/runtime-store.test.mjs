@@ -508,6 +508,50 @@ test("deleteLoop removes an inactive loop from the registry", async () => {
   assert.equal(loops.currentLoopId, "run-a");
 });
 
+test("deleteLoop also removes the bound Codex automation when present", async () => {
+  const configRoot = await createWorkspace();
+  await createLoop(configRoot, {
+    loopName: "带自动化的循环",
+    runId: "run-delete-automation",
+    threadTitle: "带自动化的循环",
+  });
+
+  const loopsPath = path.join(configRoot, "codex_loop", "settings", "loops.json");
+  const loopsJson = JSON.parse(await fs.readFile(loopsPath, "utf8"));
+  loopsJson.loops = loopsJson.loops.map((loop) =>
+    loop.id === "run-delete-automation"
+      ? {
+          ...loop,
+          threadBinding: {
+            ...(loop.threadBinding || {}),
+            threadId: "thread-delete-1",
+            heartbeatAutomation: "automation-delete-1",
+          },
+        }
+      : loop,
+  );
+  await fs.writeFile(loopsPath, `${JSON.stringify(loopsJson, null, 2)}\n`, "utf8");
+
+  const automationRoot = path.join(os.homedir(), ".codex", "automations", "automation-delete-1");
+  await fs.mkdir(automationRoot, { recursive: true });
+  await fs.writeFile(
+    path.join(automationRoot, "automation.toml"),
+    [
+      'id = "automation-delete-1"',
+      'kind = "heartbeat"',
+      'target_thread_id = "thread-delete-1"',
+      'rrule = "RRULE:FREQ=MINUTELY;INTERVAL=10"',
+    ].join("\n"),
+    "utf8",
+  );
+
+  const result = await deleteLoop(configRoot, { loopId: "run-delete-automation" });
+
+  assert.equal(result.loops.some((loop) => loop.id === "run-delete-automation"), false);
+  assert.equal(result.automationCleanup.deleted, true);
+  await assert.rejects(fs.access(path.join(automationRoot, "automation.toml")));
+});
+
 test("loop creation assistant asks for missing project path first", async () => {
   const configRoot = await createWorkspace();
   const state = await getLoopCreationAssistantState(configRoot);

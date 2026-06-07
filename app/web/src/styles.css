@@ -286,6 +286,29 @@ select {
   gap: 14px;
 }
 
+.sidebar-disclosure {
+  border: 1px solid var(--line);
+  border-radius: 22px;
+  background: var(--panel);
+  overflow: hidden;
+}
+
+.sidebar-disclosure summary {
+  cursor: pointer;
+  list-style: none;
+  padding: 16px 18px;
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.sidebar-disclosure summary::-webkit-details-marker {
+  display: none;
+}
+
+.sidebar-disclosure[open] summary {
+  border-bottom: 1px solid var(--line);
+}
+
 .assistant-pane {
   gap: 16px;
 }
@@ -521,7 +544,7 @@ select {
 
 .workspace-columns {
   display: grid;
-  grid-template-columns: minmax(0, 1.2fr) minmax(300px, 0.8fr);
+  grid-template-columns: minmax(0, 1.45fr) minmax(280px, 0.75fr);
   gap: 18px;
   margin-top: 18px;
 }
@@ -649,6 +672,10 @@ select {
 .settings-form {
   display: grid;
   gap: 16px;
+}
+
+.compact-metric-grid {
+  gap: 10px;
 }
 
 .settings-grid {

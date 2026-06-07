@@ -100,6 +100,18 @@ async function readAutomationRecord(filePath) {
   }
 }
 
+async function deleteAutomationRecord(record) {
+  const automationDir = path.dirname(record.filePath);
+  await fs.rm(automationDir, { recursive: true, force: true });
+  return {
+    deleted: true,
+    id: record.data.id || "",
+    targetThreadId: record.data.target_thread_id || "",
+    filePath: record.filePath,
+    deletedAt: nowIso(),
+  };
+}
+
 async function resolveHeartbeatAutomation(thread) {
   const automationFiles = await findAutomationFiles(AUTOMATION_DIR);
   const records = (
@@ -191,4 +203,18 @@ export async function updateAutomationIntervalForThread(thread = {}, intervalMin
     updated: true,
     syncedAt: nowIso(),
   };
+}
+
+export async function deleteAutomationForThread(thread = {}) {
+  const record = await resolveHeartbeatAutomation(thread);
+  if (!record) {
+    return {
+      deleted: false,
+      id: "",
+      targetThreadId: String(thread?.threadId || "").trim(),
+      reason: "missing",
+    };
+  }
+
+  return deleteAutomationRecord(record);
 }

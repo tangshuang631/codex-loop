@@ -136,10 +136,10 @@ function SidebarSummary({ currentLoop, loopRegistry, snapshot, pollStatus }) {
   return (
     <div className="sidebar-summary-card">
       <span className="sidebar-summary-label">当前焦点</span>
-      <strong>{formatValue(currentLoop?.name || snapshot?.config?.loopName, "未命名 loop")}</strong>
+      <strong>{formatValue(currentLoop?.name || snapshot?.config?.loopName, "未命名任务")}</strong>
       <p>{formatValue(currentLoop?.projectName || snapshot?.config?.projectName, "未命名项目")}</p>
       <div className="sidebar-summary-meta">
-        <span>{loopRegistry.loops.length} 个 loop</span>
+        <span>{loopRegistry.loops.length} 个任务</span>
         <span>{snapshot?.thread?.threadId ? "已绑定线程" : "待绑定线程"}</span>
         <span>{pollStatus}</span>
       </div>
@@ -177,9 +177,9 @@ function LoopCreationAssistantPane({
 
   return (
     <div className="sidebar-form assistant-pane">
-      <h3>对话创建 Loop</h3>
+      <h3>对话创建任务</h3>
       <p className="sidebar-help">
-        像和助手对话一样创建 loop。这里会自动检测项目路径、Git、规则文档和推荐分支，再生成左侧可管理的新 loop。
+        直接描述你想推进的项目和目标，这里会帮你整理成本地任务，并放进左侧列表。
       </p>
 
       {assistantState?.status === "completed" && createdLoop ? (
@@ -204,7 +204,7 @@ function LoopCreationAssistantPane({
             <div className="assistant-draft-grid">
               <Metric label="项目路径" value={formatValue(draft.workspaceRoot, "等待填写")} muted={!draft.workspaceRoot} />
               <Metric label="项目名" value={formatValue(draft.projectName, "等待填写")} muted={!draft.projectName} />
-              <Metric label="Loop 名称" value={formatValue(draft.loopName, "等待填写")} muted={!draft.loopName} />
+              <Metric label="任务名称" value={formatValue(draft.loopName, "等待填写")} muted={!draft.loopName} />
               <Metric label="分支" value={formatValue(draft.branch, "等待填写")} muted={!draft.branch} />
               <Metric
                 label="Git 状态"
@@ -224,7 +224,7 @@ function LoopCreationAssistantPane({
                   title={plan.objectiveSummary}
                   body={[
                     `建议项目名：${formatValue(plan.suggestedProjectName, "暂无")}`,
-                    `建议 Loop 名：${formatValue(plan.suggestedLoopName, "暂无")}`,
+                    `建议任务名：${formatValue(plan.suggestedLoopName, "暂无")}`,
                     `建议分支：${formatValue(plan.suggestedBranch, "暂无")}`,
                   ].join("\n")}
                 />
@@ -259,7 +259,7 @@ function LoopCreationAssistantPane({
               value={assistantAnswer}
               placeholder={
                 currentQuestion.id === "project_name" && draft.workspaceRoot
-                  ? "也可以直接描述你的自动化 loop 规划意图"
+                  ? "也可以直接描述你的自动续跑规划意图"
                   : currentQuestion.placeholder || "输入你的回答"
               }
               onChange={(event) => setAssistantAnswer(event.target.value)}
@@ -280,7 +280,7 @@ function LoopCreationAssistantPane({
               <p key={doc}>规则：{doc}</p>
             ))}
             {draft.docs.devDocs?.map((doc) => (
-              <p key={doc}>开发：{doc}</p>
+              <p key={doc}>说明：{doc}</p>
             ))}
             {draft.docs.notes?.map((note) => (
               <p key={note}>{note}</p>
@@ -288,6 +288,298 @@ function LoopCreationAssistantPane({
           </div>
         </details>
       ) : null}
+    </div>
+  );
+}
+
+function ManagePane({
+  threadForm,
+  setThreadForm,
+  settingsForm,
+  setSettingsForm,
+  automationStatus,
+  launcherPhase,
+  launcherWebUrl,
+  remoteAccessStatus,
+  remoteTransport,
+  ollamaModels,
+  promptGeneratorStatus,
+  conversationLanguage,
+  healthIssues,
+  latestEvent,
+  snapshot,
+  submitting,
+  withSubmit,
+}) {
+  return (
+    <div className="sidebar-pane-stack">
+      <details className="sidebar-disclosure">
+        <summary>线程绑定</summary>
+        <form
+          className="sidebar-form"
+          onSubmit={(event) => {
+            event.preventDefault();
+            void withSubmit(async () => {
+              await requestJson("/thread", {
+                method: "POST",
+                body: JSON.stringify(threadForm),
+              });
+            });
+          }}
+        >
+          <p className="sidebar-help">
+            只有首次绑定或调整目标窗口时才需要这里。日常使用时可以一直收起。
+          </p>
+          <label>
+            <span>项目显示名</span>
+            <input
+              value={threadForm.workspaceName}
+              onChange={(event) =>
+                setThreadForm((current) => ({
+                  ...current,
+                  workspaceName: event.target.value,
+                }))
+              }
+            />
+          </label>
+          <label>
+            <span>窗口标题</span>
+            <input
+              value={threadForm.threadTitle}
+              onChange={(event) =>
+                setThreadForm((current) => ({
+                  ...current,
+                  threadTitle: event.target.value,
+                }))
+              }
+            />
+          </label>
+          <label>
+            <span>线程编号</span>
+            <input
+              value={threadForm.threadId}
+              onChange={(event) =>
+                setThreadForm((current) => ({
+                  ...current,
+                  threadId: event.target.value,
+                }))
+              }
+            />
+          </label>
+          <label>
+            <span>备注</span>
+            <textarea
+              rows={3}
+              value={threadForm.note}
+              onChange={(event) =>
+                setThreadForm((current) => ({
+                  ...current,
+                  note: event.target.value,
+                }))
+              }
+            />
+          </label>
+          <label className="toggle-row">
+            <input
+              type="checkbox"
+              checked={threadForm.singleThreadMode}
+              onChange={(event) =>
+                setThreadForm((current) => ({
+                  ...current,
+                  singleThreadMode: event.target.checked,
+                }))
+              }
+            />
+            <span>只在当前线程里持续续发</span>
+          </label>
+          <button type="submit" className="primary-button" disabled={submitting}>
+            保存绑定
+          </button>
+        </form>
+      </details>
+
+      <details className="sidebar-disclosure">
+        <summary>任务设置</summary>
+        <form
+          className="sidebar-form"
+          onSubmit={(event) => {
+            event.preventDefault();
+            void withSubmit(async () => {
+              await requestJson("/overrides", {
+                method: "POST",
+                body: JSON.stringify({
+                  conversation: {
+                    language: settingsForm.conversationLanguage,
+                    promptGenerator: {
+                      enabled: settingsForm.promptGeneratorEnabled,
+                      provider: "ollama",
+                      model: settingsForm.promptGeneratorModel,
+                      baseUrl: settingsForm.promptGeneratorBaseUrl,
+                    },
+                  },
+                }),
+              });
+              if (automationStatus?.connected) {
+                await requestJson("/automation", {
+                  method: "POST",
+                  body: JSON.stringify({
+                    intervalMinutes: Number(settingsForm.intervalMinutes),
+                  }),
+                });
+              }
+            });
+          }}
+        >
+          <div className="settings-grid">
+            <label>
+              <span>默认对话语言</span>
+              <select
+                value={settingsForm.conversationLanguage}
+                onChange={(event) =>
+                  setSettingsForm((current) => ({
+                    ...current,
+                    conversationLanguage: event.target.value,
+                  }))
+                }
+              >
+                <option value="zh-CN">中文优先</option>
+                <option value="en">英文</option>
+              </select>
+            </label>
+            <label>
+              <span>自动续跑间隔（分钟）</span>
+              <input
+                type="number"
+                min="1"
+                value={settingsForm.intervalMinutes}
+                onChange={(event) =>
+                  setSettingsForm((current) => ({
+                    ...current,
+                    intervalMinutes: event.target.value,
+                  }))
+                }
+              />
+            </label>
+          </div>
+
+          <details className="workspace-details">
+            <summary>高级续发生成</summary>
+            <div className="settings-grid">
+              <label className="toggle-row">
+                <input
+                  type="checkbox"
+                  checked={settingsForm.promptGeneratorEnabled}
+                  onChange={(event) =>
+                    setSettingsForm((current) => ({
+                      ...current,
+                      promptGeneratorEnabled: event.target.checked,
+                    }))
+                  }
+                />
+                <span>启用本地模型生成下一条续发</span>
+              </label>
+              <label>
+                <span>模型名称</span>
+                <input
+                  value={settingsForm.promptGeneratorModel}
+                  onChange={(event) =>
+                    setSettingsForm((current) => ({
+                      ...current,
+                      promptGeneratorModel: event.target.value,
+                    }))
+                  }
+                />
+              </label>
+              <label>
+                <span>本地模型列表</span>
+                <select
+                  value={
+                    ollamaModels.some((model) => model.name === settingsForm.promptGeneratorModel)
+                      ? settingsForm.promptGeneratorModel
+                      : ""
+                  }
+                  onChange={(event) => {
+                    if (!event.target.value) return;
+                    setSettingsForm((current) => ({
+                      ...current,
+                      promptGeneratorModel: event.target.value,
+                    }));
+                  }}
+                >
+                  <option value="">从本地模型中选择</option>
+                  {ollamaModels.map((model) => (
+                    <option key={model.name} value={model.name}>
+                      {model.name}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label>
+                <span>模型地址</span>
+                <input
+                  value={settingsForm.promptGeneratorBaseUrl}
+                  onChange={(event) =>
+                    setSettingsForm((current) => ({
+                      ...current,
+                      promptGeneratorBaseUrl: event.target.value,
+                    }))
+                  }
+                />
+              </label>
+            </div>
+          </details>
+
+          <div className="metric-grid compact-metric-grid">
+            <Metric label="语言" value={conversationLanguage} />
+            <Metric
+              label="自动节奏"
+              value={automationStatus?.connected ? `${automationStatus.intervalMinutes} 分钟` : "未连接"}
+              muted={!automationStatus?.connected}
+            />
+            <Metric label="续发生成" value={promptGeneratorStatus} />
+            <Metric label="启动状态" value={launcherPhase} />
+          </div>
+
+          <button type="submit" className="primary-button" disabled={submitting}>
+            保存设置
+          </button>
+        </form>
+      </details>
+
+      <details className="sidebar-disclosure">
+        <summary>运行健康</summary>
+        <div className="sidebar-form">
+          <div className="metric-grid compact-metric-grid">
+            <Metric label="整体状态" value={snapshot?.health?.ok ? "正常" : "需要关注"} />
+            <Metric label="最近事件" value={latestEvent} />
+            <Metric label="访问方式" value={remoteTransport} />
+            <Metric label="页面地址" value={launcherWebUrl} />
+          </div>
+          <div className="detail-stack">
+            <DetailCard
+              meta="异常提醒"
+              title={healthIssues.length ? "发现需要处理的状态" : "当前稳定"}
+              body={
+                healthIssues.length
+                  ? healthIssues.join("\n")
+                  : "没有发现明显异常，可以继续观察运行情况。"
+              }
+              quiet
+            />
+            <DetailCard
+              meta="远程查看"
+              title={
+                remoteAccessStatus?.remoteReady ? "已具备基础查看条件" : "尚未准备跨网络入口"
+              }
+              body={formatValue(
+                (remoteAccessStatus?.recommendedSteps || []).join("\n"),
+                "如需手机跨网络查看，可按建议步骤接入本地远程入口。",
+              )}
+              quiet
+            />
+          </div>
+        </div>
+      </details>
     </div>
   );
 }
@@ -512,6 +804,14 @@ export function App() {
       : pollState.lastSuccessAt
         ? `更新于 ${formatTime(pollState.lastSuccessAt)}`
         : "等待首轮同步";
+  const threadLabel =
+    snapshot?.thread?.threadTitle || snapshot?.thread?.workspaceName || "尚未绑定可见窗口";
+  const changeSummary =
+    snapshot?.thread?.lastAssistantActionSummary ||
+    mobileView?.summary?.recentSummary ||
+    latestSummary;
+  const mobileSummary =
+    mobileView?.summary?.recentSummary || latestSummary;
 
   if (loading && !snapshot) {
     return <SkeletonBlock />;
@@ -542,9 +842,9 @@ export function App() {
 
             <div className="sidebar-panes">
               {[
-                ["loops", "Loop"],
+                ["loops", "任务"],
                 ["create", "创建"],
-                ["thread", "线程"],
+                ["manage", "管理"],
               ].map(([id, label]) => (
                 <button
                   key={id}
@@ -617,17 +917,17 @@ export function App() {
                                         <button
                                           type="button"
                                           onClick={() => {
-                                            setActiveSidebarPane("thread");
+                                            setActiveSidebarPane("manage");
                                             setLoopMenuOpenId("");
                                           }}
                                         >
-                                          编辑线程绑定
+                                          打开管理项
                                         </button>
                                         <button
                                           type="button"
                                           onClick={() =>
                                             withSubmit(async () => {
-                                              const nextName = window.prompt("输入新的 loop 名称", loop.name);
+                                              const nextName = window.prompt("输入新的任务名称", loop.name);
                                               if (!nextName || nextName === loop.name) return;
                                               await requestJson("/rename-loop", {
                                                 method: "POST",
@@ -637,7 +937,7 @@ export function App() {
                                             })
                                           }
                                         >
-                                          重命名当前 loop
+                                          重命名任务
                                         </button>
                                         {!loop.isCurrent ? (
                                           <button
@@ -652,7 +952,7 @@ export function App() {
                                               })
                                             }
                                           >
-                                            删除这个 loop
+                                            删除这个任务
                                           </button>
                                         ) : null}
                                       </div>
@@ -688,91 +988,26 @@ export function App() {
               />
             ) : null}
 
-            {activeSidebarPane === "thread" ? (
-              <div className="sidebar-pane-stack">
-                <form
-                  className="sidebar-form"
-                  onSubmit={(event) => {
-                    event.preventDefault();
-                    void withSubmit(async () => {
-                      await requestJson("/thread", {
-                        method: "POST",
-                        body: JSON.stringify(threadForm),
-                      });
-                    });
-                  }}
-                >
-                  <h3>线程绑定</h3>
-                  <p className="sidebar-help">
-                    这里保留详细低代码信息，方便你定位 Codex 桌面端真实线程，并让 loop 的续发记录显示在那个可见窗口里。
-                  </p>
-                  <label>
-                    <span>项目显示名</span>
-                    <input
-                      value={threadForm.workspaceName}
-                      onChange={(event) =>
-                        setThreadForm((current) => ({
-                          ...current,
-                          workspaceName: event.target.value,
-                        }))
-                      }
-                    />
-                  </label>
-                  <label>
-                    <span>线程标题</span>
-                    <input
-                      value={threadForm.threadTitle}
-                      onChange={(event) =>
-                        setThreadForm((current) => ({
-                          ...current,
-                          threadTitle: event.target.value,
-                        }))
-                      }
-                    />
-                  </label>
-                  <label>
-                    <span>线程 ID</span>
-                    <input
-                      value={threadForm.threadId}
-                      onChange={(event) =>
-                        setThreadForm((current) => ({
-                          ...current,
-                          threadId: event.target.value,
-                        }))
-                      }
-                    />
-                  </label>
-                  <label>
-                    <span>说明备注</span>
-                    <textarea
-                      rows={4}
-                      value={threadForm.note}
-                      onChange={(event) =>
-                        setThreadForm((current) => ({
-                          ...current,
-                          note: event.target.value,
-                        }))
-                      }
-                    />
-                  </label>
-                  <label className="toggle-row">
-                    <input
-                      type="checkbox"
-                      checked={threadForm.singleThreadMode}
-                      onChange={(event) =>
-                        setThreadForm((current) => ({
-                          ...current,
-                          singleThreadMode: event.target.checked,
-                        }))
-                      }
-                    />
-                    <span>单线程续发模式</span>
-                  </label>
-                  <button type="submit" className="primary-button" disabled={submitting}>
-                    保存线程绑定
-                  </button>
-                </form>
-              </div>
+            {activeSidebarPane === "manage" ? (
+              <ManagePane
+                threadForm={threadForm}
+                setThreadForm={setThreadForm}
+                settingsForm={settingsForm}
+                setSettingsForm={setSettingsForm}
+                automationStatus={automationStatus}
+                launcherPhase={launcherPhase}
+                launcherWebUrl={launcherWebUrl}
+                remoteAccessStatus={remoteAccessStatus}
+                remoteTransport={remoteTransport}
+                ollamaModels={ollamaModels}
+                promptGeneratorStatus={promptGeneratorStatus}
+                conversationLanguage={conversationLanguage}
+                healthIssues={healthIssues}
+                latestEvent={latestEvent}
+                snapshot={snapshot}
+                submitting={submitting}
+                withSubmit={withSubmit}
+              />
             ) : null}
           </>
         ) : (
@@ -805,9 +1040,9 @@ export function App() {
             <span className="workspace-hero-project">
               {formatValue(currentLoop?.projectName || snapshot?.config?.projectName, "当前项目")}
             </span>
-            <h1>{formatValue(currentLoop?.name || snapshot?.config?.loopName, "当前 loop")}</h1>
+            <h1>{formatValue(currentLoop?.name || snapshot?.config?.loopName, "当前任务")}</h1>
             <p>
-              首页只聚焦当前 loop 的真实进度、对话记录和策略卡片。左边负责管理所有 loop，右边负责把当前 loop 跑稳、看清、可控。
+              首页只保留你真正会盯着看的内容：运行状态、对话记录、最近进展。其它配置都收进左侧，避免像后台表单一样堆满屏幕。
             </p>
             <div className="workspace-status-row">
               <StatusPill text={modeText} active={snapshot?.state?.mode === "running"} />
@@ -830,13 +1065,13 @@ export function App() {
                   {snapshot?.thread?.continuationStatus === "dispatching"
                     ? "Codex 正在思考并准备下一条消息"
                     : snapshot?.state?.mode === "running"
-                      ? "loop 正在后台持续推进"
+                      ? "任务正在后台持续推进"
                       : "当前没有活跃续发"}
                 </strong>
                 <p>
                   {snapshot?.thread?.continuationStatus === "dispatching"
                     ? "前端会持续刷新状态，避免长任务时误以为卡死。"
-                    : "即使当前没有可见输出，前端也会维持轻量轮询和健康检查，确保长时间运行更稳定。"}
+                    : "即使暂时没有新内容，界面也会保持轻量轮询与状态提示，避免误判卡死。"}
                 </p>
               </div>
             </div>
@@ -855,8 +1090,8 @@ export function App() {
         <div className="workspace-columns">
           <div className="workspace-primary">
             <Section
-              title="当前状态"
-              desc="启动、停止、手动续跑和当前摘要都集中在这里。"
+              title="运行面板"
+              desc="开始、停止、续跑，以及当前任务的关键信号都集中在这里。"
               actions={
                 <>
                   <button
@@ -891,7 +1126,7 @@ export function App() {
                       withSubmit(async () => {
                         await requestJson("/stop", {
                           method: "POST",
-                          body: JSON.stringify({ reason: "manual stop from console" }),
+                          body: JSON.stringify({ reason: "manual stop from dashboard" }),
                         });
                       })
                     }
@@ -904,19 +1139,23 @@ export function App() {
               <div className="metric-grid">
                 <Metric label="当前模式" value={modeText} />
                 <Metric label="续发状态" value={continuationStatus} />
-                <Metric label="线程标题" value={formatValue(snapshot?.thread?.threadTitle, "未绑定线程")} muted={!snapshot?.thread?.threadTitle} />
-                <Metric label="线程 ID" value={formatValue(snapshot?.thread?.threadId, "未绑定")} muted={!snapshot?.thread?.threadId} />
+                <Metric label="可见窗口" value={threadLabel} muted={!snapshot?.thread?.threadTitle} />
+                <Metric
+                  label="最后异常"
+                  value={formatValue(snapshot?.thread?.lastContinuationError, "无")}
+                  muted={!snapshot?.thread?.lastContinuationError}
+                />
               </div>
               <div className="detail-stack">
                 <DetailCard
                   meta="最新摘要"
                   title={formatValue(snapshot?.thread?.latestCodexSummary || latestSummary, "等待首轮输出")}
-                  body={formatValue(snapshot?.thread?.lastAssistantActionSummary || latestSummary, "等待下一轮反馈")}
+                  body={formatValue(changeSummary, "等待下一轮反馈")}
                 />
                 <DetailCard
                   meta="当前建议"
                   title={formatValue(suggestedAction, "等待更新")}
-                  body={formatValue(bindingNote, "暂无")}
+                  body={formatValue(strategy.contextCard?.nextAction || bindingNote, "暂无")}
                   quiet
                 />
               </div>
@@ -924,19 +1163,19 @@ export function App() {
 
             <Section
               title="对话记录"
-              desc="这里集中看当前 loop 最近发给 Codex 的消息、最新反馈，以及手机端看到的聊天镜像。"
+              desc="这里按时间查看最近发送内容、最新回复摘要，以及对话镜像。"
             >
               <div className="detail-stack">
                 <DetailCard
-                  meta="最近发送给 Codex"
+                  meta="最近发出的消息"
                   title={continuationStatus}
                   body={formatValue(latestPrompt, "暂时还没有续发内容。")}
                 />
                 <DetailCard
-                  meta="最新 Codex 摘要"
+                  meta="最新回复摘要"
                   title={formatValue(snapshot?.thread?.latestCodexSummary, "暂无")}
                   body={formatValue(
-                    snapshot?.thread?.lastAssistantActionSummary || latestSummary,
+                    changeSummary,
                     "等待下一次可见反馈。",
                   )}
                   quiet
@@ -961,221 +1200,31 @@ export function App() {
                 )}
               </div>
             </Section>
-
-            <Section
-              title="当前设置"
-              desc="默认中文优先。自动化间隔、Ollama 模型与提示词生成都在这里。"
-            >
-              <form
-                className="settings-form"
-                onSubmit={(event) => {
-                  event.preventDefault();
-                  void withSubmit(async () => {
-                    await requestJson("/overrides", {
-                      method: "POST",
-                      body: JSON.stringify({
-                        conversation: {
-                          language: settingsForm.conversationLanguage,
-                          promptGenerator: {
-                            enabled: settingsForm.promptGeneratorEnabled,
-                            provider: "ollama",
-                            model: settingsForm.promptGeneratorModel,
-                            baseUrl: settingsForm.promptGeneratorBaseUrl,
-                          },
-                        },
-                      }),
-                    });
-                    if (automationStatus?.connected) {
-                      await requestJson("/automation", {
-                        method: "POST",
-                        body: JSON.stringify({
-                          intervalMinutes: Number(settingsForm.intervalMinutes),
-                        }),
-                      });
-                    }
-                  });
-                }}
-              >
-                <div className="settings-grid">
-                  <label>
-                    <span>默认续发语言</span>
-                    <select
-                      value={settingsForm.conversationLanguage}
-                      onChange={(event) =>
-                        setSettingsForm((current) => ({
-                          ...current,
-                          conversationLanguage: event.target.value,
-                        }))
-                      }
-                    >
-                      <option value="zh-CN">中文优先</option>
-                      <option value="en">英文</option>
-                    </select>
-                  </label>
-                  <label>
-                    <span>自动化间隔（分钟）</span>
-                    <input
-                      type="number"
-                      min="1"
-                      value={settingsForm.intervalMinutes}
-                      onChange={(event) =>
-                        setSettingsForm((current) => ({
-                          ...current,
-                          intervalMinutes: event.target.value,
-                        }))
-                      }
-                    />
-                  </label>
-                </div>
-
-                <details className="workspace-details" open={settingsForm.promptGeneratorEnabled}>
-                  <summary>高级设置：动态续发生成</summary>
-                  <div className="settings-grid">
-                    <label className="toggle-row">
-                      <input
-                        type="checkbox"
-                        checked={settingsForm.promptGeneratorEnabled}
-                        onChange={(event) =>
-                          setSettingsForm((current) => ({
-                            ...current,
-                            promptGeneratorEnabled: event.target.checked,
-                          }))
-                        }
-                      />
-                      <span>启用本地 Ollama 生成下一条消息</span>
-                    </label>
-                    <label>
-                      <span>模型名称</span>
-                      <input
-                        value={settingsForm.promptGeneratorModel}
-                        onChange={(event) =>
-                          setSettingsForm((current) => ({
-                            ...current,
-                            promptGeneratorModel: event.target.value,
-                          }))
-                        }
-                      />
-                    </label>
-                    <label>
-                      <span>本地模型列表</span>
-                      <select
-                        value={
-                          ollamaModels.some((model) => model.name === settingsForm.promptGeneratorModel)
-                            ? settingsForm.promptGeneratorModel
-                            : ""
-                        }
-                        onChange={(event) => {
-                          if (!event.target.value) return;
-                          setSettingsForm((current) => ({
-                            ...current,
-                            promptGeneratorModel: event.target.value,
-                          }));
-                        }}
-                      >
-                        <option value="">从本地 Ollama 模型中选择</option>
-                        {ollamaModels.map((model) => (
-                          <option key={model.name} value={model.name}>
-                            {model.name}
-                          </option>
-                        ))}
-                      </select>
-                    </label>
-                    <label>
-                      <span>Ollama Base URL</span>
-                      <input
-                        value={settingsForm.promptGeneratorBaseUrl}
-                        onChange={(event) =>
-                          setSettingsForm((current) => ({
-                            ...current,
-                            promptGeneratorBaseUrl: event.target.value,
-                          }))
-                        }
-                      />
-                    </label>
-                  </div>
-                </details>
-
-                <div className="metric-grid">
-                  <Metric label="语言策略" value={conversationLanguage} />
-                  <Metric label="自动化节奏" value={automationSchedule} muted={!automationStatus?.connected} />
-                  <Metric label="动态续发生成" value={promptGeneratorStatus} />
-                  <Metric label="启动状态" value={launcherPhase} />
-                </div>
-
-                <button type="submit" className="primary-button" disabled={submitting}>
-                  保存当前设置
-                </button>
-              </form>
-            </Section>
           </div>
 
           <aside className="workspace-secondary">
             <Section
-              title="策略卡片"
-              desc="这是 loop 强于原生自动化的关键：每次续发前都明确理由、节奏和收尾条件。"
+              title="进展概览"
+              desc="这里总结为什么继续、接下来做什么，以及需要什么时候停下来。"
             >
               <div className="metric-grid">
                 <Metric label="为什么继续" value={formatValue(strategy.contextCard?.whyContinue, "暂无")} />
                 <Metric label="预计下一步" value={formatValue(strategy.contextCard?.nextAction, "暂无")} />
-                <Metric label="节奏策略" value={formatValue(strategy.rhythmCard?.promptGeneratorMode, "template")} />
+                <Metric label="续发方式" value={settingsForm.promptGeneratorEnabled ? "本地模型增强" : "默认模板"} />
                 <Metric label="暂停 / 收尾条件" value={formatValue(strategy.guardrailCard?.stopRule, "暂无")} />
               </div>
-            </Section>
-
-            <Section
-              title="手机查看"
-              desc="手机上重点看摘要、策略、最近消息和聊天记录。"
-            >
               <div className="detail-stack">
-                <DetailCard title="线程绑定提示" body={bindingNote} />
-                <DetailCard title="当前建议动作" body={suggestedAction} />
                 <DetailCard
-                  title="手机端最近摘要"
-                  body={formatValue(mobileView?.summary?.recentSummary || latestSummary, "暂无摘要")}
+                  meta="最近改动"
+                  title={formatValue(changeSummary, "暂无")}
+                  body={formatValue(mobileSummary, "等待新的摘要更新。")}
                 />
-              </div>
-            </Section>
-
-            <Section
-              title="远程访问"
-              desc="不部署云服务器时，最简单的跨网络访问方案是 Tailscale。"
-            >
-              <div className="metric-grid">
-                <Metric label="推荐方案" value={remoteTransport} />
-                <Metric
-                  label="当前就绪"
-                  value={remoteAccessStatus?.remoteReady ? "已具备基础条件" : "尚未安装远程入口"}
+                <DetailCard
+                  meta="窗口说明"
+                  title={formatValue(bindingNote, "暂无")}
+                  body={formatValue(suggestedAction, "等待下一步")}
+                  quiet
                 />
-                <Metric label="前端地址" value={launcherWebUrl} />
-                <Metric
-                  label="最后异常"
-                  value={formatValue(snapshot?.thread?.lastContinuationError, "无")}
-                  muted={!snapshot?.thread?.lastContinuationError}
-                />
-              </div>
-              <details className="workspace-details">
-                <summary>展开最简接入步骤</summary>
-                <div className="remote-steps">
-                  {(remoteAccessStatus?.recommendedSteps || []).map((step) => (
-                    <p key={step}>{step}</p>
-                  ))}
-                </div>
-              </details>
-            </Section>
-
-            <Section
-              title="健康检查"
-              desc="这里只显示真正有帮助的信息，其它噪音都收起来。"
-            >
-              <div className="metric-grid">
-                <Metric label="整体结果" value={snapshot?.health?.ok ? "正常" : "异常"} />
-                <Metric
-                  label="异常项"
-                  value={healthIssues.length ? healthIssues.join(" / ") : "无"}
-                  muted={!healthIssues.length}
-                />
-                <Metric label="最近事件" value={latestEvent} />
-                <Metric label="接口地址" value={formatValue(launcherStatus?.apiBaseUrl, "暂无")} />
               </div>
             </Section>
           </aside>
