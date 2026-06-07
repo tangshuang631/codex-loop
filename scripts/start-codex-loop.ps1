@@ -28,8 +28,10 @@ function Stop-ExistingLoopProcesses {
   param([Parameter(Mandatory = $true)][string]$LoopRoot)
 
   $normalizedRoot = $LoopRoot.ToLowerInvariant()
+  $currentPid = $PID
   $candidates = Get-CimInstance Win32_Process | Where-Object {
     ($_.Name -ieq "cmd.exe" -or $_.Name -ieq "node.exe") -and
+    $_.ProcessId -ne $currentPid -and
     $_.CommandLine -and
     (
       $_.CommandLine.ToLowerInvariant().Contains($normalizedRoot) -or
@@ -43,7 +45,11 @@ function Stop-ExistingLoopProcesses {
     return
   }
 
-  $ids = @($candidates | Select-Object -ExpandProperty ProcessId)
+  $ids = @($candidates | Select-Object -ExpandProperty ProcessId | Select-Object -Unique)
+  if (-not $ids.Count) {
+    return
+  }
+
   Write-Step "Stopping existing codex-loop dev processes: $($ids -join ', ')"
   foreach ($id in $ids) {
     cmd /c "taskkill /PID $id /T /F >nul 2>nul" | Out-Null
@@ -79,6 +85,7 @@ try {
   } else {
     $null
   }
+
   $workspaceRoot = if ($env:CODEX_LOOP_WORKSPACE_ROOT) {
     $env:CODEX_LOOP_WORKSPACE_ROOT
   } elseif ($localConfig -and $localConfig.workspaceRoot) {
@@ -86,7 +93,7 @@ try {
   } elseif ($config.workspaceRoot) {
     $config.workspaceRoot
   } else {
-    throw "workspaceRoot is required in config.local.json or CODEX_LOOP_WORKSPACE_ROOT."
+    $loopRoot
   }
 
   $workspaceRoot = (Resolve-Path $workspaceRoot).Path
@@ -131,14 +138,24 @@ try {
 
   Write-Info "Expected console URL: http://${hostName}:$webPort"
   Write-Info "Use one persistent Codex thread for this loop."
-  Write-Info "Read these first in the target workspace:"
-  Write-Host "        1. OPENCOW_CORE_RULES.md"
-  Write-Host "        2. docs\v1.0"
-  Write-Host "        3. 开发进度清单2026.6.6-22-48.md"
+  if ($checkResult.requiredFiles.projectRules -or $checkResult.requiredFiles.docsRoot -or $checkResult.requiredFiles.progressPath) {
+    Write-Info "Read these first in the target workspace:"
+    if ($checkResult.requiredFiles.projectRules) {
+      Write-Host "        1. $($checkResult.requiredFiles.projectRules)"
+    }
+    if ($checkResult.requiredFiles.docsRoot) {
+      Write-Host "        2. $($checkResult.requiredFiles.docsRoot)"
+    }
+    if ($checkResult.requiredFiles.progressPath) {
+      Write-Host "        3. $($checkResult.requiredFiles.progressPath)"
+    }
+  } else {
+    Write-Info "No project-specific rule bundle is locked yet. Create or select a real loop in the sidebar first."
+  }
   Write-Step "Opening codex-loop console window..."
 
   $command = "chcp 65001>nul && cd /d `"$loopRoot`" && set `"CODEX_LOOP_HOST=$hostName`" && set `"CODEX_LOOP_PORT=$apiPort`" && set `"CODEX_LOOP_WEB_PORT=$webPort`" && npm run dev"
-  Start-Process -FilePath "cmd.exe" -ArgumentList "/k", $command -WorkingDirectory $loopRoot
+  Start-Process -FilePath "cmd.exe" -ArgumentList "/k", $command -WorkingDirectory $loopRoot -WindowStyle Normal
 
   Write-Ok "codex-loop launch requested."
   Write-Info "If the browser does not open automatically, visit http://${hostName}:$webPort manually."

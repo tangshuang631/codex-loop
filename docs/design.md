@@ -33,6 +33,27 @@ The Codex thread owns:
 - the running narration of what Codex said and did
 - the place where heartbeat continuations should return
 
+## Advanced Prompt Generation
+
+The default continuation path should stay deterministic and stable:
+
+- build a structured fallback prompt from loop state
+- continue the same visible Codex thread
+- keep the local runtime as the recovery layer
+
+An optional advanced layer may generate a more natural next user message before dispatch.
+
+Rules for that layer:
+
+- default is off
+- local-only by default
+- current supported provider is `ollama`
+- generation must use the latest loop summary, thread summary, and selected rule docs
+- failure must automatically fall back to the stable template prompt
+- fallback must be visible in local state so operators can diagnose generator failures
+
+This keeps the product safe by default while still allowing a more human-like continuation mode when users explicitly enable it.
+
 ## Runtime layout
 
 Each run lives under:
@@ -91,3 +112,25 @@ For the best Codex-native experience:
 5. Keep local logs as a mirror and recovery aid.
 
 This is the closest model to "it looks like I personally kept chatting with Codex while it kept working."
+
+## Differentiation From Native Automation
+
+`codex_loop` should stay visibly stronger than the native Codex automation surface.
+
+Current differentiation targets:
+
+- continuation context cards before every next turn
+- explicit rhythm strategy for the loop, not just a raw schedule
+- visible pause, continue, and graceful-finalize conditions
+- mobile-readable recent prompt and transcript mirror
+- lightweight remote access path that does not require a custom cloud server
+
+Native automation is good at waking a thread up on a schedule.
+
+`codex_loop` should be stronger at:
+
+- operational visibility
+- recovery
+- guided continuation quality
+- long-task pacing
+- phone-side progress checking

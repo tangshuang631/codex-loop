@@ -29,7 +29,7 @@ export async function resolveWorkspaceAndLoopRoot(startDir = process.cwd()) {
     return {
       workspaceRoot: config.workspaceRoot
         ? path.resolve(config.workspaceRoot)
-        : path.dirname(startDir),
+        : startDir,
       codexLoopRoot: startDir,
     };
   }

@@ -9,8 +9,10 @@ import {
   deleteLoop,
   exportLoopSummary,
   ensureLoopArtifacts,
+  getLoopCreationAssistantState,
   listLoops,
   readLoopSnapshot,
+  replyLoopCreationAssistant,
   runLoopTurn,
   startRun,
   selectLoop,
@@ -20,6 +22,7 @@ import {
   saveThreadBinding,
   syncCodexThreadMirror,
 } from "../app/server/lib/runtime-store.mjs";
+import { saveUserOverrides } from "../app/server/lib/adapter-store.mjs";
 
 function buildConfig() {
   return {
@@ -73,7 +76,7 @@ test("saveThreadBinding persists project and title display metadata", async () =
 
   await ensureLoopArtifacts(configRoot);
   await saveThreadBinding(configRoot, {
-    workspaceName: "opencow",
+    workspaceName: "demo",
     threadTitle: "\u8bc4\u4f30\u957f\u65f6\u5f00\u53d1\u65b9\u6848",
     threadId: "thread-123",
     singleThreadMode: true,
@@ -81,7 +84,7 @@ test("saveThreadBinding persists project and title display metadata", async () =
   });
 
   const snapshot = await readLoopSnapshot(configRoot);
-  assert.equal(snapshot.thread.workspaceName, "opencow");
+  assert.equal(snapshot.thread.workspaceName, "demo");
   assert.equal(snapshot.thread.threadTitle, "\u8bc4\u4f30\u957f\u65f6\u5f00\u53d1\u65b9\u6848");
   assert.equal(snapshot.thread.latestMode, "running");
 });
@@ -154,8 +157,8 @@ test("runLoopTurn sends the next message to the bound Codex thread and stores vi
   const configRoot = await createWorkspace();
   await ensureLoopArtifacts(configRoot);
   await saveThreadBinding(configRoot, {
-    workspaceName: "opencow",
-    threadTitle: "按清单继续开发",
+    workspaceName: "demo",
+    threadTitle: "持续开发主线",
     threadId: "thread-123",
     singleThreadMode: true,
     note: "desktop primary thread",
@@ -190,48 +193,192 @@ test("runLoopTurn sends the next message to the bound Codex thread and stores vi
   assert.ok(snapshot.thread.lastCompletionAt);
 });
 
+test("runLoopTurn uses Chinese follow-up prompt by default", async () => {
+  const configRoot = await createWorkspace();
+  await ensureLoopArtifacts(configRoot);
+  await saveThreadBinding(configRoot, {
+    workspaceName: "demo",
+    threadTitle: "开发主线",
+    threadId: "thread-zh",
+    singleThreadMode: true,
+  });
+  await syncCodexThreadMirror(configRoot, {
+    lastUserInstructionSummary: "继续推进核心链路",
+    lastAssistantActionSummary: "完成上一轮验证",
+    latestCodexSummary: "上一轮已修复启动状态展示",
+  });
+
+  let dispatchedPrompt = "";
+  await runLoopTurn(configRoot, {
+    dispatchThreadMessage: async ({ prompt }) => {
+      dispatchedPrompt = prompt;
+      return { lastMessage: "已继续处理下一批任务" };
+    },
+  });
+
+  assert.match(dispatchedPrompt, /当前循环上下文/);
+  assert.match(dispatchedPrompt, /继续推进核心链路/);
+  assert.doesNotMatch(
+    dispatchedPrompt,
+    /Continue the same Codex thread from its latest verified checkpoint\./,
+  );
+});
+
+test("runLoopTurn switches to English follow-up prompt when configured", async () => {
+  const configRoot = await createWorkspace();
+  await ensureLoopArtifacts(configRoot);
+  await saveUserOverrides(configRoot, {
+    conversation: {
+      language: "en",
+    },
+  });
+  await saveThreadBinding(configRoot, {
+    workspaceName: "demo",
+    threadTitle: "English thread",
+    threadId: "thread-en",
+    singleThreadMode: true,
+  });
+  await syncCodexThreadMirror(configRoot, {
+    lastUserInstructionSummary: "Continue the current loop",
+    lastAssistantActionSummary: "Finished the last verification batch",
+    latestCodexSummary: "The launcher status fix is already complete",
+  });
+
+  let dispatchedPrompt = "";
+  await runLoopTurn(configRoot, {
+    dispatchThreadMessage: async ({ prompt }) => {
+      dispatchedPrompt = prompt;
+      return { lastMessage: "Completed the next loop turn" };
+    },
+  });
+
+  assert.match(
+    dispatchedPrompt,
+    /Continue the same Codex thread from its latest verified checkpoint\./,
+  );
+  assert.match(dispatchedPrompt, /Current loop context:/);
+  assert.match(dispatchedPrompt, /Continue the current loop/);
+});
+
+test("runLoopTurn uses ollama-generated prompt when advanced continuation is enabled", async () => {
+  const configRoot = await createWorkspace();
+  await ensureLoopArtifacts(configRoot);
+  await saveUserOverrides(configRoot, {
+    conversation: {
+      language: "zh-CN",
+      promptGenerator: {
+        enabled: true,
+        provider: "ollama",
+        model: "qwen2.5:7b",
+      },
+    },
+  });
+  await saveThreadBinding(configRoot, {
+    workspaceName: "demo",
+    threadTitle: "高级续发线程",
+    threadId: "thread-ollama",
+    singleThreadMode: true,
+  });
+  await syncCodexThreadMirror(configRoot, {
+    lastUserInstructionSummary: "继续推进日志健康检查",
+    lastAssistantActionSummary: "完成上一轮界面精简",
+    latestCodexSummary: "上一轮已经修复自动化发送可见性",
+  });
+
+  let dispatchedPrompt = "";
+  const snapshot = await runLoopTurn(configRoot, {
+    generateFollowupPrompt: async ({ fallbackPrompt, snapshot: currentSnapshot }) => {
+      assert.match(fallbackPrompt, /当前循环上下文/);
+      assert.equal(
+        currentSnapshot.profile.resolved.conversation.promptGenerator.enabled,
+        true,
+      );
+      return "请基于上一轮已完成内容，继续推进日志健康检查，并先完成最小可验证批次。";
+    },
+    dispatchThreadMessage: async ({ prompt }) => {
+      dispatchedPrompt = prompt;
+      return { lastMessage: "已发送动态续发消息" };
+    },
+  });
+
+  assert.equal(
+    dispatchedPrompt,
+    "请基于上一轮已完成内容，继续推进日志健康检查，并先完成最小可验证批次。",
+  );
+  assert.equal(snapshot.thread.continuationStatus, "idle");
+});
+
+test("runLoopTurn falls back to template prompt when ollama generation fails", async () => {
+  const configRoot = await createWorkspace();
+  await ensureLoopArtifacts(configRoot);
+  await saveUserOverrides(configRoot, {
+    conversation: {
+      language: "zh-CN",
+      promptGenerator: {
+        enabled: true,
+        provider: "ollama",
+        model: "qwen2.5:7b",
+      },
+    },
+  });
+  await saveThreadBinding(configRoot, {
+    workspaceName: "demo",
+    threadTitle: "回退线程",
+    threadId: "thread-fallback",
+    singleThreadMode: true,
+  });
+  await syncCodexThreadMirror(configRoot, {
+    lastUserInstructionSummary: "继续推进移动端适配",
+    latestCodexSummary: "上一轮已经补完主要接口",
+  });
+
+  let dispatchedPrompt = "";
+  const snapshot = await runLoopTurn(configRoot, {
+    generateFollowupPrompt: async () => {
+      throw new Error("ollama unavailable");
+    },
+    dispatchThreadMessage: async ({ prompt }) => {
+      dispatchedPrompt = prompt;
+      return { lastMessage: "已回退到模板续发" };
+    },
+  });
+
+  assert.match(dispatchedPrompt, /当前循环上下文/);
+  assert.match(snapshot.thread.lastContinuationError, /ollama unavailable/);
+  assert.equal(snapshot.thread.continuationStatus, "idle");
+});
+
 test("renameLoop updates loop name in config and runtime snapshot", async () => {
   const configRoot = await createWorkspace();
   await ensureLoopArtifacts(configRoot);
 
   const snapshot = await renameLoop(configRoot, {
-    loopName: "opencow-longrun-core",
+    loopName: "core-longrun-loop",
   });
 
-  assert.equal(snapshot.config.loopName, "opencow-longrun-core");
-  assert.equal(snapshot.state.loopName, "opencow-longrun-core");
+  assert.equal(snapshot.config.loopName, "core-longrun-loop");
+  assert.equal(snapshot.state.loopName, "core-longrun-loop");
 });
 
-test("listLoops seeds an opencow loop preset for the workspace", async () => {
+test("listLoops seeds a generic default loop for the workspace", async () => {
   const configRoot = await createWorkspace();
   await fs.writeFile(
     path.join(configRoot, "codex_loop", "config.json"),
     `${JSON.stringify(
-      {
-        ...buildConfig(),
-        projectName: "opencow",
-        projectAdapter: "opencow",
-      },
+      { ...buildConfig() },
       null,
       2,
     )}\n`,
     "utf8",
   );
-  await fs.writeFile(path.join(configRoot, "OPENCOW_CORE_RULES.md"), "# rules\n", "utf8");
-  await fs.mkdir(path.join(configRoot, "docs", "v1.0"), { recursive: true });
-  await fs.writeFile(
-    path.join(configRoot, "开发进度清单2026.6.6-22-48.md"),
-    "# progress\n",
-    "utf8",
-  );
 
   const loops = await listLoops(configRoot);
 
-  assert.equal(loops.currentLoopId, "opencow-continue-from-checklist");
+  assert.equal(loops.currentLoopId, "run-a");
   assert.equal(loops.loops.length, 1);
-  assert.equal(loops.loops[0].name, "按清单继续开发");
-  assert.equal(loops.loops[0].threadTitle, "按清单继续开发");
-  assert.equal(loops.loops[0].budgets.maxMinutes, 360);
+  assert.equal(loops.loops[0].name, "demo");
+  assert.equal(loops.loops[0].threadTitle, "未绑定线程");
+  assert.equal(loops.loops[0].budgets.maxMinutes, 120);
 });
 
 test("createLoop persists a new loop and selectLoop switches active config", async () => {
@@ -239,21 +386,10 @@ test("createLoop persists a new loop and selectLoop switches active config", asy
   await fs.writeFile(
     path.join(configRoot, "codex_loop", "config.json"),
     `${JSON.stringify(
-      {
-        ...buildConfig(),
-        projectName: "opencow",
-        projectAdapter: "opencow",
-      },
+      { ...buildConfig() },
       null,
       2,
     )}\n`,
-    "utf8",
-  );
-  await fs.writeFile(path.join(configRoot, "OPENCOW_CORE_RULES.md"), "# rules\n", "utf8");
-  await fs.mkdir(path.join(configRoot, "docs", "v1.0"), { recursive: true });
-  await fs.writeFile(
-    path.join(configRoot, "开发进度清单2026.6.6-22-48.md"),
-    "# progress\n",
     "utf8",
   );
 
@@ -353,21 +489,10 @@ test("deleteLoop removes an inactive loop from the registry", async () => {
   await fs.writeFile(
     path.join(configRoot, "codex_loop", "config.json"),
     `${JSON.stringify(
-      {
-        ...buildConfig(),
-        projectName: "opencow",
-        projectAdapter: "opencow",
-      },
+      { ...buildConfig() },
       null,
       2,
     )}\n`,
-    "utf8",
-  );
-  await fs.writeFile(path.join(configRoot, "OPENCOW_CORE_RULES.md"), "# rules\n", "utf8");
-  await fs.mkdir(path.join(configRoot, "docs", "v1.0"), { recursive: true });
-  await fs.writeFile(
-    path.join(configRoot, "开发进度清单2026.6.6-22-48.md"),
-    "# progress\n",
     "utf8",
   );
 
@@ -380,7 +505,81 @@ test("deleteLoop removes an inactive loop from the registry", async () => {
   const loops = await deleteLoop(configRoot, { loopId: "run-delete-me" });
 
   assert.equal(loops.loops.some((loop) => loop.id === "run-delete-me"), false);
-  assert.equal(loops.currentLoopId, "opencow-continue-from-checklist");
+  assert.equal(loops.currentLoopId, "run-a");
+});
+
+test("loop creation assistant asks for missing project path first", async () => {
+  const configRoot = await createWorkspace();
+  const state = await getLoopCreationAssistantState(configRoot);
+
+  assert.equal(state.status, "collecting");
+  assert.equal(state.currentQuestion.id, "workspace_root");
+  assert.match(state.currentQuestion.prompt, /项目路径|workspace/i);
+});
+
+test("loop creation assistant can detect git, docs, and create a grouped loop", async () => {
+  const configRoot = await createWorkspace();
+  const projectRoot = path.join(configRoot, "demo-project");
+  await fs.mkdir(projectRoot, { recursive: true });
+  await fs.writeFile(
+    path.join(projectRoot, "package.json"),
+    `${JSON.stringify(
+      {
+        name: "demo-project",
+        scripts: {
+          test: "vitest run",
+          build: "vite build",
+        },
+      },
+      null,
+      2,
+    )}\n`,
+    "utf8",
+  );
+  await fs.mkdir(path.join(projectRoot, ".git"), { recursive: true });
+  await fs.mkdir(path.join(projectRoot, "docs"), { recursive: true });
+  await fs.writeFile(path.join(projectRoot, "docs", "DEV_RULES.md"), "# rules\n", "utf8");
+  await fs.writeFile(path.join(projectRoot, "docs", "开发文档.md"), "# dev doc\n", "utf8");
+
+  let state = await replyLoopCreationAssistant(configRoot, {
+    answer: projectRoot,
+  });
+  assert.equal(state.currentQuestion.id, "project_name");
+  assert.equal(state.draft.workspaceRoot, projectRoot);
+  assert.equal(state.draft.git.hasGit, true);
+
+  state = await replyLoopCreationAssistant(configRoot, {
+    answer: "演示项目",
+  });
+  assert.equal(state.currentQuestion.id, "loop_name");
+
+  state = await replyLoopCreationAssistant(configRoot, {
+    answer: "核心链路推进",
+  });
+  assert.equal(state.currentQuestion.id, "branch");
+
+  state = await replyLoopCreationAssistant(configRoot, {
+    answer: "dev",
+  });
+  assert.equal(state.currentQuestion.id, "docs_confirmed");
+  assert.equal(state.draft.docs.ruleDocs.length > 0, true);
+  assert.equal(state.draft.docs.devDocs.length > 0, true);
+
+  state = await replyLoopCreationAssistant(configRoot, {
+    answer: "confirm",
+  });
+  assert.equal(state.status, "completed");
+  assert.equal(state.createdLoop.loop.name, "核心链路推进");
+  assert.equal(state.createdLoop.loop.projectName, "演示项目");
+  assert.equal(state.createdLoop.loop.branch, "dev");
+  assert.equal(state.createdLoop.loop.workspaceRoot, projectRoot);
+  assert.equal(state.createdLoop.loop.git.hasGit, true);
+  assert.equal(state.createdLoop.loop.docs.ruleDocs.some((file) => /DEV_RULES\.md$/.test(file)), true);
+
+  const loops = await listLoops(configRoot);
+  const createdLoop = loops.loops.find((loop) => loop.id === state.createdLoop.loop.id);
+  assert.equal(createdLoop.projectName, "演示项目");
+  assert.equal(createdLoop.workspaceRoot, projectRoot);
 });
 
 test("syncCodexThreadMirror stores normalized Codex linkage summaries", async () => {

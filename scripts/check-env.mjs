@@ -20,40 +20,51 @@ async function assertPath(targetPath, message) {
   }
 }
 
-async function findProgressFile(workspaceRoot) {
-  const entries = await fs.readdir(workspaceRoot, { withFileTypes: true });
-  const match = entries.find(
-    (entry) =>
-      entry.isFile() &&
-      entry.name.includes("2026.6.6-22-48") &&
-      entry.name.toLowerCase().endsWith(".md"),
-  );
-
-  if (!match) {
-    throw new Error(
-      `Missing starting progress file under ${workspaceRoot}. Expected a markdown file containing 2026.6.6-22-48 in its name.`,
-    );
+async function resolveRequiredFiles(workspaceRoot, config) {
+  if (!workspaceRoot || path.resolve(workspaceRoot) === path.resolve(config.codexLoopRoot || "")) {
+    return {
+      projectRules: "",
+      docsRoot: "",
+      progressPath: "",
+      strict: false,
+    };
   }
 
-  return path.join(workspaceRoot, match.name);
+  return {
+    projectRules: "",
+    docsRoot: "",
+    progressPath: "",
+    strict: false,
+  };
 }
 
 async function main() {
   const { workspaceRoot, codexLoopRoot } = await resolveWorkspaceAndLoopRoot(process.cwd());
   const { config, configPath, localConfigPath } = await loadLoopConfig(codexLoopRoot);
+  config.codexLoopRoot = codexLoopRoot;
   const packagePath = path.join(codexLoopRoot, "package.json");
-  const opencowRulesPath = path.join(workspaceRoot, "OPENCOW_CORE_RULES.md");
-  const docsRoot = path.join(workspaceRoot, "docs", "v1.0");
-  const progressPath = await findProgressFile(workspaceRoot);
+  const requiredFiles = await resolveRequiredFiles(workspaceRoot, config);
 
   await assertPath(packagePath, `Missing codex_loop package file: ${packagePath}`);
   await assertPath(configPath, `Missing codex_loop config file: ${configPath}`);
-  await assertPath(opencowRulesPath, `Missing project rules file: ${opencowRulesPath}`);
-  await assertPath(docsRoot, `Missing project docs directory: ${docsRoot}`);
-  await assertPath(progressPath, `Missing starting progress file: ${progressPath}`);
 
-  if (!config.projectName || !config.branch || !config.budgets) {
-    throw new Error("codex_loop/config.json is missing required fields: projectName, branch, budgets.");
+  if (requiredFiles.strict) {
+    await assertPath(
+      requiredFiles.projectRules,
+      `Missing project rules file: ${requiredFiles.projectRules}`,
+    );
+    await assertPath(
+      requiredFiles.docsRoot,
+      `Missing project docs directory: ${requiredFiles.docsRoot}`,
+    );
+    await assertPath(
+      requiredFiles.progressPath,
+      `Missing starting progress file: ${requiredFiles.progressPath}`,
+    );
+  }
+
+  if (!config.branch || !config.budgets) {
+    throw new Error("codex_loop/config.json is missing required fields: branch, budgets.");
   }
 
   const host = (process.env.CODEX_LOOP_HOST || "127.0.0.1").trim();
@@ -98,11 +109,7 @@ async function main() {
       webPort,
     },
     portCheck,
-    requiredFiles: {
-      projectRules: opencowRulesPath,
-      docsRoot,
-      progressPath,
-    },
+    requiredFiles,
   };
 
   process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);

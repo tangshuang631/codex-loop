@@ -1,14 +1,14 @@
 {
-  "projectName": "opencow",
+  "projectName": "project",
   "branch": "dev",
   "budgets": {
-    "maxMinutes": 360,
+    "maxMinutes": 180,
     "maxTokens": 120000,
-    "finalizeLeadMinutes": 30,
+    "finalizeLeadMinutes": 20,
     "finalizeLeadTokens": 15000
   },
-  "projectAdapter": "opencow",
-  "currentRunId": "opencow-continue-from-checklist",
-  "loopName": "按清单继续开发",
-  "threadTitle": "按清单继续开发"
+  "projectAdapter": "generic",
+  "currentRunId": "default-run",
+  "loopName": "默认循环",
+  "threadTitle": "默认线程"
 }

@@ -11,6 +11,7 @@ coverage/
 settings/local/
 settings/loops.json
 settings/*.local.json
+settings/loop-creation-assistant.json
 config.local.json
 
 # Temporary or generated project scaffolds

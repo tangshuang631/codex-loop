@@ -3,8 +3,10 @@ import {
   deleteLoop,
   exportMobileView,
   exportLoopSummary,
+  getLoopCreationAssistantState,
   listLoops,
   readLoopSnapshot,
+  replyLoopCreationAssistant,
   selectLoop,
   recordHeartbeat,
   recordError,
@@ -18,6 +20,12 @@ import {
 } from "./lib/runtime-store.mjs";
 import { createLoopController } from "./lib/loop-controller.mjs";
 import { readLauncherStatus } from "./lib/launcher-status.mjs";
+import { readRemoteAccessStatus } from "./lib/remote-access.mjs";
+import { listOllamaModels as defaultListOllamaModels } from "./lib/ollama-model-store.mjs";
+import {
+  readAutomationStatusForThread,
+  updateAutomationIntervalForThread,
+} from "./lib/automation-store.mjs";
 import { saveUserOverrides } from "./lib/adapter-store.mjs";
 
 function sendJson(response, statusCode, value) {
@@ -50,12 +58,37 @@ export function buildHandler({
       exportLoopSummary,
       exportMobileView,
       readLauncherStatus,
+      listOllamaModels: async (startDir = process.cwd()) => {
+        const snapshot = await readLoopSnapshot(startDir);
+        const baseUrl =
+          snapshot.profile?.resolved?.conversation?.promptGenerator?.baseUrl ||
+          "http://127.0.0.1:11434";
+        return defaultListOllamaModels({ baseUrl });
+      },
+      readRemoteAccessStatus: async () => {
+        const launcherStatus = await readLauncherStatus();
+        return readRemoteAccessStatus({ launcherStatus });
+      },
+      readAutomationStatus: async (startDir = process.cwd()) => {
+        const snapshot = await readLoopSnapshot(startDir);
+        return readAutomationStatusForThread(snapshot.thread);
+      },
+      updateAutomationSettings: async (startDir = process.cwd(), payload = {}) => {
+        const snapshot = await readLoopSnapshot(startDir);
+        const intervalMinutes = Number(payload.intervalMinutes);
+        if (!Number.isFinite(intervalMinutes) || intervalMinutes < 1) {
+          throw new Error("intervalMinutes must be a positive number");
+        }
+        return updateAutomationIntervalForThread(snapshot.thread, intervalMinutes);
+      },
       startRun,
       renameLoop,
       listLoops,
       createLoop,
+      getLoopCreationAssistantState,
       selectLoop,
       deleteLoop,
+      replyLoopCreationAssistant,
       requestGracefulStop,
       runLoopTurn,
       updateBudgets,
@@ -109,8 +142,32 @@ export function buildHandler({
         return;
       }
 
+      if (request.method === "GET" && request.url === "/api/remote-access") {
+        sendJson(response, 200, await operations.readRemoteAccessStatus());
+        return;
+      }
+
+      if (request.method === "GET" && request.url === "/api/ollama/models") {
+        sendJson(response, 200, await operations.listOllamaModels(process.cwd()));
+        return;
+      }
+
+      if (request.method === "GET" && request.url === "/api/automation") {
+        sendJson(response, 200, await operations.readAutomationStatus(process.cwd()));
+        return;
+      }
+
       if (request.method === "GET" && request.url === "/api/loops") {
         sendJson(response, 200, await operations.listLoops());
+        return;
+      }
+
+      if (request.method === "GET" && request.url === "/api/loop-creation-assistant") {
+        sendJson(
+          response,
+          200,
+          await operations.getLoopCreationAssistantState(process.cwd()),
+        );
         return;
       }
 
@@ -169,6 +226,19 @@ export function buildHandler({
         return;
       }
 
+      if (
+        request.method === "POST" &&
+        request.url === "/api/loop-creation-assistant/reply"
+      ) {
+        const body = await readBody(request);
+        sendJson(
+          response,
+          200,
+          await operations.replyLoopCreationAssistant(process.cwd(), body),
+        );
+        return;
+      }
+
       if (request.method === "POST" && request.url === "/api/stop") {
         const body = await readBody(request);
         loopController.stop(process.cwd());
@@ -183,6 +253,16 @@ export function buildHandler({
       if (request.method === "POST" && request.url === "/api/budgets") {
         const body = await readBody(request);
         sendJson(response, 200, await operations.updateBudgets(process.cwd(), body));
+        return;
+      }
+
+      if (request.method === "POST" && request.url === "/api/automation") {
+        const body = await readBody(request);
+        sendJson(
+          response,
+          200,
+          await operations.updateAutomationSettings(process.cwd(), body),
+        );
         return;
       }
 

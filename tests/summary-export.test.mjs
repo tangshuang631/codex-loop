@@ -45,7 +45,7 @@ test("exportLoopSummary writes mobile-friendly summary json", async () => {
   const configRoot = await createWorkspace();
   const snapshot = await ensureLoopArtifacts(configRoot);
   await saveThreadBinding(configRoot, {
-    workspaceName: "opencow",
+    workspaceName: "demo",
     threadTitle: "\u8bc4\u4f30\u957f\u65f6\u5f00\u53d1\u65b9\u6848",
     threadId: "thread-123",
     singleThreadMode: true,
@@ -59,7 +59,7 @@ test("exportLoopSummary writes mobile-friendly summary json", async () => {
 
   const exported = await exportLoopSummary(configRoot);
 
-  assert.equal(exported.workspaceName, "opencow");
+  assert.equal(exported.workspaceName, "demo");
   assert.equal(exported.threadTitle, "\u8bc4\u4f30\u957f\u65f6\u5f00\u53d1\u65b9\u6848");
   assert.equal(exported.activeTask, "Tighten summary export");
   assert.equal(exported.recentSummary, "Added lightweight summary payload");
@@ -87,7 +87,7 @@ test("exportMobileView returns recent transcript entries for mobile readers", as
     note: "launcher ready",
   });
   await saveThreadBinding(configRoot, {
-    workspaceName: "opencow",
+    workspaceName: "demo",
     threadTitle: "评估长时开发方案",
     threadId: "thread-123",
     singleThreadMode: true,
@@ -110,6 +110,8 @@ test("exportMobileView returns recent transcript entries for mobile readers", as
   assert.equal(mobile.launcher.webUrl, "http://127.0.0.1:3001");
   assert.match(mobile.bindingNote, /thread-123/);
   assert.match(mobile.suggestedAction, /\u7b49\u5f85|\u7eed\u8dd1|\u7ed1\u5b9a/);
+  assert.match(mobile.strategy.contextCard.whyContinue, /继续|Review mobile transcript|暂无/);
+  assert.ok(mobile.strategy.guardrailCard.stopRule);
 });
 
 test("exportMobileView suggests binding a visible thread before starting when thread is missing", async () => {

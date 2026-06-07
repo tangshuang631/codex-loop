@@ -72,3 +72,29 @@ test("saveUserOverrides persists loop detail tuning", async () => {
   assert.equal(profile.resolved.stopPolicy.allowFinishCurrentTask, false);
   assert.equal(profile.resolved.budgets.maxMinutes, 240);
 });
+
+test("ensureAdapterArtifacts resolves generic adapter without requiring bundled example files", async () => {
+  const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), "codex-loop-generic-only-"));
+  const loopRoot = path.join(tempRoot, "codex_loop");
+  await fs.mkdir(loopRoot, { recursive: true });
+  await fs.writeFile(
+    path.join(loopRoot, "config.json"),
+    `${JSON.stringify({
+      projectName: "",
+      branch: "dev",
+      currentRunId: "run-generic",
+      projectAdapter: "generic",
+      budgets: {
+        maxMinutes: 120,
+        maxTokens: 60000,
+        finalizeLeadMinutes: 15,
+        finalizeLeadTokens: 8000,
+      },
+    }, null, 2)}\n`,
+    "utf8",
+  );
+
+  const profile = await ensureAdapterArtifacts(loopRoot);
+  assert.equal(profile.adapter.adapterId, "generic");
+  assert.equal(profile.resolved.singleThread.required, true);
+});

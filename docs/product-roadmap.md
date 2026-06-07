@@ -31,6 +31,7 @@ Current implementation progress:
 4. improve startup resilience and recovery messaging
 5. formalize template-driven project loop setup
 6. evaluate optional ccswitch-assisted telemetry enrichments
+7. keep loop differentiation clearly stronger than native Codex automations
 
 ## Later roadmap
 
@@ -82,3 +83,24 @@ Not:
 - full remote control
 - destructive actions
 - replacing the desktop Codex workflow
+
+## Current implementation note
+
+The product is now moving toward a stronger middle ground:
+
+- phone-friendly read and light control for one loop
+- still local-first
+- still centered on the Codex desktop thread
+
+The preferred no-server remote path is:
+
+- install Tailscale on the workstation
+- install Tailscale on the phone
+- open the local `codex_loop` web UI through the Tailnet
+
+Why this is the current recommendation:
+
+- no custom cloud server is required
+- works outside the local LAN
+- keeps the tool attached to the user's own machine
+- simpler and safer than exposing raw public ports

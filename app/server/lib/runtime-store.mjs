@@ -8,6 +8,7 @@ import { applyHeartbeat, decideLoopMode } from "../../../scripts/lib/state.mjs";
 import { readResolvedLoopProfile } from "./adapter-store.mjs";
 import { dispatchThreadMessage as defaultDispatchThreadMessage } from "./codex-dispatcher.mjs";
 import { readLauncherStatus } from "./launcher-status.mjs";
+import { generatePromptWithOllama } from "./ollama-prompt-generator.mjs";
 import { resolveProjectLayout } from "./paths.mjs";
 
 function nowIso() {
@@ -15,9 +16,6 @@ function nowIso() {
 }
 
 const DEFAULT_LOOP_ID = "default-run";
-const OPENCOW_LOOP_ID = "opencow-continue-from-checklist";
-const OPENCOW_THREAD_TITLE = "按清单继续开发";
-const OPENCOW_PROGRESS_FILENAME = "开发进度清单2026.6.6-22-48.md";
 const HEARTBEAT_STALE_MS = 15 * 60 * 1000;
 const CONTINUATION_STALLED_MS = 5 * 60 * 1000;
 const TRANSCRIPT_STALE_MS = 15 * 60 * 1000;
@@ -136,7 +134,7 @@ function defaultTranscript(thread) {
 - 主线程标题：${thread.threadTitle}
 - 主线程 ID：${thread.threadId || "未绑定"}
 
-本文件是本地镜像，不替代 Codex 桌面端线程历史。`;
+本文档是本地镜像，不替代 Codex 桌面端线程历史。`;
 }
 
 function createEmptyErrorState() {
@@ -151,6 +149,16 @@ function sanitizeLoopId(value) {
     .replace(/^-|-$/g, "");
 }
 
+function buildSafeLoopId(...values) {
+  for (const value of values) {
+    const sanitized = sanitizeLoopId(value);
+    if (sanitized) {
+      return sanitized;
+    }
+  }
+  return `loop-${Date.now()}`;
+}
+
 function buildLoopRegistryPath(codexLoopRoot) {
   return path.join(codexLoopRoot, "settings", "loops.json");
 }
@@ -162,8 +170,12 @@ function buildLoopEntry({
   branch,
   projectName,
   projectAdapter,
+  workspaceRoot,
   budgets,
   startContextPaths = [],
+  docs = null,
+  git = null,
+  creation = null,
   threadBinding,
 }) {
   return {
@@ -174,8 +186,12 @@ function buildLoopEntry({
     branch,
     projectName,
     projectAdapter,
+    workspaceRoot: workspaceRoot || "",
     budgets,
     startContextPaths,
+    docs,
+    git,
+    creation,
     threadBinding: threadBinding || createLoopThreadBinding({
       projectName,
       threadTitle,
@@ -188,58 +204,21 @@ function buildLoopEntry({
 }
 
 function buildDefaultRegistry(config, workspaceRoot) {
-  const isOpencow =
-    config.projectName === "opencow" || config.projectAdapter === "opencow";
-
-  if (!isOpencow) {
-    const loopId = config.currentRunId || DEFAULT_LOOP_ID;
-    return {
-      currentLoopId: loopId,
-      loops: [
-        buildLoopEntry({
-          id: loopId,
-          name: config.loopName || config.projectName || "default loop",
-          threadTitle: config.threadTitle || config.loopName || "未绑定线程",
-          branch: config.branch || "dev",
-          projectName: config.projectName || "project",
-          projectAdapter: config.projectAdapter || config.projectName || "generic",
-          budgets: { ...config.budgets },
-          startContextPaths: [],
-          threadBinding: createLoopThreadBinding(config),
-        }),
-      ],
-      generatedAt: nowIso(),
-      version: 1,
-    };
-  }
-
-  const progressPath = path.join(workspaceRoot, OPENCOW_PROGRESS_FILENAME);
-  const docsRoot = path.join(workspaceRoot, "docs", "v1.0");
-  const rulesPath = path.join(workspaceRoot, "OPENCOW_CORE_RULES.md");
-
+  const loopId = config.currentRunId || DEFAULT_LOOP_ID;
   return {
-    currentLoopId: OPENCOW_LOOP_ID,
+    currentLoopId: loopId,
     loops: [
       buildLoopEntry({
-        id: OPENCOW_LOOP_ID,
-        name: OPENCOW_THREAD_TITLE,
-        threadTitle: OPENCOW_THREAD_TITLE,
-        branch: "dev",
-        projectName: "opencow",
-        projectAdapter: "opencow",
-        budgets: {
-          maxMinutes: 360,
-          maxTokens: 120000,
-          finalizeLeadMinutes: 30,
-          finalizeLeadTokens: 15000,
-        },
-        startContextPaths: [rulesPath, docsRoot, progressPath],
-        threadBinding: createLoopThreadBinding({
-          projectName: "opencow",
-          threadTitle: OPENCOW_THREAD_TITLE,
-          loopName: OPENCOW_THREAD_TITLE,
-          currentRunId: OPENCOW_LOOP_ID,
-        }),
+        id: loopId,
+        name: config.loopName || config.projectName || "default loop",
+        threadTitle: config.threadTitle || config.loopName || "未绑定线程",
+        branch: config.branch || "dev",
+        projectName: config.projectName || "project",
+        projectAdapter: config.projectAdapter || config.projectName || "generic",
+        workspaceRoot: config.workspaceRoot || workspaceRoot,
+        budgets: { ...config.budgets },
+        startContextPaths: [],
+        threadBinding: createLoopThreadBinding(config),
       }),
     ],
     generatedAt: nowIso(),
@@ -252,6 +231,7 @@ function applyLoopToConfig(config, loop) {
     ...config,
     projectName: loop.projectName || config.projectName,
     projectAdapter: loop.projectAdapter || config.projectAdapter || config.projectName,
+    workspaceRoot: loop.workspaceRoot || config.workspaceRoot,
     branch: loop.branch || config.branch,
     currentRunId: loop.runId || loop.id,
     loopName: loop.name,
@@ -299,6 +279,258 @@ function summarizeLoopRegistry(registry) {
   };
 }
 
+function buildAssistantStatePath(codexLoopRoot) {
+  return path.join(codexLoopRoot, "settings", "loop-creation-assistant.json");
+}
+
+function createLoopAssistantDraft() {
+  return {
+    workspaceRoot: "",
+    projectName: "",
+    loopName: "",
+    branch: "dev",
+    git: {
+      hasGit: false,
+      branch: "",
+      recommendedBranch: "dev",
+      pushRequired: true,
+      status: "missing",
+    },
+    docs: {
+      ruleDocs: [],
+      devDocs: [],
+      notes: [],
+    },
+    projectProfile: {
+      projectType: "generic",
+      commands: [],
+      strictness: "medium",
+    },
+  };
+}
+
+function normalizeBranchName(value, fallback = "dev") {
+  const text = safeText(value, fallback);
+  return text || fallback;
+}
+
+function buildLoopAssistantQuestion(step, draft = createLoopAssistantDraft()) {
+  if (step === "workspace_root") {
+    return {
+      id: "workspace_root",
+      prompt: "先告诉我这个 loop 对应的项目路径，我会自动检测 git、文档和可用命令。",
+      placeholder: "例如 E:\\2026\\codex-loop",
+    };
+  }
+
+  if (step === "project_name") {
+    return {
+      id: "project_name",
+      prompt: "这个项目希望在左侧栏显示成什么项目名？",
+      placeholder: draft.projectName || "例如 codex-loop",
+    };
+  }
+
+  if (step === "loop_name") {
+    return {
+      id: "loop_name",
+      prompt: "这个新 loop 的名称是什么？建议写成当前要推进的子任务。",
+      placeholder: "例如 核心链路推进",
+    };
+  }
+
+  if (step === "branch") {
+    return {
+      id: "branch",
+      prompt: "这个 loop 主要工作的分支是什么？默认建议使用 dev。",
+      placeholder: draft.git.branch || draft.git.recommendedBranch || "dev",
+    };
+  }
+
+  return {
+    id: "docs_confirmed",
+    prompt:
+      "我已经找到 git 和文档线索。回复 `confirm` 直接创建，或补充你想强制纳入的规则文档路径。",
+    placeholder: "输入 confirm，或粘贴额外文档路径",
+  };
+}
+
+async function pathExists(targetPath) {
+  try {
+    await fs.access(targetPath);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function detectGitMetadata(workspaceRoot) {
+  const gitDir = path.join(workspaceRoot, ".git");
+  const hasGit = await pathExists(gitDir);
+  const headPath = path.join(gitDir, "HEAD");
+  let branch = "";
+
+  if (hasGit) {
+    try {
+      const head = await fs.readFile(headPath, "utf8");
+      const match = head.match(/ref:\s+refs\/heads\/([^\r\n]+)/);
+      if (match) {
+        branch = match[1];
+      }
+    } catch {}
+  }
+
+  return {
+    hasGit,
+    branch,
+    recommendedBranch: branch || "dev",
+    pushRequired: true,
+    status: hasGit ? "ready" : "missing",
+  };
+}
+
+async function collectLoopDocs(workspaceRoot) {
+  const docs = {
+    ruleDocs: [],
+    devDocs: [],
+    notes: [],
+  };
+
+  async function walk(currentPath, depth = 0) {
+    if (depth > 2) return;
+    let entries = [];
+    try {
+      entries = await fs.readdir(currentPath, { withFileTypes: true });
+    } catch {
+      return;
+    }
+
+    for (const entry of entries) {
+      const fullPath = path.join(currentPath, entry.name);
+      if (entry.isDirectory()) {
+        if (entry.name === "node_modules" || entry.name.startsWith(".")) {
+          continue;
+        }
+        await walk(fullPath, depth + 1);
+        continue;
+      }
+
+      if (!/\.(md|txt)$/i.test(entry.name)) {
+        continue;
+      }
+
+      const lowerName = entry.name.toLowerCase();
+      if (
+        lowerName.includes("rule") ||
+        lowerName.includes("规范") ||
+        lowerName.includes("约束") ||
+        lowerName.includes("agent")
+      ) {
+        docs.ruleDocs.push(fullPath);
+        continue;
+      }
+
+      if (
+        lowerName.includes("开发") ||
+        lowerName.includes("design") ||
+        lowerName.includes("roadmap") ||
+        lowerName.includes("runbook") ||
+        lowerName.includes("readme")
+      ) {
+        docs.devDocs.push(fullPath);
+      }
+    }
+  }
+
+  await walk(workspaceRoot, 0);
+  docs.ruleDocs = [...new Set(docs.ruleDocs)].slice(0, 8);
+  docs.devDocs = [...new Set(docs.devDocs)].slice(0, 8);
+  if (!docs.ruleDocs.length) {
+    docs.notes.push("未自动发现明显的规则文档，建议手动补充。");
+  }
+  if (!docs.devDocs.length) {
+    docs.notes.push("未自动发现明显的开发文档，建议手动补充。");
+  }
+  return docs;
+}
+
+async function detectProjectProfileForAssistant(workspaceRoot) {
+  const packageJsonPath = path.join(workspaceRoot, "package.json");
+  const cargoTomlPath = path.join(workspaceRoot, "Cargo.toml");
+  const pyprojectTomlPath = path.join(workspaceRoot, "pyproject.toml");
+
+  if (await pathExists(packageJsonPath)) {
+    const packageJson = JSON.parse(await fs.readFile(packageJsonPath, "utf8"));
+    const commands = [];
+    if (packageJson.scripts?.test) commands.push("npm run test");
+    if (packageJson.scripts?.build) commands.push("npm run build");
+    if (packageJson.scripts?.lint) commands.push("npm run lint");
+    return {
+      projectType: await pathExists(cargoTomlPath) ? "hybrid" : "node",
+      commands,
+      strictness: commands.length >= 2 ? "high" : "medium",
+      detectedProjectName: safeText(packageJson.name, path.basename(workspaceRoot)),
+    };
+  }
+
+  if (await pathExists(cargoTomlPath)) {
+    return {
+      projectType: "rust",
+      commands: ["cargo test", "cargo build"],
+      strictness: "high",
+      detectedProjectName: path.basename(workspaceRoot),
+    };
+  }
+
+  if (await pathExists(pyprojectTomlPath)) {
+    return {
+      projectType: "python",
+      commands: ["python -m pytest"],
+      strictness: "high",
+      detectedProjectName: path.basename(workspaceRoot),
+    };
+  }
+
+  return {
+    projectType: "generic",
+    commands: [],
+    strictness: "medium",
+    detectedProjectName: path.basename(workspaceRoot),
+  };
+}
+
+async function loadLoopAssistantState(layout) {
+  const assistantPath = buildAssistantStatePath(layout.codexLoopRoot);
+  const existing = await readJson(assistantPath);
+  if (existing) {
+    return { assistantPath, state: existing };
+  }
+
+  const initial = {
+    status: "collecting",
+    step: "workspace_root",
+    draft: createLoopAssistantDraft(),
+    currentQuestion: buildLoopAssistantQuestion("workspace_root"),
+    createdLoop: null,
+    updatedAt: nowIso(),
+  };
+  await ensureDir(path.dirname(assistantPath));
+  await writeJson(assistantPath, initial);
+  return { assistantPath, state: initial };
+}
+
+async function saveLoopAssistantState(assistantPath, state) {
+  await ensureDir(path.dirname(assistantPath));
+  await writeJson(assistantPath, {
+    ...state,
+    updatedAt: nowIso(),
+  });
+  return {
+    ...state,
+    updatedAt: nowIso(),
+  };
+}
+
 async function readConfig(layout) {
   const { config } = await loadLoopConfig(layout.codexLoopRoot);
   return config;
@@ -341,6 +573,36 @@ function buildSummaryPayload(snapshot) {
     lastAssistantActionSummary: snapshot.thread.lastAssistantActionSummary || "",
     latestCodexSummary: snapshot.thread.latestCodexSummary || "",
     summaryGeneratedAt: nowIso(),
+  };
+}
+
+function buildContinuationStrategy(snapshot) {
+  const shouldFinalize = snapshot.state.mode === "finalize_after_current";
+  const generator = snapshot.profile?.resolved?.conversation?.promptGenerator || {};
+  return {
+    contextCard: {
+      whyContinue: snapshot.thread.lastUserInstructionSummary || "继续当前 loop 主线任务",
+      nextAction:
+        snapshot.thread.latestCodexSummary ||
+        snapshot.thread.latestSummary ||
+        snapshot.state.recentSummary ||
+        "等待下一轮明确进展",
+      latestPrompt: snapshot.thread.lastDispatchPrompt || "",
+    },
+    rhythmCard: {
+      continuationStatus: snapshot.thread.continuationStatus,
+      continuationCycles: snapshot.thread.continuationCycleCount || 0,
+      automationIntervalMinutes: snapshot.thread.heartbeatAutomation ? "已绑定自动化" : "未绑定自动化",
+      promptGeneratorMode: generator.enabled ? generator.provider || "enabled" : "template",
+    },
+    guardrailCard: {
+      mode: snapshot.state.mode,
+      finalizeRequested: Boolean(snapshot.state.finalizeRequested),
+      stopRequested: Boolean(snapshot.state.stopRequested),
+      stopRule: shouldFinalize
+        ? "当前处于收尾模式：完成当前小批任务后总结、验证、收尾。"
+        : "当前处于推进模式：优先完成下一批边界清晰、可验证的小任务。",
+    },
   };
 }
 
@@ -405,6 +667,7 @@ export async function exportMobileView(startDir = process.cwd()) {
   const summary = buildSummaryPayload(snapshot);
   const launcher = await readLauncherStatus(startDir);
   const transcriptText = await fs.readFile(snapshot.paths.transcriptPath, "utf8");
+  const strategy = buildContinuationStrategy(snapshot);
   const bindingNote = safeText(
     snapshot.thread.note,
     snapshot.thread.threadId
@@ -416,12 +679,12 @@ export async function exportMobileView(startDir = process.cwd()) {
       ? "循环正在收尾，建议等待这一轮结束后查看总结、验证结果和下一步建议。"
       : snapshot.state.mode === "stopped"
         ? snapshot.thread.threadId
-          ? "线程已绑定，循环已停下。可以查看总结，或在确认上下文后重新开始。"
-          : "循环已停下。建议先查看本轮总结；如果要继续，再绑定线程后重新开始。"
+          ? "线程已绑定，循环已停下。可以先查看总结，确认上下文后再重新开始。"
+          : "循环已停下。建议先查看本轮总结；如需继续，再绑定线程后重新开始。"
         : snapshot.thread.threadId
           ? snapshot.thread.continuationStatus === "dispatching"
             ? "Codex 正在当前线程处理中，先等待这一轮完成。"
-            : "线程已绑定，可以继续观察进展或手动续跑一轮。"
+            : "线程已绑定，可以继续观察进展，或手动续跑一轮。"
           : "建议先完成线程绑定，再开始循环，这样桌面端和手机端都能看到连续记录。";
 
   return {
@@ -440,21 +703,22 @@ export async function exportMobileView(startDir = process.cwd()) {
     health: snapshot.health,
     launcher,
     summary,
+    strategy,
     bindingNote,
     suggestedAction,
     latestPrompt: snapshot.thread.lastDispatchPrompt || "",
     transcriptEntries: parseTranscriptEntries(transcriptText),
-    generatedAt: nowIso(),
   };
 }
 
-function buildTranscriptEntry({ at, activeTask, note, summary }) {
+function buildTranscriptEntry({ at, activeTask, note, summary, mode }) {
   return [
     "",
     `## ${at}`,
     `- Active task: ${activeTask || "n/a"}`,
     `- Note: ${note || "n/a"}`,
     `- Summary: ${summary || "n/a"}`,
+    `- Thread mirror mode: ${mode || "n/a"}`,
   ].join("\n");
 }
 
@@ -535,18 +799,37 @@ async function updateRegistryLoopBinding(codexLoopRoot, loopId, updater) {
 }
 
 function buildFollowupPrompt(snapshot) {
-  const instructions =
-    snapshot.config.projectAdapter === "opencow"
-      ? [
-          "继续严格按照 OPENCOW_CORE_RULES.md、docs/v1.0 和当前开发进度清单执行。",
-          "保持在同一个可见线程内续接刚刚完成的工作，不要重开话题。",
-          "先完成当前最重要的一小批改动，再给出已做内容、验证结果、下一步，并继续推进。",
-        ]
-      : [
-          "Continue the same Codex thread from its latest verified checkpoint.",
-          "Use the current loop settings and latest thread summary as the source of truth.",
-          "After the next bounded batch, report progress, verification, and the next step.",
-        ];
+  const language = safeText(
+    snapshot.profile?.resolved?.conversation?.language,
+    snapshot.profile?.overrides?.conversation?.language || "zh-CN",
+  ).toLowerCase();
+  const englishPreferred = language.startsWith("en");
+
+  const instructions = englishPreferred
+    ? [
+        "Continue the same Codex thread from its latest verified checkpoint.",
+        "Use the current loop settings and latest thread summary as the source of truth.",
+        "After the next bounded batch, report progress, verification, and the next step.",
+      ]
+    : [
+        "继续在同一个 Codex 线程中，从最近一次已验证的检查点往下推进。",
+        "以当前 loop 设置和最近线程摘要作为唯一事实来源，不要偏题。",
+        "完成下一批边界清晰的任务后，汇报进展、验证结果和下一步，再继续推进。",
+      ];
+
+  if (englishPreferred) {
+    return [
+      ...instructions,
+      "",
+      "Current loop context:",
+      `- Loop name: ${safeText(snapshot.config.loopName, snapshot.config.projectName)}`,
+      `- Thread title: ${safeText(snapshot.thread.threadTitle, "Unbound thread")}`,
+      `- Branch: ${safeText(snapshot.config.branch, "dev")}`,
+      `- User intent summary: ${safeText(snapshot.thread.lastUserInstructionSummary, "Continue the current loop")}`,
+      `- Last Codex action: ${safeText(snapshot.thread.lastAssistantActionSummary, "None yet")}`,
+      `- Latest Codex summary: ${safeText(snapshot.thread.latestCodexSummary, "None yet")}`,
+    ].join("\n");
+  }
 
   return [
     ...instructions,
@@ -820,7 +1103,7 @@ export async function requestGracefulStop(startDir = process.cwd(), payload = {}
   await writeJson(snapshot.paths.statePath, nextState);
   const nextThread = await persistThreadMirror(snapshot.paths.threadPath, snapshot.thread, nextState, {
     continuationStatus: "idle",
-    latestSummary: "已收到停止指令，当前循环进入收尾状态。请完成当前批次后输出总结、验证结果和下一步建议。",
+    latestSummary: finalizingSummary,
     latestEventType: "graceful_stop_requested",
     lastUpdatedAt: nowIso(),
   });
@@ -891,7 +1174,7 @@ export async function startRun(startDir = process.cwd()) {
   return readLoopSnapshot(startDir);
 }
 
-export async function runLoopTurn(
+async function runLoopTurnLegacy(
   startDir = process.cwd(),
   { dispatchThreadMessage = defaultDispatchThreadMessage } = {},
 ) {
@@ -993,6 +1276,133 @@ export async function runLoopTurn(
   }
 }
 
+export async function runLoopTurn(
+  startDir = process.cwd(),
+  {
+    dispatchThreadMessage = defaultDispatchThreadMessage,
+    generateFollowupPrompt = generatePromptWithOllama,
+  } = {},
+) {
+  const snapshot = await ensureLoopArtifacts(startDir);
+  if (!snapshot.thread.threadId) {
+    throw new Error("Cannot continue loop because no Codex thread is bound.");
+  }
+
+  const fallbackPrompt = buildFollowupPrompt(snapshot);
+  const promptGenerator = snapshot.profile?.resolved?.conversation?.promptGenerator || {};
+  if (!promptGenerator.enabled || promptGenerator.provider !== "ollama") {
+    return runLoopTurnLegacy(startDir, { dispatchThreadMessage });
+  }
+
+  let prompt = fallbackPrompt;
+  let promptGenerationError = "";
+
+  try {
+    prompt = await generateFollowupPrompt({
+      snapshot,
+      fallbackPrompt,
+    });
+  } catch (error) {
+    promptGenerationError = error.message;
+  }
+
+  const dispatchAt = nowIso();
+  const dispatchingThread = await persistThreadMirror(
+    snapshot.paths.threadPath,
+    snapshot.thread,
+    snapshot.state,
+    {
+      continuationEnabled: true,
+      continuationStatus: "dispatching",
+      lastDispatchAt: dispatchAt,
+      lastDispatchPrompt: prompt,
+      lastContinuationError: promptGenerationError,
+      latestSummary: "正在向绑定的 Codex 线程发送下一条续跑消息。",
+      lastUpdatedAt: dispatchAt,
+    },
+  );
+  await updateRegistryLoopBinding(
+    snapshot.paths.codexLoopRoot,
+    snapshot.config.currentRunId,
+    (loop) => ({ threadBinding: { ...(loop.threadBinding || {}), ...dispatchingThread } }),
+  );
+  await appendJsonLine(snapshot.paths.logPath, {
+    type: "codex_followup_dispatched",
+    at: dispatchAt,
+    threadId: snapshot.thread.threadId,
+    promptGenerator: "ollama",
+    promptGenerationError,
+  });
+
+  try {
+    const result = await dispatchThreadMessage({
+      threadId: snapshot.thread.threadId,
+      prompt,
+      workspaceRoot: snapshot.paths.workspaceRoot,
+    });
+    const completedAt = nowIso();
+    const refreshed = await ensureLoopArtifacts(startDir);
+    const completedThread = await persistThreadMirror(
+      refreshed.paths.threadPath,
+      refreshed.thread,
+      refreshed.state,
+      {
+        continuationEnabled: true,
+        continuationStatus: "idle",
+        continuationCycleCount: (refreshed.thread.continuationCycleCount || 0) + 1,
+        lastCompletionAt: completedAt,
+        lastContinuationError: promptGenerationError,
+        latestSummary: "下一条循环消息已发送到 Codex 线程，正在等待该线程完成这一轮。",
+        latestCodexSummary: safeText(result.lastMessage, refreshed.thread.latestCodexSummary),
+        latestEventType: "codex_followup_completed",
+        lastUpdatedAt: completedAt,
+      },
+    );
+    await updateRegistryLoopBinding(
+      refreshed.paths.codexLoopRoot,
+      refreshed.config.currentRunId,
+      (loop) => ({ threadBinding: { ...(loop.threadBinding || {}), ...completedThread } }),
+    );
+    await appendJsonLine(refreshed.paths.logPath, {
+      type: "codex_followup_completed",
+      at: completedAt,
+      threadId: refreshed.thread.threadId,
+      promptGenerator: "ollama",
+      promptGenerationError,
+    });
+    return readLoopSnapshot(startDir);
+  } catch (error) {
+    const failedAt = nowIso();
+    const refreshed = await ensureLoopArtifacts(startDir);
+    const failedThread = await persistThreadMirror(
+      refreshed.paths.threadPath,
+      refreshed.thread,
+      refreshed.state,
+      {
+        continuationEnabled: true,
+        continuationStatus: "error",
+        lastContinuationError: error.message,
+        latestSummary: "向 Codex 线程续发下一轮消息失败，请检查线程绑定或本机 Codex CLI 状态。",
+        latestEventType: "codex_followup_failed",
+        lastUpdatedAt: failedAt,
+      },
+    );
+    await updateRegistryLoopBinding(
+      refreshed.paths.codexLoopRoot,
+      refreshed.config.currentRunId,
+      (loop) => ({ threadBinding: { ...(loop.threadBinding || {}), ...failedThread } }),
+    );
+    await appendJsonLine(refreshed.paths.logPath, {
+      type: "codex_followup_failed",
+      at: failedAt,
+      threadId: refreshed.thread.threadId,
+      message: error.message,
+      promptGenerationError,
+    });
+    throw error;
+  }
+}
+
 export async function renameLoop(startDir = process.cwd(), payload = {}) {
   const snapshot = await ensureLoopArtifacts(startDir);
   const loopName = (payload.loopName || "").trim();
@@ -1046,8 +1456,12 @@ export async function createLoop(startDir = process.cwd(), payload = {}) {
     throw new Error("loopName is required");
   }
 
-  const requestedId = payload.loopId || payload.runId || sanitizeLoopId(loopName);
-  const loopId = sanitizeLoopId(requestedId);
+  const requestedId = payload.loopId || payload.runId || loopName;
+  const loopId = buildSafeLoopId(
+    requestedId,
+    payload.projectName ? `${payload.projectName}-${loopName}` : "",
+    "loop",
+  );
   if (!loopId) {
     throw new Error("loopId is required");
   }
@@ -1063,8 +1477,12 @@ export async function createLoop(startDir = process.cwd(), payload = {}) {
     projectName: payload.projectName || config.projectName || "project",
     projectAdapter:
       payload.projectAdapter || config.projectAdapter || config.projectName || "generic",
+    workspaceRoot: payload.workspaceRoot || config.workspaceRoot || layout.workspaceRoot,
     budgets: { ...config.budgets, ...(payload.budgets || {}) },
     startContextPaths: payload.startContextPaths || [],
+    docs: payload.docs || null,
+    git: payload.git || null,
+    creation: payload.creation || null,
     threadBinding: createLoopThreadBinding(
       {
         ...config,
@@ -1072,6 +1490,7 @@ export async function createLoop(startDir = process.cwd(), payload = {}) {
         loopName,
         threadTitle: payload.threadTitle || loopName,
         projectName: payload.projectName || config.projectName || "project",
+        workspaceRoot: payload.workspaceRoot || config.workspaceRoot || layout.workspaceRoot,
       },
       {
         workspaceName: payload.projectName || config.projectName || "project",
@@ -1156,6 +1575,149 @@ export async function deleteLoop(startDir = process.cwd(), payload = {}) {
   };
   await writeJson(registryPath, nextRegistry);
   return summarizeLoopRegistry(nextRegistry);
+}
+
+export async function getLoopCreationAssistantState(startDir = process.cwd()) {
+  const layout = await resolveProjectLayout(startDir);
+  const { state } = await loadLoopAssistantState(layout);
+  return state;
+}
+
+export async function replyLoopCreationAssistant(startDir = process.cwd(), payload = {}) {
+  const layout = await resolveProjectLayout(startDir);
+  const config = await readConfig(layout);
+  const { assistantPath, state } = await loadLoopAssistantState(layout);
+  const answer = safeText(payload.answer, "");
+  const draft = {
+    ...createLoopAssistantDraft(),
+    ...(state.draft || {}),
+    git: {
+      ...createLoopAssistantDraft().git,
+      ...(state.draft?.git || {}),
+    },
+    docs: {
+      ...createLoopAssistantDraft().docs,
+      ...(state.draft?.docs || {}),
+    },
+    projectProfile: {
+      ...createLoopAssistantDraft().projectProfile,
+      ...(state.draft?.projectProfile || {}),
+    },
+  };
+
+  if (state.step === "workspace_root") {
+    const workspaceRoot = path.resolve(answer);
+    const git = await detectGitMetadata(workspaceRoot);
+    const docs = await collectLoopDocs(workspaceRoot);
+    const projectProfile = await detectProjectProfileForAssistant(workspaceRoot);
+    const nextState = {
+      ...state,
+      status: "collecting",
+      step: "project_name",
+      draft: {
+        ...draft,
+        workspaceRoot,
+        projectName: projectProfile.detectedProjectName,
+        branch: normalizeBranchName(git.branch || config.branch || "dev"),
+        git,
+        docs,
+        projectProfile,
+      },
+      currentQuestion: buildLoopAssistantQuestion("project_name", {
+        ...draft,
+        projectName: projectProfile.detectedProjectName,
+      }),
+    };
+    return saveLoopAssistantState(assistantPath, nextState);
+  }
+
+  if (state.step === "project_name") {
+    const nextDraft = {
+      ...draft,
+      projectName: answer || draft.projectName || path.basename(draft.workspaceRoot),
+    };
+    return saveLoopAssistantState(assistantPath, {
+      ...state,
+      step: "loop_name",
+      draft: nextDraft,
+      currentQuestion: buildLoopAssistantQuestion("loop_name", nextDraft),
+    });
+  }
+
+  if (state.step === "loop_name") {
+    const nextDraft = {
+      ...draft,
+      loopName: answer,
+    };
+    return saveLoopAssistantState(assistantPath, {
+      ...state,
+      step: "branch",
+      draft: nextDraft,
+      currentQuestion: buildLoopAssistantQuestion("branch", nextDraft),
+    });
+  }
+
+  if (state.step === "branch") {
+    const nextDraft = {
+      ...draft,
+      branch: normalizeBranchName(answer, draft.git.branch || draft.branch || "dev"),
+    };
+    return saveLoopAssistantState(assistantPath, {
+      ...state,
+      step: "docs_confirmed",
+      draft: nextDraft,
+      currentQuestion: buildLoopAssistantQuestion("docs_confirmed", nextDraft),
+    });
+  }
+
+  let docs = {
+    ...draft.docs,
+    ruleDocs: [...(draft.docs?.ruleDocs || [])],
+    devDocs: [...(draft.docs?.devDocs || [])],
+    notes: [...(draft.docs?.notes || [])],
+  };
+  if (answer && answer.toLowerCase() !== "confirm") {
+    docs.devDocs = [...new Set([...docs.devDocs, path.resolve(answer)])];
+  }
+
+  const loopRegistry = await createLoop(startDir, {
+    loopName: draft.loopName,
+    runId: buildSafeLoopId(draft.loopName, draft.projectName, "assistant-loop"),
+    threadTitle: draft.loopName,
+    branch: draft.branch,
+    projectName: draft.projectName,
+    projectAdapter: config.projectAdapter || config.projectName || "generic",
+    workspaceRoot: draft.workspaceRoot,
+    docs,
+    git: draft.git,
+    startContextPaths: [...docs.ruleDocs, ...docs.devDocs],
+    creation: {
+      source: "assistant",
+      createdAt: nowIso(),
+      projectProfile: draft.projectProfile,
+      safety: {
+        requireGitPushReminder: true,
+        pauseOnPermissionIssue: true,
+        requireBranchConfirmation: true,
+      },
+    },
+  });
+  const createdLoopId = buildSafeLoopId(draft.loopName, draft.projectName, "assistant-loop");
+  const createdLoop = loopRegistry.loops.find((loop) => loop.id === createdLoopId);
+
+  return saveLoopAssistantState(assistantPath, {
+    status: "completed",
+    step: "completed",
+    draft: {
+      ...draft,
+      docs,
+    },
+    currentQuestion: null,
+    createdLoop: {
+      loop: createdLoop,
+      summary: `已创建 loop「${createdLoop.name}」，归入项目「${createdLoop.projectName}」。`,
+    },
+  });
 }
 
 export async function recordError(startDir = process.cwd(), payload) {

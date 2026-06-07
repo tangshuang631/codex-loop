@@ -103,6 +103,15 @@ export async function ensureAdapterArtifacts(startDir = process.cwd()) {
       stopPolicy: {},
       threadPolicy: {},
       verification: {},
+      conversation: {
+        language: "zh-CN",
+        promptGenerator: {
+          enabled: false,
+          provider: "ollama",
+          model: "qwen2.5:7b",
+          baseUrl: "http://127.0.0.1:11434",
+        },
+      },
     };
 
   const resolved = mergeObjects(
