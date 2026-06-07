@@ -172,6 +172,7 @@ function LoopCreationAssistantPane({
 }) {
   const currentQuestion = assistantState?.currentQuestion;
   const draft = assistantState?.draft || {};
+  const plan = draft.plan || {};
   const createdLoop = assistantState?.createdLoop?.loop;
 
   return (
@@ -216,6 +217,35 @@ function LoopCreationAssistantPane({
                 muted={!draft.docs?.ruleDocs?.length}
               />
             </div>
+            {plan.objectiveSummary ? (
+              <div className="detail-stack">
+                <DetailCard
+                  meta={plan.source === "ollama" ? "本地模型规划" : "模板规划"}
+                  title={plan.objectiveSummary}
+                  body={[
+                    `建议项目名：${formatValue(plan.suggestedProjectName, "暂无")}`,
+                    `建议 Loop 名：${formatValue(plan.suggestedLoopName, "暂无")}`,
+                    `建议分支：${formatValue(plan.suggestedBranch, "暂无")}`,
+                  ].join("\n")}
+                />
+                {plan.checklist?.length ? (
+                  <DetailCard
+                    meta="规划清单"
+                    title="创建前建议"
+                    body={plan.checklist.map((item, index) => `${index + 1}. ${item}`).join("\n")}
+                    quiet
+                  />
+                ) : null}
+                {plan.riskNotes?.length ? (
+                  <DetailCard
+                    meta="风险提醒"
+                    title="需要注意的点"
+                    body={plan.riskNotes.join("\n")}
+                    quiet
+                  />
+                ) : null}
+              </div>
+            ) : null}
           </div>
 
           <form
@@ -227,7 +257,11 @@ function LoopCreationAssistantPane({
           >
             <textarea
               value={assistantAnswer}
-              placeholder={currentQuestion.placeholder || "输入你的回答"}
+              placeholder={
+                currentQuestion.id === "project_name" && draft.workspaceRoot
+                  ? "也可以直接描述你的自动化 loop 规划意图"
+                  : currentQuestion.placeholder || "输入你的回答"
+              }
               onChange={(event) => setAssistantAnswer(event.target.value)}
               rows={4}
             />

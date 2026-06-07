@@ -8,6 +8,7 @@ import { applyHeartbeat, decideLoopMode } from "../../../scripts/lib/state.mjs";
 import { readResolvedLoopProfile } from "./adapter-store.mjs";
 import { dispatchThreadMessage as defaultDispatchThreadMessage } from "./codex-dispatcher.mjs";
 import { readLauncherStatus } from "./launcher-status.mjs";
+import { planLoopWithFallback } from "./ollama-loop-planner.mjs";
 import { generatePromptWithOllama } from "./ollama-prompt-generator.mjs";
 import { resolveProjectLayout } from "./paths.mjs";
 
@@ -289,6 +290,18 @@ function createLoopAssistantDraft() {
     projectName: "",
     loopName: "",
     branch: "dev",
+    intent: "",
+    plan: {
+      source: "",
+      objectiveSummary: "",
+      suggestedProjectName: "",
+      suggestedLoopName: "",
+      suggestedBranch: "",
+      checklist: [],
+      riskNotes: [],
+      nextQuestion: "",
+      error: "",
+    },
     git: {
       hasGit: false,
       branch: "",
@@ -314,6 +327,25 @@ function normalizeBranchName(value, fallback = "dev") {
   return text || fallback;
 }
 
+function looksLikePlanningIntent(answer) {
+  const text = safeText(answer, "").toLowerCase();
+  if (!text) {
+    return false;
+  }
+
+  return (
+    text.length >= 10 &&
+    (
+      text.includes("loop") ||
+      text.includes("自动化") ||
+      text.includes("规划") ||
+      text.includes("循环") ||
+      text.includes("计划") ||
+      text.includes("首个")
+    )
+  );
+}
+
 function buildLoopAssistantQuestion(step, draft = createLoopAssistantDraft()) {
   if (step === "workspace_root") {
     return {
@@ -324,26 +356,32 @@ function buildLoopAssistantQuestion(step, draft = createLoopAssistantDraft()) {
   }
 
   if (step === "project_name") {
+    const suggestedName = safeText(draft.plan?.suggestedProjectName, draft.projectName);
     return {
       id: "project_name",
-      prompt: "这个项目希望在左侧栏显示成什么项目名？",
-      placeholder: draft.projectName || "例如 codex-loop",
+      prompt: draft.plan?.nextQuestion || "这个项目希望在左侧栏显示成什么项目名？",
+      placeholder: suggestedName || draft.projectName || "例如 codex-loop",
     };
   }
 
   if (step === "loop_name") {
+    const suggestedLoopName = safeText(draft.plan?.suggestedLoopName, draft.loopName);
     return {
       id: "loop_name",
       prompt: "这个新 loop 的名称是什么？建议写成当前要推进的子任务。",
-      placeholder: "例如 核心链路推进",
+      placeholder: suggestedLoopName || "例如 核心链路推进",
     };
   }
 
   if (step === "branch") {
+    const suggestedBranch = safeText(
+      draft.plan?.suggestedBranch,
+      draft.git.branch || draft.git.recommendedBranch || draft.branch,
+    );
     return {
       id: "branch",
       prompt: "这个 loop 主要工作的分支是什么？默认建议使用 dev。",
-      placeholder: draft.git.branch || draft.git.recommendedBranch || "dev",
+      placeholder: suggestedBranch || "dev",
     };
   }
 
@@ -1599,6 +1637,10 @@ export async function replyLoopCreationAssistant(startDir = process.cwd(), paylo
       ...createLoopAssistantDraft().docs,
       ...(state.draft?.docs || {}),
     },
+    plan: {
+      ...createLoopAssistantDraft().plan,
+      ...(state.draft?.plan || {}),
+    },
     projectProfile: {
       ...createLoopAssistantDraft().projectProfile,
       ...(state.draft?.projectProfile || {}),
@@ -1632,6 +1674,45 @@ export async function replyLoopCreationAssistant(startDir = process.cwd(), paylo
   }
 
   if (state.step === "project_name") {
+    if (payload.planner?.enabled && !draft.intent && looksLikePlanningIntent(answer)) {
+      const plan = payload.planLoop
+        ? await payload.planLoop({ draft, answer })
+        : await planLoopWithFallback({
+            draft,
+            answer,
+            model: payload.planner?.model,
+            baseUrl: payload.planner?.baseUrl,
+          });
+      const suggestedProjectName =
+        safeText(plan.suggestedProjectName, "") ||
+        draft.projectName ||
+        path.basename(draft.workspaceRoot);
+      const suggestedLoopName =
+        safeText(plan.suggestedLoopName, "") || draft.loopName;
+      const suggestedBranch =
+        normalizeBranchName(
+          plan.suggestedBranch,
+          draft.git.branch || draft.branch || "dev",
+        );
+      const nextDraft = {
+        ...draft,
+        intent: answer,
+        projectName: suggestedProjectName,
+        loopName: suggestedLoopName,
+        branch: suggestedBranch,
+        plan: {
+          ...draft.plan,
+          ...plan,
+        },
+      };
+      return saveLoopAssistantState(assistantPath, {
+        ...state,
+        step: "project_name",
+        draft: nextDraft,
+        currentQuestion: buildLoopAssistantQuestion("project_name", nextDraft),
+      });
+    }
+
     const nextDraft = {
       ...draft,
       projectName: answer || draft.projectName || path.basename(draft.workspaceRoot),
@@ -1647,7 +1728,7 @@ export async function replyLoopCreationAssistant(startDir = process.cwd(), paylo
   if (state.step === "loop_name") {
     const nextDraft = {
       ...draft,
-      loopName: answer,
+      loopName: answer || draft.loopName || draft.plan?.suggestedLoopName,
     };
     return saveLoopAssistantState(assistantPath, {
       ...state,
@@ -1660,7 +1741,10 @@ export async function replyLoopCreationAssistant(startDir = process.cwd(), paylo
   if (state.step === "branch") {
     const nextDraft = {
       ...draft,
-      branch: normalizeBranchName(answer, draft.git.branch || draft.branch || "dev"),
+      branch: normalizeBranchName(
+        answer,
+        draft.plan?.suggestedBranch || draft.git.branch || draft.branch || "dev",
+      ),
     };
     return saveLoopAssistantState(assistantPath, {
       ...state,

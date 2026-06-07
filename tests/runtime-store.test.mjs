@@ -517,6 +517,64 @@ test("loop creation assistant asks for missing project path first", async () => 
   assert.match(state.currentQuestion.prompt, /项目路径|workspace/i);
 });
 
+test("loop creation assistant can start from a natural-language planning intent", async () => {
+  const configRoot = await createWorkspace();
+  const projectRoot = path.join(configRoot, "demo-project");
+  await fs.mkdir(projectRoot, { recursive: true });
+  await fs.writeFile(
+    path.join(projectRoot, "package.json"),
+    `${JSON.stringify(
+      {
+        name: "demo-project",
+        scripts: {
+          test: "vitest run",
+        },
+      },
+      null,
+      2,
+    )}\n`,
+    "utf8",
+  );
+  await fs.mkdir(path.join(projectRoot, ".git"), { recursive: true });
+  await fs.mkdir(path.join(projectRoot, "docs"), { recursive: true });
+  await fs.writeFile(path.join(projectRoot, "docs", "RULES.md"), "# rules\n", "utf8");
+
+  let state = await replyLoopCreationAssistant(configRoot, {
+    answer: projectRoot,
+  });
+  assert.equal(state.currentQuestion.id, "project_name");
+
+  state = await replyLoopCreationAssistant(configRoot, {
+    answer: "我要针对这个项目做自动化 loop 规划，先帮我设计第一个循环",
+    planner: {
+      enabled: true,
+    },
+    planLoop: async ({ draft, answer }) => {
+      assert.equal(draft.workspaceRoot, projectRoot);
+      assert.match(answer, /自动化 loop 规划/);
+      return {
+        source: "template",
+        objectiveSummary: "先围绕核心链路设计首个循环",
+        suggestedProjectName: "opencow",
+        suggestedLoopName: "首个核心链路循环",
+        suggestedBranch: "dev",
+        checklist: ["确认规则文档", "确认分支"],
+        riskNotes: ["Git 已存在"],
+        nextQuestion: "项目名要直接使用 opencow 吗？",
+      };
+    },
+  });
+
+  assert.equal(state.step, "project_name");
+  assert.equal(state.draft.intent, "我要针对这个项目做自动化 loop 规划，先帮我设计第一个循环");
+  assert.equal(state.draft.plan.objectiveSummary, "先围绕核心链路设计首个循环");
+  assert.equal(state.draft.projectName, "opencow");
+  assert.equal(state.draft.loopName, "首个核心链路循环");
+  assert.equal(state.draft.branch, "dev");
+  assert.equal(state.currentQuestion.id, "project_name");
+  assert.match(state.currentQuestion.prompt, /opencow/);
+});
+
 test("loop creation assistant can detect git, docs, and create a grouped loop", async () => {
   const configRoot = await createWorkspace();
   const projectRoot = path.join(configRoot, "demo-project");
