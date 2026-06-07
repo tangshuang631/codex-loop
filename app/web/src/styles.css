@@ -286,6 +286,26 @@ select {
   gap: 14px;
 }
 
+.sidebar-pane-hint {
+  display: grid;
+  gap: 8px;
+  padding: 14px 16px;
+  border: 1px dashed var(--line-strong);
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.78);
+}
+
+.sidebar-pane-hint strong {
+  font-size: 14px;
+}
+
+.sidebar-pane-hint p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.6;
+}
+
 .sidebar-disclosure {
   border: 1px solid var(--line);
   border-radius: 22px;
@@ -454,6 +474,52 @@ select {
 .workspace-main {
   padding: 26px;
   overflow: hidden;
+}
+
+.workspace-focus {
+  display: grid;
+  gap: 18px;
+}
+
+.workspace-focus-head {
+  display: grid;
+  gap: 10px;
+  padding: 28px;
+  border: 1px solid var(--line);
+  border-radius: 28px;
+  background: var(--panel);
+  box-shadow: var(--shadow);
+}
+
+.workspace-focus-head h1 {
+  margin: 0;
+  font-size: clamp(2.2rem, 4vw, 3.6rem);
+  line-height: 1.06;
+  letter-spacing: -0.04em;
+}
+
+.workspace-focus-head p {
+  margin: 0;
+  max-width: 760px;
+  color: var(--muted);
+  font-size: 15px;
+  line-height: 1.8;
+}
+
+.workspace-focus-eyebrow {
+  color: var(--muted);
+  font-size: 13px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.workspace-focus .assistant-pane,
+.workspace-focus .sidebar-pane-stack {
+  padding: 22px;
+  border: 1px solid var(--line);
+  border-radius: 28px;
+  background: var(--panel);
+  box-shadow: var(--shadow);
 }
 
 .workspace-hero,

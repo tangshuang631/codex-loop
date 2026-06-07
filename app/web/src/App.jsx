@@ -617,6 +617,46 @@ function ManagePane({
   );
 }
 
+function CreateWorkspaceView({
+  assistantState,
+  assistantAnswer,
+  setAssistantAnswer,
+  submitting,
+  onSubmit,
+}) {
+  return (
+    <section className="workspace-focus">
+      <div className="workspace-focus-head">
+        <span className="workspace-focus-eyebrow">创建新任务</span>
+        <h1>对话创建 loop</h1>
+        <p>右侧会完整显示创建流程，你现在不用再挤在侧边栏里操作。</p>
+      </div>
+
+      <LoopCreationAssistantPane
+        assistantState={assistantState}
+        assistantAnswer={assistantAnswer}
+        setAssistantAnswer={setAssistantAnswer}
+        submitting={submitting}
+        onSubmit={onSubmit}
+      />
+    </section>
+  );
+}
+
+function ManageWorkspaceView(props) {
+  return (
+    <section className="workspace-focus">
+      <div className="workspace-focus-head">
+        <span className="workspace-focus-eyebrow">任务管理</span>
+        <h1>调整当前 loop</h1>
+        <p>连接窗口、自动续跑、模型增强和关闭控制台都集中放在这里。</p>
+      </div>
+
+      <ManagePane {...props} />
+    </section>
+  );
+}
+
 export function App() {
   const [snapshot, setSnapshot] = useState(null);
   const [mobileView, setMobileView] = useState(null);
@@ -1026,45 +1066,15 @@ export function App() {
               </div>
             ) : null}
 
-            {activeSidebarPane === "create" ? (
-              <LoopCreationAssistantPane
-                assistantState={assistantState}
-                assistantAnswer={assistantAnswer}
-                setAssistantAnswer={setAssistantAnswer}
-                submitting={submitting}
-                onSubmit={() =>
-                  withSubmit(async () => {
-                    await requestJson("/loop-creation-assistant/reply", {
-                      method: "POST",
-                      body: JSON.stringify({ answer: assistantAnswer }),
-                    });
-                    setAssistantAnswer("");
-                  })
-                }
-              />
-            ) : null}
-
-            {activeSidebarPane === "manage" ? (
-              <ManagePane
-                threadForm={threadForm}
-                setThreadForm={setThreadForm}
-                settingsForm={settingsForm}
-                setSettingsForm={setSettingsForm}
-                automationStatus={automationStatus}
-                launcherPhase={launcherPhase}
-                launcherWebUrl={launcherWebUrl}
-                remoteAccessStatus={remoteAccessStatus}
-                remoteTransport={remoteTransport}
-                ollamaModels={ollamaModels}
-                promptGeneratorStatus={promptGeneratorStatus}
-                conversationLanguage={conversationLanguage}
-                healthIssues={healthIssues}
-                latestEvent={latestEvent}
-                snapshot={snapshot}
-                submitting={submitting}
-                withSubmit={withSubmit}
-                onRequestShutdown={requestFullShutdown}
-              />
+            {activeSidebarPane !== "loops" ? (
+              <div className="sidebar-pane-hint">
+                <strong>{activeSidebarPane === "create" ? "正在创建新任务" : "正在调整当前任务"}</strong>
+                <p>
+                  {activeSidebarPane === "create"
+                    ? "右侧已经切换到完整创建流程。"
+                    : "右侧已经切换到完整管理面板。"}
+                </p>
+              </div>
             ) : null}
           </>
         ) : (
@@ -1092,6 +1102,49 @@ export function App() {
       </aside>
 
       <section className="workspace-main">
+        {activeSidebarPane === "create" ? (
+          <CreateWorkspaceView
+            assistantState={assistantState}
+            assistantAnswer={assistantAnswer}
+            setAssistantAnswer={setAssistantAnswer}
+            submitting={submitting}
+            onSubmit={() =>
+              withSubmit(async () => {
+                await requestJson("/loop-creation-assistant/reply", {
+                  method: "POST",
+                  body: JSON.stringify({ answer: assistantAnswer }),
+                });
+                setAssistantAnswer("");
+              })
+            }
+          />
+        ) : null}
+
+        {activeSidebarPane === "manage" ? (
+          <ManageWorkspaceView
+            threadForm={threadForm}
+            setThreadForm={setThreadForm}
+            settingsForm={settingsForm}
+            setSettingsForm={setSettingsForm}
+            automationStatus={automationStatus}
+            launcherPhase={launcherPhase}
+            launcherWebUrl={launcherWebUrl}
+            remoteAccessStatus={remoteAccessStatus}
+            remoteTransport={remoteTransport}
+            ollamaModels={ollamaModels}
+            promptGeneratorStatus={promptGeneratorStatus}
+            conversationLanguage={conversationLanguage}
+            healthIssues={healthIssues}
+            latestEvent={latestEvent}
+            snapshot={snapshot}
+            submitting={submitting}
+            withSubmit={withSubmit}
+            onRequestShutdown={requestFullShutdown}
+          />
+        ) : null}
+
+        {activeSidebarPane === "loops" ? (
+        <>
         <section className="workspace-hero">
           <div className="workspace-hero-copy">
             <span className="workspace-hero-project">
@@ -1286,6 +1339,8 @@ export function App() {
             </Section>
           </aside>
         </div>
+        </>
+        ) : null}
       </section>
     </main>
   );

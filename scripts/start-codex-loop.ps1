@@ -14,6 +14,15 @@ function Write-Info {
   Write-Host "[info] $Message"
 }
 
+function Write-ProgressStep {
+  param(
+    [int]$Percent,
+    [string]$Message
+  )
+
+  Write-Host ("[{0,3}%] {1}" -f $Percent, $Message)
+}
+
 function Write-Ok {
   param([string]$Message)
   Write-Host "[ok] $Message" -ForegroundColor Green
@@ -24,35 +33,103 @@ function Write-Fail {
   Write-Host "[error] $Message" -ForegroundColor Red
 }
 
-function Stop-ExistingLoopProcesses {
-  param([Parameter(Mandatory = $true)][string]$LoopRoot)
+function Stop-ProcessTreeById {
+  param([int]$ProcessId)
 
-  $normalizedRoot = $LoopRoot.ToLowerInvariant()
-  $currentPid = $PID
-  $candidates = Get-CimInstance Win32_Process | Where-Object {
-    ($_.Name -ieq "cmd.exe" -or $_.Name -ieq "node.exe") -and
-    $_.ProcessId -ne $currentPid -and
-    $_.CommandLine -and
-    (
-      $_.CommandLine.ToLowerInvariant().Contains($normalizedRoot) -or
-      $_.CommandLine -like "*scripts/dev.mjs*" -or
-      $_.CommandLine -like "*app/server/index.mjs*" -or
-      $_.CommandLine -like "*app/web/vite.config.mjs*"
-    )
-  }
-
-  if (-not $candidates) {
+  if ($ProcessId -le 0 -or $ProcessId -eq $PID) {
     return
   }
 
-  $ids = @($candidates | Select-Object -ExpandProperty ProcessId | Select-Object -Unique)
+  cmd /c "taskkill /PID $ProcessId /T /F >nul 2>nul" | Out-Null
+}
+
+function Read-LauncherStatus {
+  param([Parameter(Mandatory = $true)][string]$LoopRoot)
+
+  $statusPath = Join-Path $LoopRoot "settings\launcher-status.json"
+  if (-not (Test-Path $statusPath)) {
+    return $null
+  }
+
+  try {
+    return Get-Content -Raw -Encoding UTF8 $statusPath | ConvertFrom-Json
+  } catch {
+    return $null
+  }
+}
+
+function Wait-LauncherReady {
+  param(
+    [Parameter(Mandatory = $true)][string]$LoopRoot,
+    [int]$TimeoutSeconds = 25
+  )
+
+  $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
+  while ((Get-Date) -lt $deadline) {
+    $status = Read-LauncherStatus -LoopRoot $LoopRoot
+    if ($status -and $status.phase -eq "ready" -and $status.webUrl) {
+      return $status
+    }
+
+    Start-Sleep -Milliseconds 500
+  }
+
+  return Read-LauncherStatus -LoopRoot $LoopRoot
+}
+
+function Get-PortOwnerIds {
+  param([int[]]$Ports = @())
+
+  $ownerIds = [System.Collections.Generic.HashSet[int]]::new()
+  foreach ($port in $Ports) {
+    if ($port -le 0) {
+      continue
+    }
+
+    try {
+      $connections = Get-NetTCPConnection -LocalPort $port -State Listen -ErrorAction Stop
+      foreach ($connection in $connections) {
+        $null = $ownerIds.Add([int]$connection.OwningProcess)
+      }
+    } catch {
+      continue
+    }
+  }
+
+  return @($ownerIds)
+}
+
+function Stop-ExistingLoopProcesses {
+  param(
+    [Parameter(Mandatory = $true)][string]$LoopRoot,
+    [int[]]$Ports = @()
+  )
+
+  $ids = [System.Collections.Generic.HashSet[int]]::new()
+  $status = Read-LauncherStatus -LoopRoot $LoopRoot
+  if ($status) {
+    foreach ($candidateId in @($status.launcherPid, $status.serverPid, $status.webPid)) {
+      $numericId = [int]($candidateId | ForEach-Object { $_ })
+      if ($numericId -gt 0 -and $numericId -ne $PID) {
+        $null = $ids.Add($numericId)
+      }
+    }
+  }
+
+  foreach ($ownerId in Get-PortOwnerIds -Ports $Ports) {
+    if ($ownerId -gt 0 -and $ownerId -ne $PID) {
+      $null = $ids.Add([int]$ownerId)
+    }
+  }
+
+  $ids = @($ids)
   if (-not $ids.Count) {
     return
   }
 
   Write-Step "Stopping existing codex-loop dev processes: $($ids -join ', ')"
   foreach ($id in $ids) {
-    cmd /c "taskkill /PID $id /T /F >nul 2>nul" | Out-Null
+    Stop-ProcessTreeById -ProcessId $id
   }
 }
 
@@ -67,6 +144,29 @@ function Invoke-CheckedCommand {
   if ($LASTEXITCODE -ne 0) {
     throw $FailureMessage
   }
+}
+
+function Invoke-JsonCommand {
+  param(
+    [Parameter(Mandatory = $true)][string]$FilePath,
+    [string[]]$Arguments = @(),
+    [string]$FailureMessage = "Command failed."
+  )
+
+  $output = & $FilePath @Arguments 2>&1
+  if ($LASTEXITCODE -ne 0) {
+    if ($output) {
+      Write-Host ($output -join [Environment]::NewLine)
+    }
+    throw $FailureMessage
+  }
+
+  $text = ($output -join [Environment]::NewLine).Trim()
+  if (-not $text) {
+    return $null
+  }
+
+  return $text | ConvertFrom-Json
 }
 
 try {
@@ -103,8 +203,10 @@ try {
 
   $Host.UI.RawUI.WindowTitle = "codex-loop launcher"
 
-  Write-Info "Tool root: $loopRoot"
-  Write-Info "Workspace: $workspaceRoot"
+  Write-Host ""
+  Write-Host "codex-loop 启动器" -ForegroundColor White
+  Write-Host "工作区: $workspaceRoot" -ForegroundColor DarkGray
+  Write-Host ""
 
   if (-not (Get-Command node -ErrorAction SilentlyContinue)) {
     throw "node was not found in PATH."
@@ -115,50 +217,56 @@ try {
   }
 
   if (-not (Test-Path (Join-Path $loopRoot "node_modules"))) {
-    Write-Step "Installing codex-loop dependencies..."
+    Write-ProgressStep -Percent 10 -Message "首次启动，正在准备依赖..."
     Invoke-CheckedCommand -FilePath "npm" -Arguments @("--prefix", $loopRoot, "install") -FailureMessage "Failed to install codex-loop dependencies."
   } else {
-    Write-Step "codex-loop dependencies detected."
+    Write-ProgressStep -Percent 10 -Message "依赖已就绪"
   }
 
-  Write-Step "Running environment check..."
-  Invoke-CheckedCommand -FilePath "npm" -Arguments @("--prefix", $loopRoot, "run", "loop:check") -FailureMessage "codex-loop environment check failed."
-  $checkResult = & node (Join-Path $loopRoot "scripts\check-env.mjs") | ConvertFrom-Json
+  Write-ProgressStep -Percent 25 -Message "正在检查运行环境..."
+  $checkResult = Invoke-JsonCommand -FilePath "node" -Arguments @(Join-Path $loopRoot "scripts\check-env.mjs") -FailureMessage "codex-loop environment check failed."
   $apiPort = [string]$checkResult.ports.apiPort
   $webPort = [string]$checkResult.ports.webPort
 
   if ($mode -ieq "check") {
-    Write-Ok "Environment check passed."
+    Write-ProgressStep -Percent 100 -Message "环境检查完成"
     exit 0
   }
 
-  Write-Step "Initializing loop runtime..."
-  Invoke-CheckedCommand -FilePath "npm" -Arguments @("--prefix", $loopRoot, "run", "loop:init") -FailureMessage "Loop initialization failed."
-  Stop-ExistingLoopProcesses -LoopRoot $loopRoot
+  Write-ProgressStep -Percent 45 -Message "正在初始化 loop 运行区..."
+  $initResult = Invoke-JsonCommand -FilePath "node" -Arguments @(Join-Path $loopRoot "scripts\init-run.mjs") -FailureMessage "Loop initialization failed."
 
-  Write-Info "Expected console URL: http://${hostName}:$webPort"
-  Write-Info "Use one persistent Codex thread for this loop."
-  if ($checkResult.requiredFiles.projectRules -or $checkResult.requiredFiles.docsRoot -or $checkResult.requiredFiles.progressPath) {
-    Write-Info "Read these first in the target workspace:"
-    if ($checkResult.requiredFiles.projectRules) {
-      Write-Host "        1. $($checkResult.requiredFiles.projectRules)"
-    }
-    if ($checkResult.requiredFiles.docsRoot) {
-      Write-Host "        2. $($checkResult.requiredFiles.docsRoot)"
-    }
-    if ($checkResult.requiredFiles.progressPath) {
-      Write-Host "        3. $($checkResult.requiredFiles.progressPath)"
-    }
-  } else {
-    Write-Info "No project-specific rule bundle is locked yet. Create or select a real loop in the sidebar first."
-  }
-  Write-Step "Opening codex-loop console window..."
+  Write-ProgressStep -Percent 60 -Message "正在清理旧的控制台进程..."
+  Stop-ExistingLoopProcesses -LoopRoot $loopRoot -Ports @([int]$apiPort, [int]$webPort)
+
+  Write-ProgressStep -Percent 72 -Message "正在启动控制台服务..."
 
   $command = "chcp 65001>nul && cd /d `"$loopRoot`" && set `"CODEX_LOOP_HOST=$hostName`" && set `"CODEX_LOOP_PORT=$apiPort`" && set `"CODEX_LOOP_WEB_PORT=$webPort`" && npm run dev"
-  Start-Process -FilePath "cmd.exe" -ArgumentList "/k", $command -WorkingDirectory $loopRoot -WindowStyle Normal
+  Start-Process -FilePath "cmd.exe" -ArgumentList "/k", $command -WorkingDirectory $loopRoot -WindowStyle Normal | Out-Null
 
-  Write-Ok "codex-loop launch requested."
-  Write-Info "If the browser does not open automatically, visit http://${hostName}:$webPort manually."
+  Write-ProgressStep -Percent 86 -Message "正在等待控制台就绪..."
+  $readyStatus = Wait-LauncherReady -LoopRoot $loopRoot
+  $resolvedUrl = if ($readyStatus -and $readyStatus.phase -eq "ready" -and $readyStatus.webUrl) {
+    [string]$readyStatus.webUrl
+  } else {
+    "http://${hostName}:$webPort"
+  }
+
+  if ($resolvedUrl) {
+    Start-Process -FilePath $resolvedUrl | Out-Null
+    Write-Host ""
+    Write-Host "============================================" -ForegroundColor Cyan
+    Write-Host " 100%  codex-loop 控制台已启动" -ForegroundColor Green
+    Write-Host " 实际访问地址: $resolvedUrl" -ForegroundColor Yellow
+    if ($initResult -and $initResult.runtimeRoot) {
+      Write-Host " 运行目录: $($initResult.runtimeRoot)" -ForegroundColor DarkGray
+    }
+    Write-Host "============================================" -ForegroundColor Cyan
+    Write-Host ""
+  }
+
+  Write-Ok "浏览器即将打开控制台。"
+  Write-Info "如果没有自动打开，请手动访问 $resolvedUrl"
   exit 0
 } catch {
   Write-Fail $_.Exception.Message
