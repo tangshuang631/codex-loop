@@ -281,7 +281,6 @@ function StatusSummaryPanel({
   modeText,
   continuationStatus,
   currentLoopName,
-  threadLabel,
   modelStatus,
   automationSchedule,
   healthSummary,
@@ -289,7 +288,6 @@ function StatusSummaryPanel({
   const rows = [
     ["运行状态", `${modeText} · ${continuationStatus}`],
     ["当前任务", currentLoopName],
-    ["绑定线程", threadLabel],
     ["本地模型", modelStatus],
     ["自动间隔", automationSchedule],
     ["提示", healthSummary],
@@ -909,12 +907,6 @@ function ManagePane({
               quiet
             />
           ) : null}
-          <DetailCard
-            meta="当前线程"
-            title={formatValue(snapshot?.thread?.threadTitle, "尚未绑定线程")}
-            body={formatValue(snapshot?.thread?.threadId, "还没有保存线程 ID")}
-            quiet
-          />
           <button
             type="button"
             className="ghost-button danger-zone-button"
@@ -1130,7 +1122,6 @@ function DashboardHomeLegacy({
               modeText={modeText}
               continuationStatus={continuationStatus}
               currentLoopName={legacyLoopName}
-              threadLabel={threadLabel}
               modelStatus={settingsForm.promptGeneratorEnabled ? `已开启 · ${settingsForm.promptGeneratorModel}` : "未开启"}
               automationSchedule={automationSchedule}
               healthSummary={legacyHealthSummary}
@@ -1333,7 +1324,6 @@ function DashboardHome({
               modeText={modeText}
               continuationStatus={continuationStatus}
               currentLoopName={currentLoopName}
-              threadLabel={threadLabel}
               modelStatus={settingsForm.promptGeneratorEnabled ? `已开启 · ${settingsForm.promptGeneratorModel}` : "未开启"}
               automationSchedule={automationSchedule}
               healthSummary={healthSummary}
@@ -1595,8 +1585,11 @@ export function App() {
       : pollState.lastSuccessAt
         ? `更新于 ${formatTime(pollState.lastSuccessAt)}`
         : "等待首轮同步";
-  const threadLabel =
+  const threadTitle =
     snapshot?.thread?.threadTitle || snapshot?.thread?.workspaceName || "尚未绑定可见窗口";
+  const threadLabel = snapshot?.thread?.threadId
+    ? `${threadTitle}（${snapshot.thread.threadId}）`
+    : threadTitle;
   const changeSummary =
     snapshot?.thread?.lastAssistantActionSummary ||
     mobileView?.summary?.recentSummary ||

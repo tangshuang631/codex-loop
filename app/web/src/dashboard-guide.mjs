@@ -32,6 +32,12 @@ function formatRecentTime(value) {
   });
 }
 
+function formatThreadDisplay(thread = {}) {
+  const title = safeText(thread.threadTitle || thread.workspaceName, "已绑定线程");
+  const threadId = safeText(thread.threadId, "");
+  return threadId ? `${title}（${threadId}）` : "还没有绑定线程";
+}
+
 export function deriveDashboardGuide({
   snapshot = {},
   currentLoop = null,
@@ -71,9 +77,7 @@ export function deriveDashboardGuide({
     },
     {
       label: "当前线程",
-      value: hasBoundThread
-        ? safeText(snapshot?.thread?.threadTitle, "已绑定线程")
-        : "还没有绑定线程",
+      value: hasBoundThread ? formatThreadDisplay(snapshot?.thread) : "还没有绑定线程",
     },
     {
       label: "最近同步",
