@@ -1,5 +1,20 @@
 import { markContinuationFailed, readLoopSnapshot, runLoopTurn } from "./runtime-store.mjs";
 
+function budgetLimitReached(state = {}) {
+  const budgets = state.budgets || {};
+  const maxMinutes = Number(budgets.maxMinutes);
+  const maxTokens = Number(budgets.maxTokens);
+  const finalizeLeadMinutes = Number(budgets.finalizeLeadMinutes || 0);
+  const finalizeLeadTokens = Number(budgets.finalizeLeadTokens || 0);
+  const elapsedMinutes = Number(state.elapsedMinutes || 0);
+  const consumedTokens = Number(state.consumedTokens || 0);
+
+  return (
+    (Number.isFinite(maxMinutes) && elapsedMinutes >= Math.max(0, maxMinutes - finalizeLeadMinutes)) ||
+    (Number.isFinite(maxTokens) && consumedTokens >= Math.max(0, maxTokens - finalizeLeadTokens))
+  );
+}
+
 export function createLoopController({
   readSnapshot = readLoopSnapshot,
   runTurn = runLoopTurn,
@@ -39,6 +54,11 @@ export function createLoopController({
       }
 
       if (snapshot.thread?.continuationStatus === "error") {
+        activeLoops.delete(startDir);
+        return;
+      }
+
+      if (budgetLimitReached(snapshot.state)) {
         activeLoops.delete(startDir);
         return;
       }

@@ -2,6 +2,9 @@ import { randomUUID } from "node:crypto";
 import { spawn, spawnSync } from "node:child_process";
 
 const APP_SERVER_TIMEOUT_MS = Number(process.env.CODEX_LOOP_APP_SERVER_TIMEOUT_MS || 120000);
+const APP_SERVER_DELIVERY_TIMEOUT_MS = Number(
+  process.env.CODEX_LOOP_APP_SERVER_DELIVERY_TIMEOUT_MS || 15000,
+);
 let cachedCodexCommand = "";
 
 function safeText(value, fallback = "") {
@@ -242,16 +245,13 @@ async function dispatchViaAppServer({ threadId, prompt, workspaceRoot, model }) 
     }
   }
 
-  async function waitForCompletion() {
+  async function waitForDelivery() {
     const startedAt = Date.now();
-    while (!turnCompleted && Date.now() - startedAt < APP_SERVER_TIMEOUT_MS) {
-      await new Promise((resolve) => setTimeout(resolve, 200));
+    while (!deliveryObserved && Date.now() - startedAt < APP_SERVER_DELIVERY_TIMEOUT_MS) {
+      await new Promise((resolve) => setTimeout(resolve, 100));
     }
-    if (!turnCompleted) {
-      throw new Error("Codex 已收到指令，但等待这一轮回复超时。");
-    }
-    if (turnStatus && turnStatus !== "completed") {
-      throw new Error(turnError || `Codex 本轮未正常完成：${turnStatus}`);
+    if (!deliveryObserved) {
+      throw new Error("Codex 桌面端未确认收到本次指令。");
     }
   }
 
@@ -295,14 +295,14 @@ async function dispatchViaAppServer({ threadId, prompt, workspaceRoot, model }) 
     turnId = safeText(turn.result?.turn?.id, turnId);
     deliveryObserved = Boolean(turnId);
 
-    await waitForCompletion();
+    await waitForDelivery();
     return {
       transport: "desktop-app-server-stdio",
       delivery: "desktop_visible_thread",
       nativeMethod: "thread/resume+turn/start",
       dispatchedTurnId: turnId,
       lastMessage,
-      completionObserved: true,
+      completionObserved: turnCompleted,
       deliveryObserved,
       delegated: buildDelegatedPrompt(prompt) !== prompt,
     };

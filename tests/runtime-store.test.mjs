@@ -919,6 +919,35 @@ test("runLoopTurn fails when native dispatch does not confirm target-thread deli
   assert.match(snapshot.thread.lastContinuationError, /未确认送达|没有观察到目标线程/);
 });
 
+test("runLoopTurn keeps waiting when native delivery succeeds but Codex has not completed yet", async () => {
+  const configRoot = await createWorkspace();
+  await ensureLoopArtifacts(configRoot);
+  await saveThreadBinding(configRoot, {
+    workspaceName: "demo",
+    threadTitle: "visible thread",
+    threadId: "thread-visible-wait",
+    singleThreadMode: true,
+  });
+  await syncCodexThreadMirror(configRoot, {
+    latestCodexSummary: "Previous turn already finished",
+  });
+
+  const snapshot = await runLoopTurn(configRoot, {
+    dispatchThreadMessage: async () => ({
+      lastMessage: "",
+      deliveryObserved: true,
+      completionObserved: false,
+      dispatchedTurnId: "turn-waiting",
+    }),
+    generateFollowupPrompt: async ({ fallbackPrompt }) => fallbackPrompt,
+  });
+
+  assert.equal(snapshot.state.mode, "running");
+  assert.equal(snapshot.thread.continuationStatus, "dispatching");
+  assert.equal(snapshot.thread.lastContinuationError, "");
+  assert.equal(snapshot.thread.latestEventType, "codex_followup_sent_waiting");
+});
+
 test("runLoopTurn rejects duplicate dispatch while a continuation is actively in flight", async () => {
   const configRoot = await createWorkspace();
   await ensureLoopArtifacts(configRoot);
@@ -950,18 +979,14 @@ test("runLoopTurn rejects duplicate dispatch while a continuation is actively in
   );
 });
 
-test("runLoopTurn refuses to continue when the previous dispatch is stalled and waits for manual recovery", async () => {
+test("runLoopTurn does not send another prompt while Codex is still processing", async () => {
   const configRoot = await createWorkspace();
   await ensureLoopArtifacts(configRoot);
   await saveThreadBinding(configRoot, {
     workspaceName: "demo",
-    threadTitle: "stalled thread",
-    threadId: "thread-recovered",
+    threadTitle: "busy thread",
+    threadId: "thread-still-processing",
     singleThreadMode: true,
-  });
-  await syncCodexThreadMirror(configRoot, {
-    lastUserInstructionSummary: "continue the core loop",
-    latestCodexSummary: "the previous continuation stalled while waiting for Codex",
   });
 
   const busySnapshot = await readLoopSnapshot(configRoot);
@@ -981,17 +1006,14 @@ test("runLoopTurn refuses to continue when the previous dispatch is stalled and 
   );
 
   const refreshed = await readLoopSnapshot(configRoot);
-  assert.equal(refreshed.thread.continuationStatus, "error");
-  assert.match(refreshed.thread.latestSummary, /停止自动续发|手动继续/);
-  assert.match(refreshed.thread.lastContinuationError, /等待 Codex 完成|停止自动续发/i);
+  assert.equal(refreshed.thread.continuationStatus, "dispatching");
+  assert.equal(refreshed.thread.lastContinuationError, "");
+  assert.match(refreshed.health.issues.join(","), /continuation:stalled/);
 
   await assert.rejects(
     () => runLoopTurn(configRoot),
-    /还没有确认 Codex 已完成|目标线程完成当前工作/i,
+    /already dispatching/i,
   );
-
-  const transcriptText = await fs.readFile(busySnapshot.paths.transcriptPath, "utf8");
-  assert.match(transcriptText, /codex_followup_stalled|停止自动续发|手动继续/i);
 });
 
 test("runLoopTurn rejects using the current Codex session thread as the loop target", async () => {
@@ -1546,49 +1568,26 @@ test("readLoopSnapshot marks health issue when heartbeat is stale", async () => 
   assert.match(refreshed.health.issues.join(","), /heartbeat:stale/);
 });
 
-test("readLoopSnapshot marks a stalled continuation as waiting for manual confirmation", async () => {
+test("readLoopSnapshot reports long-running Codex work without converting it to failure", async () => {
   const configRoot = await createWorkspace();
   const snapshot = await ensureLoopArtifacts(configRoot);
-  const staleAt = new Date(Date.now() - 1000 * 60 * 10).toISOString();
   await saveThreadBinding(configRoot, {
     workspaceName: "demo",
-    threadTitle: "stalled thread",
-    threadId: "thread-123",
+    threadTitle: "long-running thread",
+    threadId: "thread-long-running",
     singleThreadMode: true,
   });
-  await syncCodexThreadMirror(configRoot, {
-    latestCodexSummary: "stalled run",
-  });
-  const nextThread = {
-    ...((await readLoopSnapshot(configRoot)).thread),
-    continuationEnabled: true,
-    continuationStatus: "dispatching",
-    lastDispatchAt: staleAt,
-  };
-  await fs.writeFile(snapshot.paths.threadPath, `${JSON.stringify(nextThread, null, 2)}\n`, "utf8");
+
+  const currentThread = (await readLoopSnapshot(configRoot)).thread;
   await fs.writeFile(
-    path.join(configRoot, "codex_loop", "settings", "loops.json"),
+    snapshot.paths.threadPath,
     `${JSON.stringify(
       {
-        currentLoopId: "run-a",
-        version: 1,
-        generatedAt: new Date().toISOString(),
-        loops: [
-          {
-            id: "run-a",
-            runId: "run-a",
-            name: "demo",
-            threadTitle: "stalled thread",
-            branch: "dev",
-            projectName: "demo",
-            projectAdapter: "generic",
-            budgets: buildConfig().budgets,
-            startContextPaths: [],
-            threadBinding: nextThread,
-            createdAt: new Date().toISOString(),
-            updatedAt: new Date().toISOString(),
-          },
-        ],
+        ...currentThread,
+        continuationEnabled: true,
+        continuationStatus: "dispatching",
+        lastContinuationError: "",
+        lastDispatchAt: new Date(Date.now() - 1000 * 60 * 12).toISOString(),
       },
       null,
       2,
@@ -1597,13 +1596,10 @@ test("readLoopSnapshot marks a stalled continuation as waiting for manual confir
   );
 
   const refreshed = await readLoopSnapshot(configRoot);
-  assert.equal(refreshed.thread.continuationStatus, "error");
-  assert.match(refreshed.thread.lastContinuationError, /等待 Codex 完成|停止自动续发/i);
+  assert.equal(refreshed.thread.continuationStatus, "dispatching");
+  assert.equal(refreshed.thread.lastContinuationError, "");
   assert.equal(refreshed.health.ok, false);
-  assert.match(refreshed.health.issues.join(","), /continuation:error/);
-
-  const transcriptText = await fs.readFile(snapshot.paths.transcriptPath, "utf8");
-  assert.match(transcriptText, /codex_followup_stalled|停止自动续发|手动继续/i);
+  assert.match(refreshed.health.issues.join(","), /continuation:stalled/);
 });
 
 test("readLoopSnapshot marks health issue when transcript is stale during an active run", async () => {

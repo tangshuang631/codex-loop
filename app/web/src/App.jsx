@@ -510,6 +510,7 @@ function StatusPill({ text, tone = "default", active = false }) {
 function StatusSummaryPanel({
   modeText,
   continuationStatus,
+  codexWorkStatus,
   currentLoopName,
   threadLabel,
   modelStatus,
@@ -518,6 +519,7 @@ function StatusSummaryPanel({
 }) {
   const rows = [
     ["运行", `${modeText} · ${continuationStatus}`],
+    ["Codex", codexWorkStatus],
     ["任务", currentLoopName],
     ["线程", threadLabel],
     ["模型", modelStatus],
@@ -1043,6 +1045,15 @@ function ManagePane({
                   }),
                 });
               }
+              await requestJson("/budgets", {
+                method: "POST",
+                body: JSON.stringify({
+                  maxMinutes: Number(settingsForm.maxMinutes),
+                  maxTokens: Number(settingsForm.maxTokens),
+                  finalizeLeadMinutes: Number(settingsForm.finalizeLeadMinutes),
+                  finalizeLeadTokens: Number(settingsForm.finalizeLeadTokens),
+                }),
+              });
             });
           }}
         >
@@ -1144,6 +1155,65 @@ function ManagePane({
                     setSettingsForm((current) => ({
                       ...current,
                       promptGeneratorBaseUrl: event.target.value,
+                    }))
+                  }
+                />
+              </label>
+            </div>
+
+            <div className="settings-grid">
+              <label>
+                <span>最长运行时间（分钟）</span>
+                <input
+                  type="number"
+                  min="1"
+                  value={settingsForm.maxMinutes}
+                  onChange={(event) =>
+                    setSettingsForm((current) => ({
+                      ...current,
+                      maxMinutes: event.target.value,
+                    }))
+                  }
+                />
+              </label>
+              <label>
+                <span>最大 token 预算</span>
+                <input
+                  type="number"
+                  min="1"
+                  value={settingsForm.maxTokens}
+                  onChange={(event) =>
+                    setSettingsForm((current) => ({
+                      ...current,
+                      maxTokens: event.target.value,
+                    }))
+                  }
+                />
+              </label>
+              <label>
+                <span>提前收尾时间（分钟）</span>
+                <input
+                  type="number"
+                  min="0"
+                  value={settingsForm.finalizeLeadMinutes}
+                  onChange={(event) =>
+                    setSettingsForm((current) => ({
+                      ...current,
+                      finalizeLeadMinutes: event.target.value,
+                    }))
+                  }
+                />
+              </label>
+              <label>
+                <span>提前收尾 token</span>
+                <input
+                  type="number"
+                  min="0"
+                  value={settingsForm.finalizeLeadTokens}
+                  onChange={(event) =>
+                    setSettingsForm((current) => ({
+                      ...current,
+                      finalizeLeadTokens: event.target.value,
                     }))
                   }
                 />
@@ -1322,6 +1392,13 @@ function DashboardHome({
     : isDispatching || isRunning
       ? "is-active"
       : "is-idle";
+  const codexWorkStatus = isFinalizing
+    ? "正在收尾，当前轮结束后停止"
+    : isDispatching
+      ? "Codex 正在处理，暂不发送下一条"
+      : isRunning
+        ? "等待下一轮循环指令"
+        : "已停止";
   const latestVisibleSummary = summarizeVisibleText(
     snapshot?.thread?.latestCodexSummary || latestSummary,
     "等待第一轮可见进展",
@@ -1430,6 +1507,7 @@ function DashboardHome({
             <StatusSummaryPanelV2
               modeText={modeText}
               continuationStatus={continuationStatus}
+              codexWorkStatus={codexWorkStatus}
               currentLoopName={loopTitle}
               threadLabel={threadLabel}
               modelStatus={modelStatus}
@@ -1474,6 +1552,10 @@ export function App() {
     promptGeneratorEnabled: false,
     promptGeneratorModel: "qwen2.5:7b",
     promptGeneratorBaseUrl: "http://127.0.0.1:11434",
+    maxMinutes: "180",
+    maxTokens: "120000",
+    finalizeLeadMinutes: "20",
+    finalizeLeadTokens: "15000",
   });
   const [pollState, setPollState] = useState({
     syncing: false,
@@ -1549,6 +1631,10 @@ export function App() {
         promptGeneratorBaseUrl:
           nextSnapshot.profile?.resolved?.conversation?.promptGenerator?.baseUrl ||
           "http://127.0.0.1:11434",
+        maxMinutes: String(nextSnapshot.state?.budgets?.maxMinutes ?? 180),
+        maxTokens: String(nextSnapshot.state?.budgets?.maxTokens ?? 120000),
+        finalizeLeadMinutes: String(nextSnapshot.state?.budgets?.finalizeLeadMinutes ?? 20),
+        finalizeLeadTokens: String(nextSnapshot.state?.budgets?.finalizeLeadTokens ?? 15000),
       });
       setUiError("");
       setPollState({

@@ -95,3 +95,44 @@ test("loop controller records a visible failure when a turn crashes", async () =
   assert.equal(failures[0].details.message, "native dispatch unavailable");
   assert.equal(controller.isRunning("demo"), false);
 });
+
+test("loop controller stops before sending another turn when budget limit is reached", async () => {
+  let runTurnCount = 0;
+  const scheduled = [];
+  const snapshots = [
+    {
+      state: {
+        mode: "running",
+        stopRequested: false,
+        finalizeRequested: false,
+        elapsedMinutes: 120,
+        consumedTokens: 1000,
+        budgets: {
+          maxMinutes: 120,
+          maxTokens: 50000,
+          finalizeLeadMinutes: 0,
+          finalizeLeadTokens: 0,
+        },
+      },
+      thread: { continuationStatus: "idle", lastCompletionAt: "" },
+    },
+  ];
+
+  const controller = createLoopController({
+    readSnapshot: async () => snapshots[0],
+    runTurn: async () => {
+      runTurnCount += 1;
+    },
+    schedule: (fn) => {
+      scheduled.push(fn);
+      return fn;
+    },
+    cancel: () => {},
+  });
+
+  assert.equal(await controller.start("demo"), true);
+  assert.equal(await flushScheduled(scheduled), true);
+
+  assert.equal(runTurnCount, 0);
+  assert.equal(controller.isRunning("demo"), false);
+});

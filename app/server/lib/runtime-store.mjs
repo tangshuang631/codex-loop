@@ -26,6 +26,7 @@ const HEARTBEAT_STALE_MS = 15 * 60 * 1000;
 const CONTINUATION_STALLED_MS = 5 * 60 * 1000;
 const FINALIZE_WAIT_MS = 90 * 1000;
 const TRANSCRIPT_STALE_MS = 15 * 60 * 1000;
+const AUTO_FAIL_STALLED_CONTINUATION = false;
 const activeContinuationKeys = new Set();
 const activeRecoveryKeys = new Set();
 
@@ -1708,7 +1709,11 @@ export async function ensureLoopArtifacts(startDir = process.cwd()) {
   );
 
   const recoveryKey = `${layout.codexLoopRoot}:${thread.threadId || runId}`;
-  if (isContinuationStalled(thread) && !activeRecoveryKeys.has(recoveryKey)) {
+  if (
+    AUTO_FAIL_STALLED_CONTINUATION &&
+    isContinuationStalled(thread) &&
+    !activeRecoveryKeys.has(recoveryKey)
+  ) {
     activeRecoveryKeys.add(recoveryKey);
     try {
       const recoveredAt = nowIso();
