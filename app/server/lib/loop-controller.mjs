@@ -1,4 +1,9 @@
-import { markContinuationFailed, readLoopSnapshot, runLoopTurn } from "./runtime-store.mjs";
+import {
+  markContinuationFailed,
+  readLoopSnapshot,
+  requestGracefulStop,
+  runLoopTurn,
+} from "./runtime-store.mjs";
 
 function budgetLimitReached(state = {}) {
   const budgets = state.budgets || {};
@@ -19,6 +24,7 @@ export function createLoopController({
   readSnapshot = readLoopSnapshot,
   runTurn = runLoopTurn,
   markFailed = markContinuationFailed,
+  requestStop = requestGracefulStop,
   schedule = setTimeout,
   cancel = clearTimeout,
 } = {}) {
@@ -59,6 +65,9 @@ export function createLoopController({
       }
 
       if (budgetLimitReached(snapshot.state)) {
+        await requestStop(startDir, {
+          reason: "预算已到达，codex-loop 已停止自动发送下一轮指令。",
+        });
         activeLoops.delete(startDir);
         return;
       }

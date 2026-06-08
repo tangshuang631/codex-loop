@@ -98,6 +98,7 @@ test("loop controller records a visible failure when a turn crashes", async () =
 
 test("loop controller stops before sending another turn when budget limit is reached", async () => {
   let runTurnCount = 0;
+  const stopRequests = [];
   const scheduled = [];
   const snapshots = [
     {
@@ -123,6 +124,9 @@ test("loop controller stops before sending another turn when budget limit is rea
     runTurn: async () => {
       runTurnCount += 1;
     },
+    requestStop: async (startDir, payload) => {
+      stopRequests.push({ startDir, payload });
+    },
     schedule: (fn) => {
       scheduled.push(fn);
       return fn;
@@ -134,5 +138,8 @@ test("loop controller stops before sending another turn when budget limit is rea
   assert.equal(await flushScheduled(scheduled), true);
 
   assert.equal(runTurnCount, 0);
+  assert.equal(stopRequests.length, 1);
+  assert.equal(stopRequests[0].startDir, "demo");
+  assert.match(stopRequests[0].payload.reason, /预算|budget/i);
   assert.equal(controller.isRunning("demo"), false);
 });
