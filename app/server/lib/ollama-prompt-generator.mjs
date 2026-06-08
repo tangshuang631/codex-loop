@@ -54,17 +54,20 @@ function extractJsonMessage(text) {
   return "";
 }
 
-function shouldReplaceOrdinaryUserDeferral(text) {
+function hasHighRiskSignal(text) {
+  return /删除|清空|覆盖|重置|回滚|不可逆|凭证|密钥|token|权限|授权|登录|安全|支付|费用|生产环境|destructive|irreversible|credential|permission|security|payment|production/i.test(
+    safeText(text, ""),
+  );
+}
+
+function shouldReplaceOrdinaryUserDeferral(text, context = "") {
   const value = safeText(text, "");
   if (!value) return false;
   const asksForConfirmation =
     /(?:如果)?没有偏好|等待.*用户|用户确认|待.*确认|等.*确认后再继续|defer to the human|wait for user confirmation/i.test(
       value,
     );
-  const highRisk =
-    /删除|清空|覆盖|重置|回滚|不可逆|凭证|密钥|token|权限|授权|登录|安全|支付|费用|生产环境|destructive|irreversible|credential|permission|security|payment|production/i.test(
-      value,
-    );
+  const highRisk = hasHighRiskSignal(`${value}\n${safeText(context, "")}`);
   return asksForConfirmation && !highRisk;
 }
 
@@ -94,7 +97,10 @@ function cleanGeneratedMessage(value, maxChars = 900, options = {}) {
     .replace(/^(?:message|prompt|instruction|text|下一步指令|回复)[:：]\s*/i, "")
     .trim();
 
-  if (options.replaceOrdinaryUserDeferral && shouldReplaceOrdinaryUserDeferral(text)) {
+  if (
+    options.replaceOrdinaryUserDeferral &&
+    shouldReplaceOrdinaryUserDeferral(text, options.riskContext)
+  ) {
     text = decisiveContinuationFallback(options.englishPreferred);
   }
 
@@ -196,6 +202,12 @@ export async function generatePromptWithOllama({
   const generated = cleanGeneratedMessage(data.response, 900, {
     replaceOrdinaryUserDeferral: true,
     englishPreferred,
+    riskContext: [
+      snapshot.thread.latestCodexSummary,
+      snapshot.thread.lastAssistantActionSummary,
+      snapshot.thread.latestSummary,
+      snapshot.state.recentSummary,
+    ].join("\n"),
   });
   if (!generated) {
     throw new Error("ollama returned an empty prompt");
