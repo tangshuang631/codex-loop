@@ -239,6 +239,28 @@ test("startRun records a visible launch signal before the first heartbeat", asyn
   assert.match(transcriptText, /run_started_from_console/);
 });
 
+test("readLoopSnapshot exposes readable runtime events for the dashboard", async () => {
+  const configRoot = await createWorkspace();
+  await ensureLoopArtifacts(configRoot);
+  await startRun(configRoot);
+  await savePendingGuidance(configRoot, {
+    text: "下一轮优先检查运行记录是否清楚。",
+  });
+
+  const snapshot = await readLoopSnapshot(configRoot);
+
+  assert.equal(Array.isArray(snapshot.runtimeEvents), true);
+  assert.match(
+    snapshot.runtimeEvents.map((event) => event.title).join("\n"),
+    /已开始循环/,
+  );
+  assert.match(
+    snapshot.runtimeEvents.map((event) => event.title).join("\n"),
+    /已记录下一轮补充/,
+  );
+  assert.doesNotMatch(snapshot.runtimeEvents[0].title, /_/);
+});
+
 test("startRun preserves an active Codex dispatch instead of reopening it as idle", async () => {
   const configRoot = await createWorkspace();
   const initialSnapshot = await ensureLoopArtifacts(configRoot);

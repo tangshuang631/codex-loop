@@ -10,6 +10,7 @@ import {
   exportLoopSummary,
   recordHeartbeat,
   saveThreadBinding,
+  savePendingGuidance,
   startRun,
   requestGracefulStop,
 } from "../app/server/lib/runtime-store.mjs";
@@ -112,6 +113,35 @@ test("exportMobileView returns recent transcript entries for mobile readers", as
   assert.match(mobile.suggestedAction, /\u7b49\u5f85|\u7eed\u8dd1|\u7ed1\u5b9a/);
   assert.match(mobile.strategy.contextCard.whyContinue, /继续|Review mobile transcript|暂无/);
   assert.ok(mobile.strategy.guardrailCard.stopRule);
+});
+
+test("exportMobileView returns readable runtime events for mobile monitoring", async () => {
+  const configRoot = await createWorkspace();
+  await ensureLoopArtifacts(configRoot);
+  await saveThreadBinding(configRoot, {
+    workspaceName: "demo",
+    threadTitle: "\u79fb\u52a8\u7aef\u76d1\u63a7\u7ebf\u7a0b",
+    threadId: "thread-readable-events",
+    singleThreadMode: true,
+  });
+  await startRun(configRoot);
+  await savePendingGuidance(configRoot, {
+    text: "\u4e0b\u4e00\u8f6e\u4f18\u5148\u68c0\u67e5\u79fb\u52a8\u7aef\u72b6\u6001\u6458\u8981\u3002",
+  });
+
+  const mobile = await exportMobileView(configRoot);
+
+  assert.equal(Array.isArray(mobile.runtimeEvents), true);
+  assert.equal(mobile.runtimeEvents.length >= 2, true);
+  assert.match(
+    mobile.runtimeEvents.map((event) => event.title).join("\n"),
+    /\u5df2\u5f00\u59cb\u5faa\u73af/,
+  );
+  assert.match(
+    mobile.runtimeEvents.map((event) => event.title).join("\n"),
+    /\u5df2\u8bb0\u5f55\u4e0b\u4e00\u8f6e\u8865\u5145/,
+  );
+  assert.doesNotMatch(mobile.runtimeEvents[0].title, /_/);
 });
 
 test("exportMobileView suggests binding a visible thread before starting when thread is missing", async () => {

@@ -115,6 +115,89 @@ function buildPromptPreview(prompt, maxLength = 180) {
   return summarizeForFollowup(prompt, maxLength);
 }
 
+async function readJsonLines(filePath, limit = 20) {
+  try {
+    const text = await fs.readFile(filePath, "utf8");
+    return text
+      .split(/\r?\n/u)
+      .map((line) => line.trim())
+      .filter(Boolean)
+      .slice(-limit)
+      .map((line) => {
+        try {
+          return JSON.parse(line);
+        } catch {
+          return null;
+        }
+      })
+      .filter(Boolean);
+  } catch (error) {
+    if (error && error.code === "ENOENT") {
+      return [];
+    }
+    throw error;
+  }
+}
+
+function readableRuntimeEventTitle(type) {
+  const titles = {
+    artifacts_verified: "运行文件已就绪",
+    thread_binding_updated: "已绑定线程",
+    run_started_from_console: "已开始循环",
+    heartbeat: "已同步进展",
+    pending_guidance_saved: "已记录下一轮补充",
+    codex_followup_dispatching: "正在发送下一轮指令",
+    codex_followup_dispatched: "正在等待 Codex 回复",
+    codex_followup_sent_waiting: "指令已送达，等待 Codex",
+    codex_followup_completed: "Codex 已完成一轮",
+    codex_thread_mirror_synced: "已同步 Codex 记录",
+    codex_conversation_mirror_synced: "已同步 Codex 对话",
+    codex_followup_failed: "续跑失败",
+    codex_followup_stalled: "等待超时，已停止自动续发",
+    graceful_stop_requested: "已请求停止",
+    graceful_stop_completed: "已停止循环",
+    graceful_stop_wait_elapsed: "停止等待已结束",
+    runtime_error: "运行异常",
+    summary_exported: "已导出摘要",
+    loop_renamed: "已重命名任务",
+  };
+  return titles[type] || "运行记录";
+}
+
+function readableRuntimeEventDetail(event = {}) {
+  return firstNonEmpty(
+    event.preview,
+    event.progressSummary,
+    event.summary,
+    event.note,
+    event.reason,
+    event.message,
+    event.error,
+    event.latestAssistantPreview,
+    event.threadTitle,
+    event.loopName,
+    event.threadId,
+  );
+}
+
+async function readReadableRuntimeEvents(logPath, limit = 12) {
+  const events = await readJsonLines(logPath, Math.max(limit * 3, 30));
+  return events
+    .reverse()
+    .map((event) => {
+      const type = safeText(event.type, "");
+      return {
+        at: safeText(event.at, ""),
+        type,
+        title: readableRuntimeEventTitle(type),
+        detail: summarizeForFollowup(readableRuntimeEventDetail(event), 180),
+        tone: /failed|error|stalled/i.test(type) ? "danger" : "normal",
+      };
+    })
+    .filter((event) => event.at || event.type)
+    .slice(0, limit);
+}
+
 function markErrorAlreadyRecorded(error) {
   if (error && typeof error === "object") {
     error.codexLoopRecorded = true;
@@ -1040,6 +1123,7 @@ function summarizeSnapshot({
   errorState,
   health,
   codexConversation = null,
+  runtimeEvents = [],
 }) {
   return {
     config,
@@ -1053,6 +1137,7 @@ function summarizeSnapshot({
     error: errorState,
     health,
     codexConversation,
+    runtimeEvents,
   };
 }
 
@@ -1223,6 +1308,7 @@ export async function exportMobileView(startDir = process.cwd()) {
   const launcher = await readLauncherStatus(startDir);
   const transcriptText = await fs.readFile(snapshot.paths.transcriptPath, "utf8");
   const transcriptEntries = parseTranscriptEntries(transcriptText);
+  const runtimeEvents = await readReadableRuntimeEvents(snapshot.paths.logPath);
   const strategy = buildContinuationStrategy(snapshot);
   const boundThreadLabel = snapshot.thread.threadTitle || snapshot.thread.threadId;
   const bindingNote = safeText(
@@ -1263,6 +1349,7 @@ export async function exportMobileView(startDir = process.cwd()) {
     bindingNote,
     suggestedAction,
     latestPrompt: snapshot.thread.lastDispatchPrompt || "",
+    runtimeEvents,
     transcriptEntries:
       transcriptEntries.length > 0
         ? transcriptEntries
@@ -1899,6 +1986,7 @@ export async function ensureLoopArtifacts(startDir = process.cwd()) {
     ? await readCodexConversationMirror(thread.threadId)
     : codexConversation;
   const health = await inspectLoopHealth(paths, state, thread, errorState);
+  const runtimeEvents = await readReadableRuntimeEvents(logPath);
 
   return summarizeSnapshot({
     config,
@@ -1909,6 +1997,7 @@ export async function ensureLoopArtifacts(startDir = process.cwd()) {
     errorState,
     health,
     codexConversation: refreshedCodexConversation,
+    runtimeEvents,
   });
 }
 
