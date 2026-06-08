@@ -223,22 +223,40 @@ const THREAD_ID_REQUEST_PROMPT =
   "请告诉我当前这个 Codex 窗口的 threadId，只输出 threadId，不要输出解释。";
 
 function ThreadIdHelpCard({ compact = false }) {
+  const steps = compact
+    ? [
+        "在要接入的 Codex 窗口发送下面这句话。",
+        "复制 Codex 返回的 threadId。",
+        "粘贴到新 loop 的线程 ID，再继续创建。",
+      ]
+    : [
+        "打开新的 Codex 窗口，复制这句话发给 Codex。",
+        "它返回 threadId 后，粘贴到线程 ID。",
+        "保存绑定后再开始循环。",
+      ];
+
   return (
     <div className={`thread-id-help-card ${compact ? "is-compact" : ""}`}>
       <div>
-        <strong>{compact ? "绑定新窗口" : "获取线程号"}</strong>
+        <strong>{compact ? "新窗口线程号" : "获取线程号"}</strong>
         <p>
           {compact
-            ? "先在目标 Codex 窗口发出这句话，Codex 返回 threadId 后，再回到这里继续填写新 loop。"
-            : "打开新的 Codex 窗口，复制这句话发给 Codex。它返回 threadId 后，粘贴到线程 ID，再保存绑定。"}
+            ? "创建前先确认这个 loop 要绑定哪个 Codex 窗口。"
+            : "用这一句向目标 Codex 窗口询问 threadId，再把结果保存到绑定信息里。"}
         </p>
       </div>
+      <ol className="thread-id-step-list">
+        {steps.map((step) => (
+          <li key={step}>{step}</li>
+        ))}
+      </ol>
       <div className="thread-id-copy-row">
         <code>{THREAD_ID_REQUEST_PROMPT}</code>
         <button type="button" className="ghost-button" onClick={() => copyTextToClipboard(THREAD_ID_REQUEST_PROMPT)}>
           复制指令
         </button>
       </div>
+      <small>这个指令只用于获取窗口编号，不会启动循环。</small>
     </div>
   );
 }
