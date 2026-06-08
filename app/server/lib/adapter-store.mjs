@@ -106,7 +106,7 @@ export async function ensureAdapterArtifacts(startDir = process.cwd()) {
       conversation: {
         language: "zh-CN",
         promptGenerator: {
-          enabled: false,
+          enabled: "auto",
           provider: "ollama",
           model: "qwen2.5:7b",
           baseUrl: "http://127.0.0.1:11434",

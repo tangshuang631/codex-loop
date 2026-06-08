@@ -549,6 +549,89 @@ function StatusPill({ text, tone = "default", active = false }) {
   );
 }
 
+function buildLoopProgressItems({ processStatus, runtimeEvents = [], healthSummary = "" }) {
+  const latestEventType = processStatus?.latestEventType || runtimeEvents[0]?.type || "";
+  const hasThread = processStatus?.state !== "unbound";
+  const hasStopLimit =
+    processStatus?.stopLimit && processStatus.stopLimit !== "未设置停止条件";
+  const hasPendingGuidance = Boolean(processStatus?.hasPendingGuidance);
+  const hasHealthIssue = healthSummary && healthSummary !== "当前没有明显异常。";
+
+  return [
+    {
+      key: "binding",
+      label: "线程绑定",
+      detail: hasThread ? "已绑定目标 Codex 线程" : "先绑定要接入的 Codex 窗口",
+      state: hasThread ? "done" : "current",
+    },
+    {
+      key: "current-turn",
+      label: "当前轮",
+      detail:
+        processStatus?.headline ||
+        (latestEventType === "codex_followup_completed"
+          ? "Codex 已完成一轮"
+          : "等待下一轮可发送时机"),
+      state:
+        processStatus?.state === "error"
+          ? "error"
+          : processStatus?.waitingForCodex
+            ? "current"
+            : processStatus?.canSendNextTurn
+              ? "done"
+              : "pending",
+    },
+    {
+      key: "guidance",
+      label: "补充引导",
+      detail: hasPendingGuidance
+        ? processStatus.pendingGuidancePreview
+        : "没有临时补充，按文档和规则推进",
+      state: hasPendingGuidance ? "current" : "pending",
+    },
+    {
+      key: "stop-limit",
+      label: "停止条件",
+      detail: processStatus?.stopLimit || "未设置停止条件",
+      state: hasStopLimit ? "done" : "pending",
+    },
+    {
+      key: "health",
+      label: "健康状态",
+      detail: hasHealthIssue ? healthSummary : "暂无需要处理的异常",
+      state: hasHealthIssue ? "error" : "done",
+    },
+  ];
+}
+
+function LoopProgressPanel({ processStatus, runtimeEvents, healthSummary }) {
+  const items = buildLoopProgressItems({ processStatus, runtimeEvents, healthSummary });
+  const currentItem = items.find((item) => item.state === "current") || items.find((item) => item.state === "error") || items[0];
+
+  return (
+    <details className="loop-progress-panel" open>
+      <summary>
+        <span>进度</span>
+        <strong>{currentItem?.label || "当前轮"}</strong>
+      </summary>
+      <div className="loop-progress-list">
+        {items.map((item) => (
+          <div className={`loop-progress-item is-${item.state}`} key={item.key}>
+            <span className="loop-progress-dot" aria-hidden="true">
+              {item.state === "done" ? "✓" : ""}
+            </span>
+            <div>
+              <strong>{item.label}</strong>
+              <p>{item.detail}</p>
+            </div>
+          </div>
+        ))}
+      </div>
+      <div className="loop-progress-source">来源：当前轮状态 · 最近运行记录</div>
+    </details>
+  );
+}
+
 function StatusSummaryPanel({
   modeText,
   continuationStatus,
@@ -563,22 +646,23 @@ function StatusSummaryPanel({
 }) {
   const processDetail = processStatus?.detail || codexWorkStatus;
   const rows = [
-    ["运行", `${modeText} · ${continuationStatus}`],
-    ["Codex", processStatus?.headline || codexWorkStatus],
+    ["当前", `${modeText} · ${processStatus?.headline || continuationStatus}`],
     ["说明", processDetail],
     ["停止条件", processStatus?.stopLimit || "未设置停止条件"],
     processStatus?.hasPendingGuidance
       ? ["待合并补充", processStatus?.pendingGuidancePreview || "已记录"]
       : null,
-    ["任务", currentLoopName],
     ["线程", threadLabel],
     ["模型", modelStatus],
-    ["同步", pollStatus],
-    ["提醒", healthSummary],
   ].filter(Boolean);
 
   return (
     <div className="status-summary-panel">
+      <LoopProgressPanel
+        processStatus={processStatus}
+        runtimeEvents={runtimeEvents}
+        healthSummary={healthSummary}
+      />
       {rows.map(([label, value]) => (
         <div className="status-summary-row" key={label}>
           <span>{label}</span>
@@ -1181,7 +1265,7 @@ function ManagePane({
               <label className="toggle-row">
                 <input
                   type="checkbox"
-                  checked={settingsForm.promptGeneratorEnabled}
+                  checked={Boolean(settingsForm.promptGeneratorEnabled)}
                   onChange={(event) =>
                     setSettingsForm((current) => ({
                       ...current,
@@ -1467,9 +1551,11 @@ function DashboardHome({
   const isFinalizing = snapshot?.state?.stopRequested || snapshot?.state?.finalizeRequested;
   const isRunning = snapshot?.state?.mode === "running";
   const healthSummary = healthIssues.length ? healthIssues.join("\n") : "当前没有明显异常。";
-  const modelStatus = settingsForm.promptGeneratorEnabled
-    ? "已开启 · " + settingsForm.promptGeneratorModel
-    : "未开启";
+  const modelStatus = settingsForm.promptGeneratorEnabled === "auto"
+    ? "自动接入 Ollama · " + settingsForm.promptGeneratorModel
+    : settingsForm.promptGeneratorEnabled
+      ? "已开启 · " + settingsForm.promptGeneratorModel
+      : "未开启";
   const runningHeadline = processStatus?.headline || (isFinalizing
     ? "正在收尾"
     : isDispatching
@@ -1682,7 +1768,7 @@ export function App() {
   const [settingsForm, setSettingsForm] = useState({
     conversationLanguage: "zh-CN",
     intervalMinutes: "10",
-    promptGeneratorEnabled: false,
+    promptGeneratorEnabled: "auto",
     promptGeneratorModel: "qwen2.5:7b",
     promptGeneratorBaseUrl: "http://127.0.0.1:11434",
     maxMinutes: "180",
@@ -1756,9 +1842,10 @@ export function App() {
         conversationLanguage:
           nextSnapshot.profile?.resolved?.conversation?.language || "zh-CN",
         intervalMinutes: String(nextAutomationStatus?.intervalMinutes || 10),
-        promptGeneratorEnabled: Boolean(
-          nextSnapshot.profile?.resolved?.conversation?.promptGenerator?.enabled,
-        ),
+        promptGeneratorEnabled:
+          nextSnapshot.profile?.resolved?.conversation?.promptGenerator?.enabled === "auto"
+            ? "auto"
+            : Boolean(nextSnapshot.profile?.resolved?.conversation?.promptGenerator?.enabled),
         promptGeneratorModel:
           nextSnapshot.profile?.resolved?.conversation?.promptGenerator?.model || "qwen2.5:7b",
         promptGeneratorBaseUrl:
@@ -1915,9 +2002,11 @@ export function App() {
     ? `${automationStatus.intervalMinutes} 分钟`
     : "未连接";
   const conversationLanguage = settingsForm.conversationLanguage === "en" ? "英文" : "中文优先";
-  const promptGeneratorStatus = settingsForm.promptGeneratorEnabled
-    ? `已启用 · ${settingsForm.promptGeneratorModel}`
-    : "默认模式";
+  const promptGeneratorStatus = settingsForm.promptGeneratorEnabled === "auto"
+    ? `自动接入 Ollama · ${settingsForm.promptGeneratorModel}`
+    : settingsForm.promptGeneratorEnabled
+      ? `已启用 · ${settingsForm.promptGeneratorModel}`
+      : "已关闭本地模型";
   const remoteTransport = remoteAccessStatus?.recommendedTransport || "tailscale";
   const launcherWebUrl = launcherStatus?.webUrl || launcherStatus?.webBaseUrl || "未提供";
   const latestEvent = formatValue(snapshot?.thread?.latestEventType || snapshot?.state?.events?.at(-1)?.type, "暂无");

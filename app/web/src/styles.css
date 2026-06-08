@@ -1061,6 +1061,108 @@ select {
   background: #fbfbf8;
 }
 
+.loop-progress-panel {
+  padding: 12px 15px 4px;
+  border-bottom: 1px solid #e8e8e2;
+}
+
+.loop-progress-panel summary {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  cursor: pointer;
+  list-style: none;
+}
+
+.loop-progress-panel summary::-webkit-details-marker {
+  display: none;
+}
+
+.loop-progress-panel summary span {
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.7;
+}
+
+.loop-progress-panel summary strong {
+  color: var(--text);
+  font-size: 13px;
+  line-height: 1.7;
+}
+
+.loop-progress-list {
+  display: grid;
+  gap: 0;
+  margin-top: 8px;
+  border-top: 1px solid #ecece7;
+}
+
+.loop-progress-item {
+  display: grid;
+  grid-template-columns: 18px minmax(0, 1fr);
+  gap: 10px;
+  padding: 10px 0;
+  border-bottom: 1px solid #ecece7;
+}
+
+.loop-progress-item:last-child {
+  border-bottom: 0;
+}
+
+.loop-progress-dot {
+  display: inline-grid;
+  place-items: center;
+  width: 14px;
+  height: 14px;
+  margin-top: 4px;
+  border: 1px solid #cfcfc7;
+  border-radius: 999px;
+  color: #ffffff;
+  background: #ffffff;
+  font-size: 10px;
+  line-height: 1;
+}
+
+.loop-progress-item.is-done .loop-progress-dot {
+  border-color: #202020;
+  background: #202020;
+}
+
+.loop-progress-item.is-current .loop-progress-dot {
+  border-color: #202020;
+  background: #ffffff;
+  box-shadow: inset 0 0 0 4px #202020;
+}
+
+.loop-progress-item.is-error .loop-progress-dot {
+  border-color: var(--danger);
+  background: var(--danger);
+}
+
+.loop-progress-item strong {
+  display: block;
+  color: var(--text);
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.loop-progress-item p {
+  margin: 2px 0 0;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.65;
+  word-break: break-word;
+}
+
+.loop-progress-source {
+  padding: 8px 0 9px;
+  border-top: 1px solid #ecece7;
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.6;
+}
+
 .status-summary-row {
   display: grid;
   grid-template-columns: 88px 1fr;

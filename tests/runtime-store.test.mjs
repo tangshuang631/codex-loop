@@ -597,6 +597,74 @@ test("runLoopTurn uses ollama-generated prompt when advanced continuation is ena
   assert.equal(snapshot.thread.latestEventType, "codex_followup_completed");
 });
 
+test("runLoopTurn tries ollama by default as the global loop brain", async () => {
+  const configRoot = await createWorkspace();
+  await ensureLoopArtifacts(configRoot);
+  await saveThreadBinding(configRoot, {
+    workspaceName: "demo",
+    threadTitle: "默认模型线程",
+    threadId: "thread-default-ollama",
+    singleThreadMode: true,
+  });
+  await syncCodexThreadMirror(configRoot, {
+    lastUserInstructionSummary: "继续按产品规则推进",
+    lastAssistantActionSummary: "Codex 已完成一批移动端监控",
+    latestCodexSummary: "上一轮完成移动端状态展示，需要产品经理视角决定下一步。",
+  });
+
+  let generatorCalled = false;
+  let dispatchedPrompt = "";
+  const snapshot = await runLoopTurn(configRoot, {
+    generateFollowupPrompt: async ({ snapshot: currentSnapshot }) => {
+      generatorCalled = true;
+      assert.equal(
+        currentSnapshot.profile.resolved.conversation.promptGenerator.enabled,
+        "auto",
+      );
+      return "以产品经理、测试人员和真实用户视角，先验证移动端状态是否清楚，再补齐最小问题清单。";
+    },
+    dispatchThreadMessage: async ({ prompt }) => {
+      dispatchedPrompt = prompt;
+      return { lastMessage: "已收到本地模型规划后的下一轮指令" };
+    },
+  });
+
+  assert.equal(generatorCalled, true);
+  assert.match(dispatchedPrompt, /产品经理、测试人员和真实用户视角/);
+  assert.equal(snapshot.thread.latestEventType, "codex_followup_completed");
+});
+
+test("runLoopTurn degrades to compact template when default ollama is unavailable", async () => {
+  const configRoot = await createWorkspace();
+  await ensureLoopArtifacts(configRoot);
+  await saveThreadBinding(configRoot, {
+    workspaceName: "demo",
+    threadTitle: "默认降级线程",
+    threadId: "thread-auto-fallback",
+    singleThreadMode: true,
+  });
+  await syncCodexThreadMirror(configRoot, {
+    lastUserInstructionSummary: "继续优化核心链路",
+    latestCodexSummary: "Codex 已完成上一批任务，等待下一轮。",
+  });
+
+  let dispatchedPrompt = "";
+  const snapshot = await runLoopTurn(configRoot, {
+    generateFollowupPrompt: async () => {
+      throw new Error("ollama unavailable");
+    },
+    dispatchThreadMessage: async ({ prompt }) => {
+      dispatchedPrompt = prompt;
+      return { lastMessage: "已通过精简模板继续推进" };
+    },
+  });
+
+  assert.match(dispatchedPrompt, /继续在同一个 Codex 线程中推进。/u);
+  assert.match(snapshot.thread.promptGenerationWarning, /Ollama/);
+  assert.equal(snapshot.thread.continuationStatus, "idle");
+  assert.equal(snapshot.thread.latestEventType, "codex_followup_completed");
+});
+
 test("pending user guidance is saved for the next ollama continuation and cleared after dispatch", async () => {
   const configRoot = await createWorkspace();
   await ensureLoopArtifacts(configRoot);

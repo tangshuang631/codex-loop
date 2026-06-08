@@ -230,7 +230,16 @@ function markErrorAlreadyRecorded(error) {
   return error;
 }
 
-async function markDispatchWaiting(snapshot, { prompt, dispatchAt, promptGenerator = "template", promptGenerationError = "" }) {
+async function markDispatchWaiting(
+  snapshot,
+  {
+    prompt,
+    dispatchAt,
+    promptGenerator = "template",
+    promptGenerationError = "",
+    promptGenerationWarning = "",
+  },
+) {
   const dispatchingThread = await persistThreadMirror(
     snapshot.paths.threadPath,
     snapshot.thread,
@@ -241,6 +250,7 @@ async function markDispatchWaiting(snapshot, { prompt, dispatchAt, promptGenerat
       lastDispatchAt: dispatchAt,
       lastDispatchPrompt: prompt,
       lastContinuationError: promptGenerationError,
+      promptGenerationWarning,
       latestSummary: "正在通过 Codex 桌面端原生链路发送指令，等待确认送达。",
       latestEventType: "codex_followup_dispatching",
       lastUpdatedAt: dispatchAt,
@@ -259,6 +269,7 @@ async function markDispatchWaiting(snapshot, { prompt, dispatchAt, promptGenerat
     workspaceRoot: snapshot.paths.workspaceRoot,
     promptGenerator,
     promptGenerationError,
+    promptGenerationWarning,
     promptPreview: buildPromptPreview(prompt),
   });
   await appendTranscriptEntry(snapshot.paths.transcriptPath, {
@@ -275,7 +286,14 @@ async function markDispatchWaiting(snapshot, { prompt, dispatchAt, promptGenerat
   return dispatchingThread;
 }
 
-async function markDispatchSentWithoutCompletion(startDir, { promptGenerator = "template", promptGenerationError = "" } = {}) {
+async function markDispatchSentWithoutCompletion(
+  startDir,
+  {
+    promptGenerator = "template",
+    promptGenerationError = "",
+    promptGenerationWarning = "",
+  } = {},
+) {
   const sentAt = nowIso();
   const refreshed = await ensureLoopArtifacts(startDir);
   const sentThread = await persistThreadMirror(
@@ -288,6 +306,7 @@ async function markDispatchSentWithoutCompletion(startDir, { promptGenerator = "
       pendingUserGuidance: "",
       pendingUserGuidanceAt: "",
       lastContinuationError: promptGenerationError,
+      promptGenerationWarning,
       latestSummary: "消息已送达绑定线程，正在等待 Codex 完成这一轮回复。",
       latestEventType: "codex_followup_sent_waiting",
       lastUpdatedAt: sentAt,
@@ -305,6 +324,7 @@ async function markDispatchSentWithoutCompletion(startDir, { promptGenerator = "
     threadTitle: refreshed.thread.threadTitle,
     promptGenerator,
     promptGenerationError,
+    promptGenerationWarning,
   });
   await appendTranscriptEntry(refreshed.paths.transcriptPath, {
     at: sentAt,
@@ -1257,13 +1277,16 @@ function buildProcessStatus(snapshot) {
   const hasThread = Boolean(snapshot.thread.threadId);
   const waitingForCodex = continuationStatus === "dispatching";
   const hasPendingGuidance = Boolean(snapshot.thread.pendingUserGuidance);
+  const promptGenerationWarning = safeText(snapshot.thread.promptGenerationWarning, "");
   const isFinalizing =
     mode === "finalize_after_current" ||
     Boolean(snapshot.state.stopRequested || snapshot.state.finalizeRequested);
 
   let state = "waiting_next_turn";
   let headline = "等待下一轮";
-  let detail = "当前可以发送下一轮指令；如果开启了本地模型，会先合并 Codex 回复和你的补充引导。";
+  let detail =
+    promptGenerationWarning ||
+    "当前可以发送下一轮指令；如果开启了本地模型，会先合并 Codex 回复和你的补充引导。";
   let canSendNextTurn = hasThread && mode === "running" && continuationStatus === "idle";
 
   if (!hasThread) {
@@ -1303,6 +1326,7 @@ function buildProcessStatus(snapshot) {
     canSendNextTurn,
     hasPendingGuidance,
     pendingGuidancePreview: buildPromptPreview(snapshot.thread.pendingUserGuidance || ""),
+    promptGenerationWarning,
     stopLimit: formatLoopStopLimit(snapshot.state.budgets || snapshot.config.budgets || {}),
     lastDispatchAt: snapshot.thread.lastDispatchAt || "",
     lastCompletionAt: snapshot.thread.lastCompletionAt || "",
@@ -1548,6 +1572,8 @@ function buildThreadMirror(thread, state, overrides = {}) {
     pendingUserGuidanceAt:
       overrides.pendingUserGuidanceAt ?? thread.pendingUserGuidanceAt ?? "",
     lastContinuationError,
+    promptGenerationWarning:
+      overrides.promptGenerationWarning ?? thread.promptGenerationWarning ?? "",
     lastUpdatedAt: overrides.lastUpdatedAt ?? nowIso(),
   };
 }
@@ -2454,12 +2480,17 @@ export async function runLoopTurn(
 
   const fallbackPrompt = buildVisibleThreadPrompt(snapshot);
   const promptGenerator = snapshot.profile?.resolved?.conversation?.promptGenerator || {};
-  if (!promptGenerator.enabled || promptGenerator.provider !== "ollama") {
+  const useOllamaPrompt =
+    (promptGenerator.enabled === true || promptGenerator.enabled === "auto") &&
+    promptGenerator.provider === "ollama";
+  const ollamaAutoMode = promptGenerator.enabled === "auto";
+  if (!useOllamaPrompt) {
     return runLoopTurnLegacy(startDir, { dispatchThreadMessage });
   }
 
   let prompt = fallbackPrompt;
   let promptGenerationError = "";
+  let promptGenerationWarning = "";
 
   try {
     prompt = await generateFollowupPrompt({
@@ -2467,12 +2498,18 @@ export async function runLoopTurn(
       fallbackPrompt,
     });
   } catch (error) {
-    const failedAt = nowIso();
-    const refreshed = await ensureLoopArtifacts(startDir);
     promptGenerationError = safeText(
       error?.message,
       "本地模型生成续跑指令失败，请检查 Ollama 和模型配置。",
     );
+    if (ollamaAutoMode) {
+      promptGenerationWarning =
+        "Ollama 暂时不可用，已降级为精简续跑指令。建议启动 Ollama 或在设置里选择可用模型。";
+      promptGenerationError = "";
+      prompt = fallbackPrompt;
+    } else {
+      const failedAt = nowIso();
+      const refreshed = await ensureLoopArtifacts(startDir);
     await markContinuationFailed(startDir, refreshed, {
       failedAt,
       message: promptGenerationError,
@@ -2481,14 +2518,16 @@ export async function runLoopTurn(
       promptGenerator: "ollama",
     });
     throw new Error("本地模型生成续跑指令失败，请检查 Ollama 和模型配置。");
+    }
   }
 
   const dispatchAt = nowIso();
   await markDispatchWaiting(snapshot, {
     prompt,
     dispatchAt,
-    promptGenerator: "ollama",
+    promptGenerator: promptGenerationWarning ? "template" : "ollama",
     promptGenerationError,
+    promptGenerationWarning,
   });
 
   try {
@@ -2508,8 +2547,9 @@ export async function runLoopTurn(
       );
     }
     return markDispatchSentWithoutCompletion(startDir, {
-      promptGenerator: "ollama",
+      promptGenerator: promptGenerationWarning ? "template" : "ollama",
       promptGenerationError,
+      promptGenerationWarning,
     });
   } catch (error) {
     const failedAt = nowIso();
@@ -2519,7 +2559,7 @@ export async function runLoopTurn(
       message: error.message,
       latestSummary: "向 Codex 桌面线程发送下一轮指令失败，请检查线程绑定和桌面原生连接。",
       promptGenerationError,
-      promptGenerator: "ollama",
+      promptGenerator: promptGenerationWarning ? "template" : "ollama",
     });
     markErrorAlreadyRecorded(error);
     throw error;
