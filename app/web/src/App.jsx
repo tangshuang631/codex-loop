@@ -219,6 +219,29 @@ function copyTextToClipboard(text) {
   document.body.removeChild(textarea);
 }
 
+const THREAD_ID_REQUEST_PROMPT =
+  "请告诉我当前这个 Codex 窗口的 threadId，只输出 threadId，不要输出解释。";
+
+function ThreadIdHelpCard() {
+  return (
+    <div className="thread-id-help-card">
+      <div>
+        <strong>还没有线程号？</strong>
+        <p>
+          先打开你要让 loop 接管的 Codex 窗口，把下面这句话发给它。拿到返回的
+          threadId 后，粘贴到“线程 ID”里保存。
+        </p>
+      </div>
+      <div className="thread-id-copy-row">
+        <code>{THREAD_ID_REQUEST_PROMPT}</code>
+        <button type="button" className="ghost-button" onClick={() => copyTextToClipboard(THREAD_ID_REQUEST_PROMPT)}>
+          复制指令
+        </button>
+      </div>
+    </div>
+  );
+}
+
 function trimPathToken(token) {
   return formatValue(token, "").replace(/[),.;，。；）]+$/u, "");
 }
@@ -726,6 +749,7 @@ function LoopCreationAssistantPane({
       <p className="sidebar-help">
         先确认项目、任务名和分支，再开始循环。
       </p>
+      <ThreadIdHelpCard />
 
       {assistantState?.status === "completed" && createdLoop ? (
         <div className="assistant-result">
@@ -940,6 +964,7 @@ function ManagePane({
           <p className="sidebar-help">
             第一次接入，或要把 loop 切换到另一个可见线程时，再来这里修改。
           </p>
+          <ThreadIdHelpCard />
           <label>
             <span>显示名称</span>
             <input

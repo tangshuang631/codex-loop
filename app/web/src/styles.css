@@ -555,6 +555,48 @@ select {
   box-shadow: var(--shadow);
 }
 
+.thread-id-help-card {
+  display: grid;
+  gap: 12px;
+  padding: 14px;
+  border: 1px solid #e6e3dc;
+  border-radius: 18px;
+  background: #f8f7f3;
+}
+
+.thread-id-help-card strong {
+  display: block;
+  margin-bottom: 4px;
+  font-size: 15px;
+}
+
+.thread-id-help-card p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.7;
+}
+
+.thread-id-copy-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: center;
+}
+
+.thread-id-copy-row code {
+  display: block;
+  padding: 10px 12px;
+  border: 1px solid #e2ded5;
+  border-radius: 12px;
+  background: #ffffff;
+  color: var(--text);
+  font-size: 13px;
+  line-height: 1.6;
+  white-space: normal;
+  word-break: break-word;
+}
+
 .workspace-hero,
 .workspace-section {
   background: var(--panel);
