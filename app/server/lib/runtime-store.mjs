@@ -24,6 +24,7 @@ function nowIso() {
 const DEFAULT_LOOP_ID = "default-run";
 const HEARTBEAT_STALE_MS = 15 * 60 * 1000;
 const CONTINUATION_STALLED_MS = 5 * 60 * 1000;
+const FINALIZE_WAIT_MS = 90 * 1000;
 const TRANSCRIPT_STALE_MS = 15 * 60 * 1000;
 const activeContinuationKeys = new Set();
 const activeRecoveryKeys = new Set();
@@ -106,11 +107,18 @@ function summarizeForFollowup(value, maxLength = 220) {
   if (normalized.length <= maxLength) {
     return normalized;
   }
-  return `${normalized.slice(0, maxLength - 1).trimEnd()}…`;
+  return `${normalized.slice(0, maxLength - 1).trimEnd()}...`;
 }
 
 function buildPromptPreview(prompt, maxLength = 180) {
   return summarizeForFollowup(prompt, maxLength);
+}
+
+function markErrorAlreadyRecorded(error) {
+  if (error && typeof error === "object") {
+    error.codexLoopRecorded = true;
+  }
+  return error;
 }
 
 async function markDispatchWaiting(snapshot, { prompt, dispatchAt, promptGenerator = "template", promptGenerationError = "" }) {
@@ -124,8 +132,8 @@ async function markDispatchWaiting(snapshot, { prompt, dispatchAt, promptGenerat
       lastDispatchAt: dispatchAt,
       lastDispatchPrompt: prompt,
       lastContinuationError: promptGenerationError,
-      latestSummary: "已向绑定的 Codex 线程发送下一条消息，正在等待这一轮回复。",
-      latestEventType: "codex_followup_dispatched",
+      latestSummary: "正在通过 Codex 桌面端原生链路发送指令，等待确认送达。",
+      latestEventType: "codex_followup_dispatching",
       lastUpdatedAt: dispatchAt,
     },
   );
@@ -135,7 +143,7 @@ async function markDispatchWaiting(snapshot, { prompt, dispatchAt, promptGenerat
     (loop) => ({ threadBinding: { ...(loop.threadBinding || {}), ...dispatchingThread } }),
   );
   await appendJsonLine(snapshot.paths.logPath, {
-    type: "codex_followup_dispatched",
+    type: "codex_followup_dispatching",
     at: dispatchAt,
     threadId: snapshot.thread.threadId,
     threadTitle: snapshot.thread.threadTitle,
@@ -147,8 +155,12 @@ async function markDispatchWaiting(snapshot, { prompt, dispatchAt, promptGenerat
   await appendTranscriptEntry(snapshot.paths.transcriptPath, {
     at: dispatchAt,
     activeTask: snapshot.state.activeTask,
-    note: "已发送到 Codex 线程",
-    summary: `发送目标：${snapshot.thread.threadTitle || snapshot.thread.threadId}。消息预览：${buildPromptPreview(prompt)}`,
+    note: "codex-loop 正在发送指令",
+    summary:
+      "发送目标：" +
+      (snapshot.thread.threadTitle || snapshot.thread.threadId) +
+      "。指令预览：" +
+      buildPromptPreview(prompt),
     mode: snapshot.state.mode,
   });
   return dispatchingThread;
@@ -165,7 +177,7 @@ async function markDispatchSentWithoutCompletion(startDir, { promptGenerator = "
       continuationEnabled: true,
       continuationStatus: "dispatching",
       lastContinuationError: promptGenerationError,
-      latestSummary: "消息已发到绑定线程，正在等待 Codex 给出这一轮回复。",
+      latestSummary: "消息已送达绑定线程，正在等待 Codex 完成这一轮回复。",
       latestEventType: "codex_followup_sent_waiting",
       lastUpdatedAt: sentAt,
     },
@@ -187,7 +199,7 @@ async function markDispatchSentWithoutCompletion(startDir, { promptGenerator = "
     at: sentAt,
     activeTask: refreshed.state.activeTask,
     note: "等待 Codex 回复",
-    summary: "消息已经进入绑定线程，但这一轮还没有可同步的回复摘要。",
+    summary: "已确认目标线程收到本次指令，但这一轮还没有可同步的回复内容。",
     mode: refreshed.state.mode,
   });
   return readLoopSnapshot(startDir);
@@ -271,13 +283,15 @@ function createLoopThreadBinding(config, overrides = {}) {
 }
 
 function defaultTranscript(thread) {
-  return `# Transcript Mirror
-
-- 工作区：${thread.workspaceName}
-- 主线程标题：${thread.threadTitle}
-- 主线程 ID：${thread.threadId || "未绑定"}
-
-本文档是本地镜像，不替代 Codex 桌面端线程历史。`;
+  return [
+    "# 本地对话记录",
+    "",
+    "- 工作区：" + thread.workspaceName,
+    "- 线程标题：" + thread.threadTitle,
+    "- 线程 ID：" + (thread.threadId || "未绑定"),
+    "",
+    "本文档是 codex-loop 的本地镜像记录，不替代 Codex 桌面端线程历史。",
+  ].join("\n");
 }
 
 function createEmptyErrorState() {
@@ -299,7 +313,7 @@ function buildSafeLoopId(...values) {
       return sanitized;
     }
   }
-  return `loop-${Date.now()}`;
+  return "loop-" + Date.now();
 }
 
 function buildLoopRegistryPath(codexLoopRoot) {
@@ -369,6 +383,46 @@ function buildDefaultRegistry(config, workspaceRoot) {
   };
 }
 
+function isPlaceholderDefaultLoop(loop) {
+  if (!loop || loop.id !== DEFAULT_LOOP_ID) {
+    return false;
+  }
+  const projectName = safeText(loop.projectName, "");
+  const name = safeText(loop.name, "");
+  const title = safeText(loop.threadTitle, "");
+  return (
+    projectName === "project" ||
+    name === "default loop" ||
+    name.includes("默认循环") ||
+    title.includes("Codex Loop ???")
+  );
+}
+
+function pickRegistryCurrentLoop(registry) {
+  const current =
+    registry.loops.find((loop) => loop.id === registry.currentLoopId) ||
+    registry.loops[0] ||
+    null;
+  if (!isPlaceholderDefaultLoop(current)) {
+    return current;
+  }
+  return registry.loops.find((loop) => !isPlaceholderDefaultLoop(loop)) || current;
+}
+
+function normalizeLoopRegistry(registry) {
+  const selected = pickRegistryCurrentLoop(registry);
+  if (!selected || selected.id === registry.currentLoopId) {
+    return registry;
+  }
+  return {
+    ...registry,
+    currentLoopId: selected.id,
+    loops: registry.loops.map((loop) =>
+      loop.id === selected.id ? { ...loop, updatedAt: nowIso() } : loop,
+    ),
+  };
+}
+
 function applyLoopToConfig(config, loop) {
   return {
     ...config,
@@ -397,7 +451,15 @@ async function loadLoopRegistry(layout, config) {
   const registryPath = buildLoopRegistryPath(layout.codexLoopRoot);
   const existingRegistry = await readJson(registryPath);
   if (existingRegistry?.loops?.length) {
-    return { registry: existingRegistry, registryPath };
+    const normalizedRegistry = normalizeLoopRegistry(existingRegistry);
+    if (normalizedRegistry !== existingRegistry) {
+      await writeJson(registryPath, normalizedRegistry);
+      const selectedLoop = pickRegistryCurrentLoop(normalizedRegistry);
+      if (selectedLoop) {
+        await saveLoopConfig(layout.codexLoopRoot, applyLoopToConfig(config, selectedLoop));
+      }
+    }
+    return { registry: normalizedRegistry, registryPath };
   }
 
   const registry = buildDefaultRegistry(config, layout.workspaceRoot);
@@ -410,9 +472,11 @@ async function loadLoopRegistry(layout, config) {
 }
 
 function summarizeLoopRegistry(registry) {
+  const visibleLoops = registry.loops.filter((loop) => !isPlaceholderDefaultLoop(loop));
+  const loops = visibleLoops.length ? visibleLoops : registry.loops;
   return {
     currentLoopId: registry.currentLoopId,
-    loops: registry.loops.map((loop) => ({
+    loops: loops.map((loop) => ({
       ...loop,
       threadBinding: undefined,
       boundThreadId: loop.threadBinding?.threadId || "",
@@ -559,11 +623,11 @@ function looksLikePlanningIntent(answer) {
     text.length >= 10 &&
     (
       text.includes("loop") ||
-      text.includes("自动化") ||
+      text.includes("自动") ||
       text.includes("规划") ||
       text.includes("循环") ||
       text.includes("计划") ||
-      text.includes("首个")
+      text.includes("任务")
     )
   );
 }
@@ -572,7 +636,7 @@ function buildLoopAssistantQuestion(step, draft = createLoopAssistantDraft()) {
   if (step === "workspace_root") {
     return {
       id: "workspace_root",
-      prompt: "先告诉我这个 loop 对应的项目路径，我会自动检测 git、文档和可用命令。",
+      prompt: "先告诉我这个 loop 对应的项目路径，我会自动检查 git、文档和可用命令。",
       placeholder: "例如 E:\\2026\\codex-loop",
     };
   }
@@ -581,7 +645,7 @@ function buildLoopAssistantQuestion(step, draft = createLoopAssistantDraft()) {
     const suggestedName = safeText(draft.plan?.suggestedProjectName, draft.projectName);
     return {
       id: "project_name",
-      prompt: draft.plan?.nextQuestion || "这个项目希望在左侧栏显示成什么项目名？",
+      prompt: draft.plan?.nextQuestion || "这个项目在左侧列表里显示成什么名字？",
       placeholder: suggestedName || draft.projectName || "例如 codex-loop",
     };
   }
@@ -591,7 +655,12 @@ function buildLoopAssistantQuestion(step, draft = createLoopAssistantDraft()) {
     if (pendingField === "project_name") {
       return {
         id: "plan_review",
-        prompt: `我先整理了一版计划：目标是「${safeText(draft.plan?.objectiveSummary, "继续推进当前任务")}」。建议项目名使用「${safeText(draft.plan?.suggestedProjectName, draft.projectName || "当前项目")}」，确认可直接回复“使用建议”，也可以改成你想要的名字。`,
+        prompt:
+          "我先整理了一版计划。目标是：" +
+          safeText(draft.plan?.objectiveSummary, "继续推进当前任务") +
+          "。建议项目名使用：" +
+          safeText(draft.plan?.suggestedProjectName, draft.projectName || "当前项目") +
+          "。确认可回复“使用建议”，也可以直接输入新名字。",
         placeholder: safeText(draft.plan?.suggestedProjectName, draft.projectName || "输入项目名"),
       };
     }
@@ -599,7 +668,10 @@ function buildLoopAssistantQuestion(step, draft = createLoopAssistantDraft()) {
     if (pendingField === "loop_name") {
       return {
         id: "plan_review",
-        prompt: `接下来确认任务名。我建议使用「${safeText(draft.plan?.suggestedLoopName, draft.loopName || "当前任务")}」，这样左侧列表会更清楚。`,
+        prompt:
+          "接下来确认任务名。我建议使用：" +
+          safeText(draft.plan?.suggestedLoopName, draft.loopName || "当前任务") +
+          "，这样左侧列表会更清楚。",
         placeholder: safeText(draft.plan?.suggestedLoopName, draft.loopName || "输入任务名"),
       };
     }
@@ -607,7 +679,10 @@ function buildLoopAssistantQuestion(step, draft = createLoopAssistantDraft()) {
     if (pendingField === "branch") {
       return {
         id: "plan_review",
-        prompt: `最后确认工作分支。当前建议是「${safeText(draft.plan?.suggestedBranch, draft.branch || "dev")}」，如果你有自己的分支名也可以直接改。`,
+        prompt:
+          "最后确认工作分支。当前建议是：" +
+          safeText(draft.plan?.suggestedBranch, draft.branch || "dev") +
+          "。如果你有自己的分支名，也可以直接改。",
         placeholder: safeText(draft.plan?.suggestedBranch, draft.branch || "dev"),
       };
     }
@@ -617,7 +692,7 @@ function buildLoopAssistantQuestion(step, draft = createLoopAssistantDraft()) {
     const suggestedLoopName = safeText(draft.plan?.suggestedLoopName, draft.loopName);
     return {
       id: "loop_name",
-      prompt: "这个新 loop 的名称是什么？建议写成当前要推进的子任务。",
+      prompt: "这个新 loop 的任务名是什么？建议写成当前要推进的子任务。",
       placeholder: suggestedLoopName || "例如 核心链路推进",
     };
   }
@@ -637,7 +712,7 @@ function buildLoopAssistantQuestion(step, draft = createLoopAssistantDraft()) {
   return {
     id: "docs_confirmed",
     prompt:
-      "我已经找到 git 和文档线索。回复 `confirm` 直接创建，或补充你想强制纳入的规则文档路径。",
+      "我已经找到 git 和文档线索。回复 confirm 直接创建，或补充你想强制纳入的规则文档路径。",
     placeholder: "输入 confirm，或粘贴额外文档路径",
   };
 }
@@ -710,7 +785,7 @@ async function collectLoopDocs(workspaceRoot) {
       if (
         lowerName.includes("rule") ||
         lowerName.includes("规范") ||
-        lowerName.includes("约束") ||
+        lowerName.includes("规则") ||
         lowerName.includes("agent")
       ) {
         docs.ruleDocs.push(fullPath);
@@ -802,7 +877,7 @@ async function loadLoopAssistantState(layout) {
     messages: [
       {
         role: "assistant",
-        text: "先告诉我项目路径，我会先帮你识别项目信息，再一起创建任务。",
+        text: "先告诉我项目路径，我会先识别项目信息，再一起创建任务。",
         meta: "开始创建",
         at: nowIso(),
       },
@@ -824,7 +899,7 @@ function createInitialLoopAssistantState() {
     messages: [
       {
         role: "assistant",
-        text: "先告诉我项目路径，我会先帮你识别项目信息，再一起创建任务。",
+        text: "先告诉我项目路径，我会先识别项目信息，再一起创建任务。",
         meta: "开始创建",
         at: nowIso(),
       },
@@ -1027,7 +1102,7 @@ function buildContinuationStrategy(snapshot) {
       finalizeRequested: Boolean(snapshot.state.finalizeRequested),
       stopRequested: Boolean(snapshot.state.stopRequested),
       stopRule: shouldFinalize
-        ? "当前处于收尾模式：完成当前小批任务后总结、验证、收尾。"
+        ? "当前处于收尾模式：完成当前小批任务后总结、验证并停止。"
         : "当前处于推进模式：优先完成下一批边界清晰、可验证的小任务。",
     },
   };
@@ -1062,23 +1137,35 @@ function parseTranscriptEntries(transcriptText) {
       continue;
     }
 
-    if (line.startsWith("- Active task: ")) {
-      current.activeTask = line.slice("- Active task: ".length).trim();
+    if (line.startsWith("- Active task: ") || line.startsWith("- 当前任务：")) {
+      current.activeTask = line
+        .replace(/^- Active task:\s*/u, "")
+        .replace(/^- 当前任务：\s*/u, "")
+        .trim();
       continue;
     }
 
-    if (line.startsWith("- Note: ")) {
-      current.note = line.slice("- Note: ".length).trim();
+    if (line.startsWith("- Note: ") || line.startsWith("- 记录：")) {
+      current.note = line
+        .replace(/^- Note:\s*/u, "")
+        .replace(/^- 记录：\s*/u, "")
+        .trim();
       continue;
     }
 
-    if (line.startsWith("- Summary: ")) {
-      current.summary = line.slice("- Summary: ".length).trim();
+    if (line.startsWith("- Summary: ") || line.startsWith("- 摘要：")) {
+      current.summary = line
+        .replace(/^- Summary:\s*/u, "")
+        .replace(/^- 摘要：\s*/u, "")
+        .trim();
       continue;
     }
 
-    if (line.startsWith("- Thread mirror mode: ")) {
-      current.mode = line.slice("- Thread mirror mode: ".length).trim();
+    if (line.startsWith("- Thread mirror mode: ") || line.startsWith("- 状态：")) {
+      current.mode = line
+        .replace(/^- Thread mirror mode:\s*/u, "")
+        .replace(/^- 状态：\s*/u, "")
+        .trim();
     }
   }
 
@@ -1138,22 +1225,21 @@ export async function exportMobileView(startDir = process.cwd()) {
   const bindingNote = safeText(
     snapshot.thread.note,
     snapshot.thread.threadId
-      ? `当前已绑定线程：${boundThreadLabel}（${snapshot.thread.threadId}）`
-      : "当前还没有绑定可见线程，请先绑定线程，再开始循环或续跑。",
+      ? "当前已绑定线程：" + boundThreadLabel + "（" + snapshot.thread.threadId + "）"
+      : "当前还没有绑定可见线程，请先绑定线程，再开始循环。",
   );
-  const suggestedAction =
-    snapshot.state.mode === "finalize_after_current"
-      ? "循环正在收尾，建议先等待这一轮结束，再查看总结、验收结果和下一步建议。"
-      : snapshot.state.mode === "stopped"
-        ? snapshot.thread.threadId
-          ? "线程已经绑定，循环目前是暂停状态。可以先看最近总结，确认上下文后再重新开始。"
-          : "循环目前已暂停。建议先绑定线程，再开始循环，这样你能连续看到每一轮记录。"
-        : snapshot.thread.threadId
-          ? snapshot.thread.continuationStatus === "dispatching"
-            ? "系统正在当前线程里处理这一轮，请先等待完成，完成后再决定是否续跑。"
-            : "线程已经绑定。你可以继续观察进展，或者手动续跑一轮。"
-          : "建议先绑定线程，再开始循环，这样桌面端和手机端都能看到连续记录。";
-
+  let suggestedAction = "先绑定线程，再开始循环。";
+  if (snapshot.state.mode === "finalize_after_current") {
+    suggestedAction = "正在收尾，请等待当前轮结束后查看总结。";
+  } else if (snapshot.state.mode === "stopped") {
+    suggestedAction = snapshot.thread.threadId
+      ? "当前已停止，可以查看最近记录后重新开始。"
+      : "当前已停止，请先绑定线程。";
+  } else if (snapshot.thread.threadId) {
+    suggestedAction = snapshot.thread.continuationStatus === "dispatching"
+      ? "Codex 正在处理当前轮，请等待完成后再继续。"
+      : "线程已绑定，可以观察进展或开始下一轮。";
+  }
   return {
     loop: {
       id: snapshot.config.currentRunId,
@@ -1183,11 +1269,11 @@ export async function exportMobileView(startDir = process.cwd()) {
 function buildTranscriptEntry({ at, activeTask, note, summary, mode }) {
   return [
     "",
-    `## ${at}`,
-    `- Active task: ${activeTask || "n/a"}`,
-    `- Note: ${note || "n/a"}`,
-    `- Summary: ${summary || "n/a"}`,
-    `- Thread mirror mode: ${mode || "n/a"}`,
+    "## " + at,
+    "- 当前任务：" + (activeTask || "n/a"),
+    "- 记录：" + (note || "n/a"),
+    "- 摘要：" + (summary || "n/a"),
+    "- 状态：" + (mode || "n/a"),
   ].join("\n");
 }
 
@@ -1211,6 +1297,12 @@ function buildThreadMirror(thread, state, overrides = {}) {
     thread.latestEventType ??
     state.events?.at(-1)?.type ??
     "";
+  const continuationStatus =
+    overrides.continuationStatus ?? thread.continuationStatus ?? "idle";
+  const lastContinuationError =
+    continuationStatus === "error"
+      ? overrides.lastContinuationError ?? thread.lastContinuationError ?? ""
+      : overrides.lastContinuationError ?? "";
 
   return {
     ...thread,
@@ -1236,8 +1328,7 @@ function buildThreadMirror(thread, state, overrides = {}) {
     ),
     latestEventType,
     latestVerification: overrides.latestVerification ?? thread.latestVerification ?? "",
-    continuationStatus:
-      overrides.continuationStatus ?? thread.continuationStatus ?? "idle",
+    continuationStatus,
     continuationEnabled:
       overrides.continuationEnabled ?? thread.continuationEnabled ?? false,
     continuationCycleCount:
@@ -1246,8 +1337,7 @@ function buildThreadMirror(thread, state, overrides = {}) {
     lastCompletionAt: overrides.lastCompletionAt ?? thread.lastCompletionAt ?? "",
     lastDispatchPrompt:
       overrides.lastDispatchPrompt ?? thread.lastDispatchPrompt ?? "",
-    lastContinuationError:
-      overrides.lastContinuationError ?? thread.lastContinuationError ?? "",
+    lastContinuationError,
     lastUpdatedAt: overrides.lastUpdatedAt ?? nowIso(),
   };
 }
@@ -1287,10 +1377,7 @@ function buildFollowupPrompt(snapshot) {
     snapshot.profile?.overrides?.conversation?.language || "zh-CN",
   ).toLowerCase();
   const englishPreferred = language.startsWith("en");
-  const loopName = safeText(
-    snapshot.config.loopName,
-    snapshot.config.projectName || "current loop",
-  );
+  const loopName = safeText(snapshot.config.loopName, snapshot.config.projectName || "current loop");
   const branch = safeText(snapshot.config.branch, "dev");
   const latestSummary = safeText(snapshot.thread.latestCodexSummary, "");
   const lastAction = safeText(snapshot.thread.lastAssistantActionSummary, "");
@@ -1302,55 +1389,21 @@ function buildFollowupPrompt(snapshot) {
 
   if (englishPreferred) {
     return [
-      `Continue loop "${loopName}" on branch "${branch}".`,
-      `Focus next on: ${focus}`,
-      "Follow the project docs and rules first.",
-      "Complete one small verifiable batch, then reply with progress, verification, and the next step.",
+      "Continue loop " + loopName + " on branch " + branch + ".",
+      "Next: " + focus,
+      "Follow project docs and rules first. Finish one small verifiable batch, then report progress, verification, and next step.",
     ].join("\n");
   }
 
   return [
-    `继续推进「${loopName}」的 loop，分支「${branch}」。`,
-    `下一步重点：${focus}`,
-    "优先遵循项目文档和开发规则，不要偏题。",
-    "先完成一批边界清晰、可验证的小任务，再回复进展、验证结果和下一步。",
+    "继续推进「" + loopName + "」，分支「" + branch + "」。",
+    "下一步：" + focus,
+    "优先遵守项目文档和开发规则。先完成一小批可验证任务，再回复进展、验证结果和下一步。",
   ].join("\n");
 }
 
 function buildCompactFollowupPrompt(snapshot) {
-  const language = safeText(
-    snapshot.profile?.resolved?.conversation?.language,
-    snapshot.profile?.overrides?.conversation?.language || "zh-CN",
-  ).toLowerCase();
-  const englishPreferred = language.startsWith("en");
-  const loopName = safeText(
-    snapshot.config.loopName,
-    snapshot.config.projectName || "current loop",
-  );
-  const branch = safeText(snapshot.config.branch, "dev");
-  const latestSummary = safeText(snapshot.thread.latestCodexSummary, "");
-  const lastAction = safeText(snapshot.thread.lastAssistantActionSummary, "");
-  const userIntent = safeText(
-    snapshot.thread.lastUserInstructionSummary,
-    englishPreferred ? "Continue the current loop." : "继续当前 loop。",
-  );
-  const focus = firstNonEmpty(latestSummary, lastAction, userIntent);
-
-  if (englishPreferred) {
-    return [
-      `Continue loop "${loopName}" on branch "${branch}".`,
-      `Next: ${focus}`,
-      "Follow the project docs and rules first.",
-      "Finish one small verifiable batch, then reply with progress, verification, and the next step.",
-    ].join("\n");
-  }
-
-  return [
-    `继续推进「${loopName}」，分支「${branch}」。`,
-    `下一步：${focus}`,
-    "优先遵循项目文档和开发规则。",
-    "先完成一批可验证的小任务，再回复进展、验证结果和下一步。",
-  ].join("\n");
+  return buildFollowupPrompt(snapshot);
 }
 
 function buildVisibleThreadPrompt(snapshot) {
@@ -1365,21 +1418,23 @@ function buildVisibleThreadPrompt(snapshot) {
     summarizeForFollowup(snapshot.thread.lastUserInstructionSummary),
     englishPreferred ? "Continue the current loop." : "继续当前循环。",
   );
+  const conciseFocus = safeText(focus, "")
+    .replace(/\s+/g, " ")
+    .replace(/^[-:：\s]+/, "")
+    .slice(0, 120);
 
   if (englishPreferred) {
     return [
       "Continue in this same Codex thread.",
-      `Next: ${focus}`,
-      "Follow project docs and rules first.",
-      "Finish one small verifiable batch, then reply with progress, verification, and the next step.",
+      "Next: " + (conciseFocus || "Continue the highest-priority verified task."),
+      "Follow project docs and rules first. Do one small verifiable batch, then report progress, verification, and next step.",
     ].join("\n");
   }
 
   return [
     "继续在同一个 Codex 线程中推进。",
-    `下一步：${focus}`,
-    "优先遵循项目文档和开发规则。",
-    "先完成一批可验证的小任务，再回复进展、验证结果和下一步。",
+    "下一步：" + (conciseFocus || "继续当前最高优先级、可验证的小任务。"),
+    "优先遵守项目文档和开发规则。完成一小批可验证任务后，再回复进展、验证结果和下一步。",
   ].join("\n");
 }
 
@@ -1477,6 +1532,19 @@ function isContinuationStalled(thread, now = Date.now()) {
   );
 }
 
+function isFinalizationWaitExceeded(state, thread, now = Date.now()) {
+  const stopRequestedAt = [...(state?.events || [])]
+    .reverse()
+    .find((event) => event?.type === "graceful_stop_requested")?.at;
+  const stopAt = Date.parse(stopRequestedAt || "");
+  return (
+    state?.mode === "finalize_after_current" &&
+    thread?.continuationStatus === "dispatching" &&
+    Number.isFinite(stopAt) &&
+    now - stopAt > FINALIZE_WAIT_MS
+  );
+}
+
 function shouldAutoFinalizeToStopped(state, thread) {
   return (
     state?.mode === "finalize_after_current" &&
@@ -1529,6 +1597,73 @@ async function finalizeLoopAsStopped(snapshot, reason = "graceful stop completed
   });
 }
 
+export async function markContinuationFailed(
+  startDir,
+  snapshot,
+  {
+    failedAt = nowIso(),
+    message,
+    latestSummary,
+    promptGenerationError = "",
+    promptGenerator = "",
+  } = {},
+) {
+  const failureMessage = safeText(message, "续跑失败，请检查 Codex 桌面端连接。");
+  const summary = safeText(
+    latestSummary,
+    "向 Codex 桌面线程发送下一轮指令失败，请检查线程绑定和桌面原生连接。",
+  );
+  const nextState = {
+    ...snapshot.state,
+    mode: "stopped",
+    stopRequested: false,
+    finalizeRequested: false,
+    recentSummary: summary,
+    lastNote: "续跑失败",
+    events: [
+      ...snapshot.state.events,
+      {
+        type: "codex_followup_failed",
+        at: failedAt,
+        threadId: snapshot.thread.threadId,
+        message: failureMessage,
+        promptGenerationError,
+        promptGenerator,
+        mode: "stopped",
+      },
+    ],
+  };
+
+  await writeJson(snapshot.paths.statePath, nextState);
+  const failedThread = await persistThreadMirror(
+    snapshot.paths.threadPath,
+    snapshot.thread,
+    nextState,
+    {
+      continuationEnabled: true,
+      continuationStatus: "error",
+      lastContinuationError: failureMessage,
+      latestSummary: summary,
+      latestEventType: "codex_followup_failed",
+      lastUpdatedAt: failedAt,
+    },
+  );
+  await updateRegistryLoopBinding(
+    snapshot.paths.codexLoopRoot,
+    snapshot.config.currentRunId,
+    (loop) => ({ threadBinding: { ...(loop.threadBinding || {}), ...failedThread } }),
+  );
+  await appendJsonLine(snapshot.paths.logPath, nextState.events.at(-1));
+  await appendTranscriptEntry(snapshot.paths.transcriptPath, {
+    at: failedAt,
+    activeTask: snapshot.state.activeTask,
+    note: "codex_followup_failed",
+    summary,
+    mode: nextState.mode,
+  });
+  return readLoopSnapshot(startDir);
+}
+
 export async function ensureLoopArtifacts(startDir = process.cwd()) {
   const layout = await resolveProjectLayout(startDir);
   const initialConfig = await readConfig(layout);
@@ -1576,36 +1711,37 @@ export async function ensureLoopArtifacts(startDir = process.cwd()) {
   if (isContinuationStalled(thread) && !activeRecoveryKeys.has(recoveryKey)) {
     activeRecoveryKeys.add(recoveryKey);
     try {
-    const recoveredAt = nowIso();
-    const recoverySummary =
-      "上一轮续跑在等待 Codex 回应时超时，系统已自动恢复，可继续下一轮。";
-    thread = buildThreadMirror(thread, state, {
-      currentRunId: runId,
-      continuationStatus: "idle",
-      lastContinuationError: "Previous continuation dispatch stalled and was reset automatically.",
-      latestSummary: recoverySummary,
-      latestEventType: "codex_followup_recovered",
-      lastUpdatedAt: recoveredAt,
-    });
-    await appendJsonLine(logPath, {
-      type: "codex_followup_recovered",
-      at: recoveredAt,
-      threadId: thread.threadId,
-      previousDispatchAt: thread.lastDispatchAt,
-      reason: "continuation_stalled",
-    });
-    await appendTranscriptEntry(transcriptPath, {
-      at: recoveredAt,
-      activeTask: state.activeTask,
-      note: "codex_followup_recovered",
-      summary: recoverySummary,
-      mode: state.mode,
-    });
-    await updateRegistryLoopBinding(
-      layout.codexLoopRoot,
-      runId,
-      (loop) => ({ threadBinding: { ...(loop.threadBinding || {}), ...thread } }),
-    );
+      const recoveredAt = nowIso();
+      const recoverySummary =
+        "上一轮仍在等待 Codex 完成，系统已停止自动续发。请先确认该线程已经完成当前工作，再手动继续。";
+      thread = buildThreadMirror(thread, state, {
+        currentRunId: runId,
+        continuationStatus: "error",
+        lastContinuationError:
+          "上一轮仍在等待 Codex 完成，已停止自动续发。",
+        latestSummary: recoverySummary,
+        latestEventType: "codex_followup_stalled",
+        lastUpdatedAt: recoveredAt,
+      });
+      await appendJsonLine(logPath, {
+        type: "codex_followup_stalled",
+        at: recoveredAt,
+        threadId: thread.threadId,
+        previousDispatchAt: thread.lastDispatchAt,
+        reason: "continuation_stalled",
+      });
+      await appendTranscriptEntry(transcriptPath, {
+        at: recoveredAt,
+        activeTask: state.activeTask,
+        note: "codex_followup_stalled",
+        summary: recoverySummary,
+        mode: state.mode,
+      });
+      await updateRegistryLoopBinding(
+        layout.codexLoopRoot,
+        runId,
+        (loop) => ({ threadBinding: { ...(loop.threadBinding || {}), ...thread } }),
+      );
     } finally {
       activeRecoveryKeys.delete(recoveryKey);
     }
@@ -1675,6 +1811,7 @@ export async function ensureLoopArtifacts(startDir = process.cwd()) {
           ? (thread.continuationCycleCount || 0) + 1
           : thread.continuationCycleCount,
       lastCompletionAt: syncedAt,
+      lastContinuationError: "",
       latestEventType: "codex_followup_completed",
       lastUpdatedAt: nowIso(),
     });
@@ -1692,6 +1829,40 @@ export async function ensureLoopArtifacts(startDir = process.cwd()) {
       latestAssistantPreview: summarizeForFollowup(latestCompletionText),
       summarySource: visibleCompletion.source,
       summaryError: visibleCompletion.error,
+    });
+  }
+
+  if (isFinalizationWaitExceeded(state, thread)) {
+    const forcedIdleAt = nowIso();
+    const forcedSummary =
+      "已停止继续追问，当前轮先在这里收尾。若 Codex 稍后有新回复，首页仍会同步到最近记录。";
+    thread = buildThreadMirror(thread, state, {
+      currentRunId: runId,
+      continuationStatus: "idle",
+      latestSummary: forcedSummary,
+      lastContinuationError: "停止时仍在等待 Codex 回复，已在短暂等待后收尾。",
+      latestEventType: "graceful_stop_wait_elapsed",
+      lastUpdatedAt: forcedIdleAt,
+    });
+    await writeJson(threadPath, thread);
+    await updateRegistryLoopBinding(
+      layout.codexLoopRoot,
+      runId,
+      (loop) => ({ threadBinding: { ...(loop.threadBinding || {}), ...thread } }),
+    );
+    await appendJsonLine(logPath, {
+      type: "graceful_stop_wait_elapsed",
+      at: forcedIdleAt,
+      threadId: thread.threadId,
+      waitMs: FINALIZE_WAIT_MS,
+      lastDispatchAt: thread.lastDispatchAt,
+    });
+    await appendTranscriptEntry(transcriptPath, {
+      at: forcedIdleAt,
+      activeTask: state.activeTask,
+      note: "graceful_stop_wait_elapsed",
+      summary: forcedSummary,
+      mode: state.mode,
     });
   }
 
@@ -1876,8 +2047,8 @@ export async function startRun(startDir = process.cwd()) {
   const at = nowIso();
   const continuationInFlight = snapshot.thread.continuationStatus === "dispatching";
   const startSummary = continuationInFlight
-    ? "上一轮续跑消息已发送到 Codex，正在等待这一轮返回结果。"
-    : "循环已启动，正在等待第一轮 heartbeat 或 Codex 线程续跑结果。";
+    ? "上一轮指令已发送到 Codex，正在等待这一轮返回结果。"
+    : "循环已启动，等待首轮进展或 Codex 线程结果。";
   const nextState = {
     ...snapshot.state,
     startedAt: snapshot.state.startedAt || at,
@@ -1945,43 +2116,24 @@ async function runLoopTurnLegacy(
         latestCodexSummary: dispatchResult.lastMessage,
       });
     }
+    if (!dispatchResult?.deliveryObserved) {
+      throw new Error(
+        "Codex 原生发送未确认送达：没有观察到目标线程收到本次指令。",
+      );
+    }
     return markDispatchSentWithoutCompletion(startDir, {
       promptGenerator: "template",
     });
   } catch (error) {
     const failedAt = nowIso();
     const refreshed = await ensureLoopArtifacts(startDir);
-    const failedThread = await persistThreadMirror(
-      refreshed.paths.threadPath,
-      refreshed.thread,
-      refreshed.state,
-      {
-        continuationEnabled: true,
-        continuationStatus: "error",
-        lastContinuationError: error.message,
-        latestSummary: "向 Codex 线程续发下一轮消息失败，请检查线程绑定或本机 Codex CLI 状态。",
-        latestEventType: "codex_followup_failed",
-        lastUpdatedAt: failedAt,
-      },
-    );
-    await updateRegistryLoopBinding(
-      refreshed.paths.codexLoopRoot,
-      refreshed.config.currentRunId,
-      (loop) => ({ threadBinding: { ...(loop.threadBinding || {}), ...failedThread } }),
-    );
-    await appendJsonLine(refreshed.paths.logPath, {
-      type: "codex_followup_failed",
-      at: failedAt,
-      threadId: refreshed.thread.threadId,
+    await markContinuationFailed(startDir, refreshed, {
+      failedAt,
       message: error.message,
+      latestSummary: "向 Codex 桌面线程发送下一轮指令失败，请检查线程绑定和桌面原生连接。",
+      promptGenerator: "template",
     });
-    await appendTranscriptEntry(refreshed.paths.transcriptPath, {
-      at: failedAt,
-      activeTask: refreshed.state.activeTask,
-      note: "codex_followup_failed",
-      summary: failedThread.latestSummary,
-      mode: refreshed.state.mode,
-    });
+    markErrorAlreadyRecorded(error);
     throw error;
   }
 }
@@ -2008,6 +2160,16 @@ export async function runLoopTurn(
   }
   if (snapshot.thread.continuationStatus === "dispatching") {
     throw new Error("Loop continuation is already dispatching for the bound Codex thread.");
+  }
+  if (
+    snapshot.thread.continuationStatus === "error" &&
+    /Automatic re-dispatch is disabled|still waiting for Codex completion|等待 Codex 完成|停止自动续发/i.test(
+      safeText(snapshot.thread.lastContinuationError, ""),
+    )
+  ) {
+    throw new Error(
+      "上一轮还没有确认 Codex 已完成。请先等目标线程完成当前工作，再手动继续。",
+    );
   }
   if (
     process.env.CODEX_THREAD_ID &&
@@ -2037,42 +2199,16 @@ export async function runLoopTurn(
     const refreshed = await ensureLoopArtifacts(startDir);
     promptGenerationError = safeText(
       error?.message,
-      "本地模型生成续跑消息失败，请检查 Ollama 和模型配置。",
+      "本地模型生成续跑指令失败，请检查 Ollama 和模型配置。",
     );
-    const failedThread = await persistThreadMirror(
-      refreshed.paths.threadPath,
-      refreshed.thread,
-      refreshed.state,
-      {
-        continuationEnabled: true,
-        continuationStatus: "error",
-        lastContinuationError: promptGenerationError,
-        latestSummary: "本地模型生成续跑消息失败，请检查 Ollama 和模型配置。",
-        latestEventType: "codex_followup_failed",
-        lastUpdatedAt: failedAt,
-      },
-    );
-    await updateRegistryLoopBinding(
-      refreshed.paths.codexLoopRoot,
-      refreshed.config.currentRunId,
-      (loop) => ({ threadBinding: { ...(loop.threadBinding || {}), ...failedThread } }),
-    );
-    await appendJsonLine(refreshed.paths.logPath, {
-      type: "codex_followup_failed",
-      at: failedAt,
-      threadId: refreshed.thread.threadId,
-      message: "prompt generation failed",
+    await markContinuationFailed(startDir, refreshed, {
+      failedAt,
+      message: promptGenerationError,
+      latestSummary: "本地模型生成续跑指令失败，请检查 Ollama 和模型配置。",
       promptGenerationError,
       promptGenerator: "ollama",
     });
-    await appendTranscriptEntry(refreshed.paths.transcriptPath, {
-      at: failedAt,
-      activeTask: refreshed.state.activeTask,
-      note: "codex_followup_failed",
-      summary: failedThread.latestSummary,
-      mode: refreshed.state.mode,
-    });
-    throw new Error("本地模型生成续跑消息失败，请检查 Ollama 和模型配置。");
+    throw new Error("本地模型生成续跑指令失败，请检查 Ollama 和模型配置。");
   }
 
   const dispatchAt = nowIso();
@@ -2094,6 +2230,11 @@ export async function runLoopTurn(
         latestCodexSummary: dispatchResult.lastMessage,
       });
     }
+    if (!dispatchResult?.deliveryObserved) {
+      throw new Error(
+        "Codex 原生发送未确认送达：没有观察到目标线程收到本次指令。",
+      );
+    }
     return markDispatchSentWithoutCompletion(startDir, {
       promptGenerator: "ollama",
       promptGenerationError,
@@ -2101,38 +2242,14 @@ export async function runLoopTurn(
   } catch (error) {
     const failedAt = nowIso();
     const refreshed = await ensureLoopArtifacts(startDir);
-    const failedThread = await persistThreadMirror(
-      refreshed.paths.threadPath,
-      refreshed.thread,
-      refreshed.state,
-      {
-        continuationEnabled: true,
-        continuationStatus: "error",
-        lastContinuationError: error.message,
-        latestSummary: "向 Codex 线程续发下一轮消息失败，请检查线程绑定或本机 Codex CLI 状态。",
-        latestEventType: "codex_followup_failed",
-        lastUpdatedAt: failedAt,
-      },
-    );
-    await updateRegistryLoopBinding(
-      refreshed.paths.codexLoopRoot,
-      refreshed.config.currentRunId,
-      (loop) => ({ threadBinding: { ...(loop.threadBinding || {}), ...failedThread } }),
-    );
-    await appendJsonLine(refreshed.paths.logPath, {
-      type: "codex_followup_failed",
-      at: failedAt,
-      threadId: refreshed.thread.threadId,
+    await markContinuationFailed(startDir, refreshed, {
+      failedAt,
       message: error.message,
+      latestSummary: "向 Codex 桌面线程发送下一轮指令失败，请检查线程绑定和桌面原生连接。",
       promptGenerationError,
+      promptGenerator: "ollama",
     });
-    await appendTranscriptEntry(refreshed.paths.transcriptPath, {
-      at: failedAt,
-      activeTask: refreshed.state.activeTask,
-      note: "codex_followup_failed",
-      summary: failedThread.latestSummary,
-      mode: refreshed.state.mode,
-    });
+    markErrorAlreadyRecorded(error);
     throw error;
   }
   } finally {
@@ -2266,8 +2383,14 @@ export async function selectLoop(startDir = process.cwd(), payload = {}) {
   const selectedSnapshot = await ensureLoopArtifacts(startDir);
   const hasBoundThread = Boolean(selectedSnapshot.thread.threadId);
   const generatedNote = hasBoundThread
-    ? `当前 loop：${loop.name}，已绑定线程 ${selectedSnapshot.thread.threadTitle || loop.threadTitle}（${selectedSnapshot.thread.threadId}）。`
-    : `当前 loop：${loop.name}，尚未绑定可见线程，请先完成线程绑定再启动续跑。`;
+    ? "当前 loop：" +
+      loop.name +
+      "，已绑定线程 " +
+      (selectedSnapshot.thread.threadTitle || loop.threadTitle) +
+      "（" +
+      selectedSnapshot.thread.threadId +
+      "）。"
+    : "当前 loop：" + loop.name + "，尚未绑定可见线程，请先完成线程绑定再启动续跑。";
   const currentNote = safeText(selectedSnapshot.thread.note, "");
   const isSystemLoopNote = currentNote.startsWith("当前 loop：");
   const nextNote = currentNote && !isSystemLoopNote ? currentNote : generatedNote;
@@ -2387,7 +2510,7 @@ export async function replyLoopCreationAssistant(startDir = process.cwd(), paylo
       messages: appendAssistantMessage(
         state.messages || [],
         "assistant",
-        `已识别项目路径：${workspaceRoot}，接下来我们先确认这个项目在左侧如何显示。`,
+        "已识别项目路径：" + workspaceRoot + "。接下来先确认这个项目在左侧如何显示。",
         "workspace_root",
       ),
       currentQuestion: buildLoopAssistantQuestion("project_name", {
@@ -2438,7 +2561,9 @@ export async function replyLoopCreationAssistant(startDir = process.cwd(), paylo
         messages: appendAssistantMessage(
           state.messages || [],
           "assistant",
-          `我已经根据项目线索整理出首版计划：${safeText(plan.objectiveSummary, "继续推进当前任务")}。接下来我们逐项确认关键设置。`,
+          "我已经根据项目线索整理出首版计划：" +
+            safeText(plan.objectiveSummary, "继续推进当前任务") +
+            "。接下来逐项确认关键设置。",
           "plan_ready",
         ),
         currentQuestion: buildLoopAssistantQuestion("plan_review", nextDraft),
@@ -2487,7 +2612,7 @@ export async function replyLoopCreationAssistant(startDir = process.cwd(), paylo
       messages: appendAssistantMessage(
         state.messages || [],
         "assistant",
-        "关键设置已经确认完了。最后确认一下规则文档和补充说明，然后就可以创建任务。",
+        "关键设置已经确认完成。最后确认规则文档和补充说明，然后就可以创建任务。",
         "plan_review_done",
       ),
       currentQuestion: buildLoopAssistantQuestion("docs_confirmed", nextDraft),
@@ -2568,7 +2693,10 @@ export async function replyLoopCreationAssistant(startDir = process.cwd(), paylo
     },
   });
   const createdLoopId = buildSafeLoopId(draft.loopName, draft.projectName, "assistant-loop");
-  const createdLoop = loopRegistry.loops.find((loop) => loop.id === createdLoopId);
+  const createdLoop =
+    loopRegistry.loops.find((loop) => loop.id === createdLoopId) ||
+    loopRegistry.loops.find((loop) => loop.id === loopRegistry.currentLoopId) ||
+    loopRegistry.loops.at(-1);
 
   return saveLoopAssistantState(assistantPath, {
     status: "completed",
@@ -2581,12 +2709,12 @@ export async function replyLoopCreationAssistant(startDir = process.cwd(), paylo
     messages: appendAssistantMessage(
       state.messages || [],
       "assistant",
-      `任务已创建：${createdLoop.name}，已归入项目 ${createdLoop.projectName}。`,
+      "任务已创建：" + createdLoop.name + "，已归入项目 " + createdLoop.projectName + "。",
       "completed",
     ),
     createdLoop: {
       loop: createdLoop,
-      summary: `已创建 loop「${createdLoop.name}」，归入项目「${createdLoop.projectName}」。`,
+      summary: "已创建 loop「" + createdLoop.name + "」，归入项目「" + createdLoop.projectName + "」。",
     },
   });
 }
@@ -2695,7 +2823,7 @@ async function resolveVisibleCodexSummary(
     return {
       summary: cleanSummary,
       source: "raw",
-      error: safeText(error?.message, "本地模型整理 Codex 回复摘要失败。"),
+      error: safeText(error?.message, "本地模型整理 Codex 回复失败。"),
     };
   }
 }
@@ -2720,6 +2848,8 @@ export async function syncCodexThreadMirror(
   const at = nowIso();
   const codexSummaryChanged =
     nextCodexSummary && nextCodexSummary !== safeText(snapshot.thread.latestCodexSummary, "");
+  const completedCurrentDispatch =
+    snapshot.thread.continuationStatus === "dispatching" && codexSummaryChanged;
   const nextThread = {
     ...snapshot.thread,
     lastUserInstructionSummary:
@@ -2732,24 +2862,27 @@ export async function syncCodexThreadMirror(
       "",
     latestCodexSummary: nextCodexSummary,
     continuationStatus:
-      snapshot.thread.continuationStatus === "dispatching" && codexSummaryChanged
+      completedCurrentDispatch
         ? "idle"
         : snapshot.thread.continuationStatus,
     continuationCycleCount:
-      snapshot.thread.continuationStatus === "dispatching" && codexSummaryChanged
+      completedCurrentDispatch
         ? (snapshot.thread.continuationCycleCount || 0) + 1
         : snapshot.thread.continuationCycleCount,
     lastCompletionAt:
-      snapshot.thread.continuationStatus === "dispatching" && codexSummaryChanged
+      completedCurrentDispatch
         ? at
         : snapshot.thread.lastCompletionAt,
+    lastContinuationError: completedCurrentDispatch
+      ? ""
+      : snapshot.thread.lastContinuationError,
     latestEventType:
-      snapshot.thread.continuationStatus === "dispatching" && codexSummaryChanged
+      completedCurrentDispatch
         ? "codex_followup_completed"
         : snapshot.thread.latestEventType,
     latestSummary:
-      snapshot.thread.continuationStatus === "dispatching" && codexSummaryChanged
-        ? "Codex 已返回这一轮的新结果，可开始下一轮。"
+      completedCurrentDispatch
+        ? "Codex 已返回这一轮的新结果，可以开始下一轮。"
         : snapshot.thread.latestSummary,
     lastUpdatedAt: at,
   };

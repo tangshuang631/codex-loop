@@ -83,6 +83,8 @@ select {
   background: rgba(255, 255, 255, 0.86);
   backdrop-filter: blur(18px);
   overflow-y: auto;
+  display: flex;
+  flex-direction: column;
 }
 
 .sidebar-summary-card {
@@ -151,7 +153,7 @@ select {
 
 .sidebar-panes {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 8px;
   margin-bottom: 18px;
 }
@@ -284,6 +286,36 @@ select {
 .sidebar-pane-stack {
   display: grid;
   gap: 14px;
+}
+
+.sidebar-footer {
+  margin-top: auto;
+  padding-top: 16px;
+}
+
+.sidebar-settings-button {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  padding: 12px 14px;
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  background: #f6f6f1;
+  color: var(--text);
+  cursor: pointer;
+}
+
+.sidebar-settings-button.is-active {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #ffffff;
+}
+
+.sidebar-settings-icon {
+  font-size: 16px;
+  line-height: 1;
 }
 
 .sidebar-pane-hint {
@@ -457,6 +489,7 @@ select {
 .sidebar-collapsed-list {
   display: grid;
   gap: 10px;
+  margin-top: auto;
 }
 
 .collapsed-loop-pill {
@@ -679,7 +712,12 @@ select {
 }
 
 .workspace-guide-card.is-actions-only {
-  gap: 18px;
+  gap: 14px;
+}
+
+.compact-actions > strong {
+  font-size: 15px;
+  line-height: 1.7;
 }
 
 .workspace-thinking-card {
@@ -773,6 +811,9 @@ select {
 
 .workspace-section {
   padding: 22px;
+  border-radius: 24px;
+  background: rgba(255, 255, 255, 0.78);
+  border: 1px solid var(--line);
 }
 
 .workspace-section-head {
@@ -906,8 +947,8 @@ select {
 
 .status-summary-panel {
   overflow: hidden;
-  border: 1px solid var(--line);
-  border-radius: 22px;
+  border: 1px solid #e8e8e2;
+  border-radius: 18px;
   background: #fbfbf8;
 }
 
@@ -915,7 +956,7 @@ select {
   display: grid;
   grid-template-columns: 88px 1fr;
   gap: 14px;
-  padding: 15px 16px;
+  padding: 13px 15px;
   border-bottom: 1px solid #e8e8e2;
 }
 
@@ -938,15 +979,20 @@ select {
 
 .conversation-timeline {
   display: grid;
-  gap: 12px;
+  gap: 0;
+  border-top: 1px solid #e7e7e1;
+  background: transparent;
 }
 
 .conversation-row {
   display: flex;
+  padding: 22px 0;
+  border-bottom: 1px solid #e7e7e1;
 }
 
 .conversation-row.is-codex {
   justify-content: flex-start;
+  display: block;
 }
 
 .conversation-row.is-loop {
@@ -954,23 +1000,30 @@ select {
 }
 
 .conversation-bubble {
-  width: min(78%, 760px);
-  border: 1px solid var(--line);
-  border-radius: 22px;
-  background: #ffffff;
-  box-shadow: 0 12px 28px rgba(17, 17, 17, 0.04);
+  width: 100%;
+  border: 0;
+  background: transparent;
+  box-shadow: none;
 }
 
 .conversation-row.is-loop .conversation-bubble {
-  background: #f5f5f0;
+  width: min(72%, 640px);
+  border: 1px solid #dcd8cf;
+  border-radius: 18px 18px 6px 18px;
+  background: #f6f3ed;
+  color: var(--text);
 }
 
 .conversation-bubble summary {
   display: grid;
   gap: 8px;
-  padding: 15px 17px;
+  padding: 0;
   cursor: pointer;
   list-style: none;
+}
+
+.conversation-row.is-loop .conversation-bubble summary {
+  padding: 14px 16px;
 }
 
 .conversation-bubble summary::-webkit-details-marker {
@@ -982,11 +1035,20 @@ select {
   font-size: 12px;
 }
 
+.conversation-row.is-loop .conversation-meta,
+.conversation-row.is-loop .conversation-bubble em {
+  color: #7c766b;
+}
+
 .conversation-bubble strong {
   color: var(--text);
   font-size: 15px;
   line-height: 1.8;
   word-break: break-word;
+}
+
+.conversation-row.is-loop .conversation-bubble strong {
+  color: var(--text);
 }
 
 .conversation-bubble em {
@@ -995,15 +1057,42 @@ select {
   font-style: normal;
 }
 
-.conversation-bubble p {
+.conversation-bubble pre {
   margin: 0;
-  padding: 0 17px 16px;
-  border-top: 1px solid #edede8;
+  padding: 14px 0 0;
+  border-top: 0;
   color: var(--text);
   font-size: 14px;
   line-height: 1.8;
   white-space: pre-wrap;
   word-break: break-word;
+  font-family: inherit;
+}
+
+.conversation-row.is-loop .conversation-bubble pre {
+  margin-top: 12px;
+  padding: 12px 16px 16px;
+  border-top: 1px solid #e2ded5;
+  color: var(--text);
+}
+
+.conversation-row.is-codex .conversation-bubble pre {
+  padding-left: 0;
+  padding-right: 0;
+}
+
+.conversation-row.is-codex .conversation-bubble summary {
+  padding-left: 0;
+  padding-right: 0;
+}
+
+.status-note-line {
+  margin-top: 12px;
+  padding: 12px 4px 0;
+  border-top: 1px solid #ededeb;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.7;
 }
 
 .conversation-empty {

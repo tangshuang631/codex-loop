@@ -218,7 +218,7 @@ test("exportMobileView falls back to thread summaries when transcript mirror is 
   );
   assert.match(
     await fs.readFile(initialSnapshot.paths.transcriptPath, "utf8"),
-    /Transcript Mirror/,
+    /本地对话记录/,
   );
 });
 
@@ -232,7 +232,7 @@ test("startRun records a visible launch signal before the first heartbeat", asyn
   assert.ok(snapshot.state.startedAt);
   assert.equal(snapshot.state.lastHeartbeatAt, "");
   assert.equal(snapshot.thread.latestEventType, "run_started_from_console");
-  assert.match(snapshot.thread.latestSummary, /heartbeat/i);
+  assert.match(snapshot.thread.latestSummary, /循环已启动|Codex 线程结果/);
 
   const transcriptText = await fs.readFile(initialSnapshot.paths.transcriptPath, "utf8");
   assert.match(transcriptText, /run_started_from_console/);
@@ -455,7 +455,7 @@ test("runLoopTurn sends the next message to the bound Codex thread and stores vi
   assert.ok(snapshot.thread.lastCompletionAt);
 
   const transcriptText = await fs.readFile(initialSnapshot.paths.transcriptPath, "utf8");
-  assert.match(transcriptText, /已发送到 Codex 线程/);
+  assert.match(transcriptText, /codex-loop 已发送指令|发送目标/);
   assert.match(transcriptText, /codex_followup_completed/);
 });
 
@@ -655,6 +655,9 @@ test("ollama requests disable thinking output for dashboard summaries and prompt
 
   assert.equal(requestBodies.length, 2);
   assert.equal(requestBodies[0].think, false);
+  assert.match(requestBodies[0].system, /产品经理 NPC|product-manager NPC/i);
+  assert.match(requestBodies[0].prompt, /直接代表用户选择|Do not defer to the human/i);
+  assert.match(requestBodies[0].prompt, /高风险删除|destructive/i);
   assert.equal(requestBodies[1].think, false);
 });
 
@@ -689,12 +692,45 @@ test("runLoopTurn falls back to template prompt when ollama generation fails", a
           throw new Error("ollama unavailable");
         },
       }),
-    /本地模型生成续跑消息失败，请检查 Ollama 和模型配置。/,
+    /本地模型生成续跑指令失败，请检查 Ollama 和模型配置。/,
   );
 
   const snapshot = await readLoopSnapshot(configRoot);
   assert.match(snapshot.thread.lastContinuationError, /ollama unavailable/);
   assert.equal(snapshot.thread.continuationStatus, "error");
+});
+
+test("runLoopTurn stops the visible run when desktop dispatch fails", async () => {
+  const configRoot = await createWorkspace();
+  await ensureLoopArtifacts(configRoot);
+  await saveThreadBinding(configRoot, {
+    workspaceName: "demo",
+    threadTitle: "visible thread",
+    threadId: "thread-native-missing",
+    singleThreadMode: true,
+  });
+  await syncCodexThreadMirror(configRoot, {
+    latestCodexSummary: "上一轮已经完成，等待下一条指令。",
+  });
+  await startRun(configRoot);
+
+  await assert.rejects(
+    () =>
+      runLoopTurn(configRoot, {
+        dispatchThreadMessage: async () => {
+          throw new Error("没有找到目标 Codex 桌面线程");
+        },
+      }),
+    /没有找到目标 Codex 桌面线程/,
+  );
+
+  const snapshot = await readLoopSnapshot(configRoot);
+  assert.equal(snapshot.state.mode, "stopped");
+  assert.equal(snapshot.state.modeLabel, "已停止");
+  assert.equal(snapshot.state.stopRequested, false);
+  assert.equal(snapshot.state.finalizeRequested, false);
+  assert.equal(snapshot.thread.continuationStatus, "error");
+  assert.match(snapshot.thread.latestSummary, /发送下一轮指令失败/);
 });
 
 test("syncCodexThreadMirror appends a transcript entry when a real Codex summary arrives", async () => {
@@ -748,6 +784,84 @@ test("syncCodexThreadMirror keeps completion state after the next snapshot reloa
   assert.match(reloaded.thread.latestSummary, /Codex|可开始下一轮/);
 });
 
+test("syncCodexThreadMirror clears stale dispatch errors after a real completion", async () => {
+  const configRoot = await createWorkspace();
+  await ensureLoopArtifacts(configRoot);
+  await saveThreadBinding(configRoot, {
+    workspaceName: "demo",
+    threadTitle: "completion clears error thread",
+    threadId: "thread-completion-clears-error",
+    singleThreadMode: true,
+  });
+  await syncCodexThreadMirror(configRoot, {
+    latestCodexSummary: "previous summary",
+  });
+
+  await assert.rejects(
+    () =>
+      runLoopTurn(configRoot, {
+        dispatchThreadMessage: async () => {
+          throw new Error("桌面端暂时不可接收新指令");
+        },
+      }),
+    /桌面端暂时不可接收新指令/,
+  );
+
+  const failed = await readLoopSnapshot(configRoot);
+  assert.match(failed.thread.lastContinuationError, /桌面端暂时不可接收新指令/);
+
+  await fs.writeFile(
+    failed.paths.threadPath,
+    `${JSON.stringify(
+      {
+        ...failed.thread,
+        continuationStatus: "dispatching",
+      },
+      null,
+      2,
+    )}\n`,
+  );
+
+  const synced = await syncCodexThreadMirror(configRoot, {
+    latestCodexSummary: "new verified result after native delivery",
+  });
+
+  assert.equal(synced.thread.continuationStatus, "idle");
+  assert.equal(synced.thread.latestEventType, "codex_followup_completed");
+  assert.equal(synced.thread.lastContinuationError, "");
+});
+
+test("readLoopSnapshot drops stale continuation errors outside error state", async () => {
+  const configRoot = await createWorkspace();
+  const initialSnapshot = await ensureLoopArtifacts(configRoot);
+  await saveThreadBinding(configRoot, {
+    workspaceName: "demo",
+    threadTitle: "stale non-error thread",
+    threadId: "thread-stale-non-error",
+    singleThreadMode: true,
+  });
+
+  await fs.writeFile(
+    initialSnapshot.paths.threadPath,
+    `${JSON.stringify(
+      {
+        ...(await readLoopSnapshot(configRoot)).thread,
+        continuationStatus: "idle",
+        latestEventType: "codex_followup_completed",
+        lastContinuationError: "旧的失败信息",
+      },
+      null,
+      2,
+    )}\n`,
+  );
+
+  const snapshot = await readLoopSnapshot(configRoot);
+
+  assert.equal(snapshot.thread.continuationStatus, "idle");
+  assert.equal(snapshot.thread.lastContinuationError, "");
+  assert.equal(snapshot.health.lastContinuationError, "");
+});
+
 test("runLoopTurn writes completion immediately when the Codex dispatcher returns a finished message", async () => {
   const configRoot = await createWorkspace();
   await ensureLoopArtifacts(configRoot);
@@ -772,6 +886,37 @@ test("runLoopTurn writes completion immediately when the Codex dispatcher return
   assert.equal(snapshot.thread.latestEventType, "codex_followup_completed");
   assert.equal(snapshot.thread.continuationCycleCount, 1);
   assert.match(snapshot.thread.latestCodexSummary, /Completed the next verified Codex batch/);
+});
+
+test("runLoopTurn fails when native dispatch does not confirm target-thread delivery", async () => {
+  const configRoot = await createWorkspace();
+  await ensureLoopArtifacts(configRoot);
+  await saveThreadBinding(configRoot, {
+    workspaceName: "demo",
+    threadTitle: "visible thread",
+    threadId: "thread-delivery-unconfirmed",
+    singleThreadMode: true,
+  });
+  await syncCodexThreadMirror(configRoot, {
+    latestCodexSummary: "previous summary",
+  });
+
+  await assert.rejects(
+    () =>
+      runLoopTurn(configRoot, {
+        dispatchThreadMessage: async () => ({
+          deliveryObserved: false,
+          completionObserved: false,
+          lastMessage: "",
+        }),
+      }),
+    /未确认送达|没有观察到目标线程/,
+  );
+
+  const snapshot = await readLoopSnapshot(configRoot);
+  assert.equal(snapshot.state.mode, "stopped");
+  assert.equal(snapshot.thread.continuationStatus, "error");
+  assert.match(snapshot.thread.lastContinuationError, /未确认送达|没有观察到目标线程/);
 });
 
 test("runLoopTurn rejects duplicate dispatch while a continuation is actively in flight", async () => {
@@ -805,12 +950,12 @@ test("runLoopTurn rejects duplicate dispatch while a continuation is actively in
   );
 });
 
-test("runLoopTurn recovers a stalled dispatch and continues with the next turn", async () => {
+test("runLoopTurn refuses to continue when the previous dispatch is stalled and waits for manual recovery", async () => {
   const configRoot = await createWorkspace();
   await ensureLoopArtifacts(configRoot);
   await saveThreadBinding(configRoot, {
     workspaceName: "demo",
-    threadTitle: "recovered thread",
+    threadTitle: "stalled thread",
     threadId: "thread-recovered",
     singleThreadMode: true,
   });
@@ -835,21 +980,18 @@ test("runLoopTurn recovers a stalled dispatch and continues with the next turn",
     "utf8",
   );
 
-  let dispatchedPrompt = "";
-  const snapshot = await runLoopTurn(configRoot, {
-    generateFollowupPrompt: async ({ fallbackPrompt }) => fallbackPrompt,
-    dispatchThreadMessage: async ({ prompt }) => {
-      dispatchedPrompt = prompt;
-      return { lastMessage: "Recovered and completed the next continuation turn" };
-    },
-  });
+  const refreshed = await readLoopSnapshot(configRoot);
+  assert.equal(refreshed.thread.continuationStatus, "error");
+  assert.match(refreshed.thread.latestSummary, /停止自动续发|手动继续/);
+  assert.match(refreshed.thread.lastContinuationError, /等待 Codex 完成|停止自动续发/i);
 
-  assert.match(dispatchedPrompt, /下一步：|Next:/i);
-  assert.equal(snapshot.thread.continuationStatus, "idle");
-  assert.equal(snapshot.thread.threadId, "thread-recovered");
+  await assert.rejects(
+    () => runLoopTurn(configRoot),
+    /还没有确认 Codex 已完成|目标线程完成当前工作/i,
+  );
 
   const transcriptText = await fs.readFile(busySnapshot.paths.transcriptPath, "utf8");
-  assert.match(transcriptText, /codex_followup_recovered|Recovered|stalled|reset/i);
+  assert.match(transcriptText, /codex_followup_stalled|停止自动续发|手动继续/i);
 });
 
 test("runLoopTurn rejects using the current Codex session thread as the loop target", async () => {
@@ -1404,7 +1546,7 @@ test("readLoopSnapshot marks health issue when heartbeat is stale", async () => 
   assert.match(refreshed.health.issues.join(","), /heartbeat:stale/);
 });
 
-test("readLoopSnapshot recovers a stalled continuation dispatch so the loop can continue", async () => {
+test("readLoopSnapshot marks a stalled continuation as waiting for manual confirmation", async () => {
   const configRoot = await createWorkspace();
   const snapshot = await ensureLoopArtifacts(configRoot);
   const staleAt = new Date(Date.now() - 1000 * 60 * 10).toISOString();
@@ -1455,12 +1597,13 @@ test("readLoopSnapshot recovers a stalled continuation dispatch so the loop can 
   );
 
   const refreshed = await readLoopSnapshot(configRoot);
-  assert.equal(refreshed.thread.continuationStatus, "idle");
-  assert.match(refreshed.thread.lastContinuationError, /stalled|timed out|reset/i);
-  assert.equal(refreshed.health.ok, true);
+  assert.equal(refreshed.thread.continuationStatus, "error");
+  assert.match(refreshed.thread.lastContinuationError, /等待 Codex 完成|停止自动续发/i);
+  assert.equal(refreshed.health.ok, false);
+  assert.match(refreshed.health.issues.join(","), /continuation:error/);
 
   const transcriptText = await fs.readFile(snapshot.paths.transcriptPath, "utf8");
-  assert.match(transcriptText, /stalled|reset|恢复/i);
+  assert.match(transcriptText, /codex_followup_stalled|停止自动续发|手动继续/i);
 });
 
 test("readLoopSnapshot marks health issue when transcript is stale during an active run", async () => {
@@ -1477,4 +1620,34 @@ test("readLoopSnapshot marks health issue when transcript is stale during an act
   const refreshed = await readLoopSnapshot(configRoot);
   assert.equal(refreshed.health.ok, false);
   assert.match(refreshed.health.issues.join(","), /transcript:stale/);
+});
+
+test("runLoopTurn rejects store-only delivery that is not visible in the desktop thread", async () => {
+  const configRoot = await createWorkspace();
+  await ensureLoopArtifacts(configRoot);
+  await saveThreadBinding(configRoot, {
+    workspaceName: "demo",
+    threadTitle: "visible thread",
+    threadId: "thread-isolated",
+    singleThreadMode: true,
+  });
+  await syncCodexThreadMirror(configRoot, {
+    latestCodexSummary: "Previous turn already finished",
+  });
+
+  await assert.rejects(
+    () =>
+      runLoopTurn(configRoot, {
+        dispatchThreadMessage: async () => ({
+          lastMessage: "",
+          transport: "app-server",
+          delivery: "thread_store_only",
+        }),
+      }),
+    /未确认送达|没有观察到目标线程/,
+  );
+
+  const snapshot = await readLoopSnapshot(configRoot);
+  assert.equal(snapshot.thread.continuationStatus, "error");
+  assert.match(snapshot.thread.lastContinuationError, /未确认送达|没有观察到目标线程/);
 });

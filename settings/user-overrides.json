@@ -6,9 +6,9 @@
   "conversation": {
     "language": "zh-CN",
     "promptGenerator": {
-      "enabled": false,
+      "enabled": true,
       "provider": "ollama",
-      "model": "qwen2.5:7b",
+      "model": "qwen3.6:35b",
       "baseUrl": "http://127.0.0.1:11434"
     }
   }

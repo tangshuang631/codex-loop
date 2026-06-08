@@ -29,12 +29,12 @@ const IDLE_POLL_MS = 12000;
 const modeTextMap = {
   running: "运行中",
   finalize_after_current: "收尾中",
-  stopped: "已暂停",
+  stopped: "已停止",
 };
 
 const continuationTextMap = {
   idle: "等待下一轮",
-  dispatching: "已发送，等待 Codex 回复",
+  dispatching: "已发送，等待 Codex",
   error: "续跑失败",
 };
 
@@ -77,7 +77,6 @@ function groupLoopsByProject(loops = []) {
     return groups;
   }, {});
 }
-
 function filterVisibleLoops(loops = []) {
   return loops.filter((loop) => {
     if (loop.isCurrent) {
@@ -85,10 +84,20 @@ function filterVisibleLoops(loops = []) {
     }
     const staleDefaultLoop =
       loop.id === "default-run" &&
-      loop.name === "默认循环" &&
+      !loop.boundThreadId &&
       loop.projectName === "project";
     return !staleDefaultLoop;
   });
+}
+
+function pickVisibleLoop(loops = [], preferredId = "") {
+  const visibleLoops = filterVisibleLoops(loops);
+  return (
+    visibleLoops.find((loop) => loop.id === preferredId) ||
+    visibleLoops.find((loop) => loop.isCurrent) ||
+    visibleLoops[0] ||
+    null
+  );
 }
 
 async function requestJsonLegacyUnused(targetPath, options = {}) {
@@ -179,9 +188,7 @@ function summarizeVisibleText(value, fallback = "暂无", maxLength = 120) {
   if (!text) {
     return fallback;
   }
-  if (
-    text === "Loop initialized; waiting for the first heartbeat or Codex progress sync."
-  ) {
+  if (text === "Loop initialized; waiting for the first heartbeat or Codex progress sync.") {
     return "刚开始运行，等待第一轮进展。";
   }
   const firstParagraph = text
@@ -190,19 +197,22 @@ function summarizeVisibleText(value, fallback = "暂无", maxLength = 120) {
     .find(Boolean) || text;
   const firstLine = firstParagraph.split("\n").map((item) => item.trim()).find(Boolean) || firstParagraph;
   const compact = firstLine.replace(/\s+/g, " ").trim();
-  return compact.length > maxLength ? `${compact.slice(0, maxLength)}…` : compact;
+  return compact.length > maxLength ? compact.slice(0, maxLength) + "..." : compact;
 }
 
 function translateHealthIssue(issue) {
   const value = formatValue(issue, "");
   if (value === "transcript:stale") {
-    return "最近记录还没同步到面板，请等待这一轮完成后再查看。";
+    return "最近记录还没有同步到面板，请等待这一轮完成后再查看。";
   }
   if (value === "continuation:stalled") {
-    return "这一轮等待时间过长，建议检查对应线程是否还在继续输出。";
+    return "这一轮等待时间过长，建议确认目标线程是否仍在输出。";
   }
   if (value === "heartbeat:stale") {
     return "运行心跳超过预期时间未更新。";
+  }
+  if (value === "continuation:error") {
+    return "续跑失败，请查看最近记录里的错误信息。";
   }
   return value || "暂无";
 }
@@ -212,16 +222,13 @@ function isUsefulTranscriptEntry(entry) {
   if (!summary) {
     return false;
   }
-  if (summary.includes("???") || summary.includes("�")) {
+  if (summary.includes("???") || summary.includes("锟")) {
     return false;
   }
-  if (summary.includes("循环已启动，正在等待第一轮")) {
+  if (summary.includes("循环已启动") || summary.includes("正在等待第一轮")) {
     return false;
   }
   if (summary.includes("正在向绑定的 Codex 线程发送")) {
-    return false;
-  }
-  if (summary.includes("下一条循环消息已发送到 Codex 线程")) {
     return false;
   }
   return true;
@@ -243,7 +250,6 @@ function deriveActionHint(snapshot, suggestedAction) {
   const fallback = summarizeVisibleText(suggestedAction, "");
   return fallback || "先开始循环。";
 }
-
 function Section({ title, desc, actions, children }) {
   return (
     <section className="workspace-section">
@@ -281,16 +287,18 @@ function StatusSummaryPanel({
   modeText,
   continuationStatus,
   currentLoopName,
+  threadLabel,
   modelStatus,
-  automationSchedule,
+  pollStatus,
   healthSummary,
 }) {
   const rows = [
-    ["运行状态", `${modeText} · ${continuationStatus}`],
-    ["当前任务", currentLoopName],
-    ["本地模型", modelStatus],
-    ["自动间隔", automationSchedule],
-    ["提示", healthSummary],
+    ["运行", `${modeText} · ${continuationStatus}`],
+    ["任务", currentLoopName],
+    ["线程", threadLabel],
+    ["模型", modelStatus],
+    ["同步", pollStatus],
+    ["提醒", healthSummary],
   ];
 
   return (
@@ -305,75 +313,91 @@ function StatusSummaryPanel({
   );
 }
 
+const StatusSummaryPanelV2 = StatusSummaryPanel;
+
 function ConversationTimeline({
   entries,
   latestCodexUser,
   latestCodexAssistant,
   latestPrompt,
-  latestVisibleSummary,
+  latestPromptAt,
   fallbackEntries,
 }) {
-  const conversationEntries = entries.length
+  const conversationEntries = (entries.length
     ? entries
     : [
-        latestCodexUser
-          ? { ...latestCodexUser, label: "codex-loop 发出的指令", role: "user" }
-          : null,
         latestCodexAssistant
           ? { ...latestCodexAssistant, label: "Codex 回复", role: "assistant" }
           : null,
-      ].filter(Boolean);
+        latestCodexUser
+          ? { ...latestCodexUser, label: "codex-loop 指令", role: "user" }
+          : null,
+      ].filter(Boolean)).filter(Boolean);
 
-  if (!conversationEntries.length && fallbackEntries.length) {
-    return (
-      <div className="conversation-timeline">
-        {fallbackEntries.map((entry, index) => (
-          <article className="conversation-row is-codex" key={`${entry.at}-${index}`}>
-            <div className="conversation-bubble">
-              <span className="conversation-meta">{formatTime(entry.at, "未知时间")} · 记录</span>
-              <strong>{summarizeVisibleText(entry.summary, "暂无摘要", 220)}</strong>
-            </div>
-          </article>
-        ))}
-      </div>
-    );
+  const latestPromptText = formatValue(latestPrompt, "");
+  const latestPromptAlreadyVisible =
+    !latestPromptText ||
+    conversationEntries.some((entry) => formatValue(entry.text, "").trim() === latestPromptText.trim());
+
+  if (!latestPromptAlreadyVisible) {
+    conversationEntries.push({
+      at: latestPromptAt,
+      role: "user",
+      text: latestPromptText,
+      preview: latestPromptText,
+      label: "codex-loop 指令",
+    });
   }
 
-  if (!conversationEntries.length) {
+  conversationEntries.sort((a, b) => {
+    const left = Date.parse(a.at || "");
+    const right = Date.parse(b.at || "");
+    if (!Number.isFinite(left) && !Number.isFinite(right)) return 0;
+    if (!Number.isFinite(left)) return 1;
+    if (!Number.isFinite(right)) return -1;
+    return left - right;
+  });
+
+  const fallbackConversation = !conversationEntries.length && fallbackEntries.length
+    ? fallbackEntries.map((entry) => ({
+        at: entry.at,
+        role: "assistant",
+        text: entry.summary,
+        preview: entry.summary,
+        label: "本地记录",
+      }))
+    : [];
+  const visibleEntries = conversationEntries.length ? conversationEntries : fallbackConversation;
+
+  if (!visibleEntries.length) {
     return (
       <div className="conversation-empty">
-        绑定线程并开始循环后，这里会用对话形式展示发出的指令和 Codex 回复。
+        绑定线程并开始循环后，这里会像 Codex 对话一样展示 codex-loop 发出的指令和 Codex 的回复。
       </div>
     );
   }
 
   return (
     <div className="conversation-timeline">
-      {conversationEntries.map((entry, index) => {
+      {visibleEntries.map((entry, index) => {
         const isLoopMessage = entry.role === "user";
-        const fullText = formatValue(
-          entry.text,
-          isLoopMessage ? latestPrompt : latestVisibleSummary,
-        );
-        const summaryText =
-          !isLoopMessage && latestVisibleSummary
-            ? latestVisibleSummary
-            : fullText;
-        const summary = summarizeVisibleText(summaryText, "暂无摘要", 220);
+        const fullText = formatValue(entry.text, isLoopMessage ? latestPrompt : "");
+        const previewText = formatValue(entry.preview, fullText);
+        const summary = summarizeVisibleText(previewText || fullText, "暂无内容", isLoopMessage ? 180 : 320);
         return (
           <article
             className={`conversation-row ${isLoopMessage ? "is-loop" : "is-codex"}`}
             key={`${entry.at || index}-${entry.role}-${index}`}
           >
-            <details className="conversation-bubble">
+            <details className="conversation-bubble" open={!isLoopMessage}>
               <summary>
                 <span className="conversation-meta">
                   {formatTime(entry.at, "未知时间")} · {isLoopMessage ? "codex-loop 指令" : "Codex 回复"}
                 </span>
                 <strong>{summary}</strong>
-                <em>点击展开完整内容</em>
+                <em>{fullText ? (isLoopMessage ? "点击展开完整指令" : "点击收起完整回复") : "等待完整内容同步"}</em>
               </summary>
-              <p>{fullText}</p>
+              {fullText ? <pre>{fullText}</pre> : null}
             </details>
           </article>
         );
@@ -381,7 +405,6 @@ function ConversationTimeline({
     </div>
   );
 }
-
 function QuickActionButton({ action, onAction, variant = "secondary", disabled = false }) {
   if (!action?.id || !action?.label) {
     return null;
@@ -399,6 +422,19 @@ function QuickActionButton({ action, onAction, variant = "secondary", disabled =
   );
 }
 
+function deriveVisibleWaitingText(snapshot, fallbackText) {
+  const summary = formatValue(fallbackText, "");
+  if (!summary) {
+    return "等待这一轮完成。";
+  }
+  if (snapshot?.thread?.continuationStatus === "dispatching") {
+    return summary.includes("Codex")
+      ? "这一轮已发出，正在等待 Codex 完成。"
+      : "这一轮处理中，正在等待结果同步。";
+  }
+  return summary;
+}
+
 function SidebarSummary({ currentLoop, loopRegistry, snapshot, pollStatus }) {
   const visibleLoops = filterVisibleLoops(loopRegistry.loops || []);
   return (
@@ -414,7 +450,6 @@ function SidebarSummary({ currentLoop, loopRegistry, snapshot, pollStatus }) {
     </div>
   );
 }
-
 function SkeletonBlock() {
   return (
     <main className="app-shell loading-shell">
@@ -458,7 +493,11 @@ function LoopCreationAssistantPane({
           <DetailCard
             meta="创建完成"
             title={createdLoop.name}
-            body={`已归入项目：${createdLoop.projectName}\n分支：${formatValue(createdLoop.branch)}\n工作区：${formatValue(createdLoop.workspaceRoot)}`}
+            body={[
+              "已归入项目：" + createdLoop.projectName,
+              "分支：" + formatValue(createdLoop.branch),
+              "工作区：" + formatValue(createdLoop.workspaceRoot),
+            ].join("\n")}
           />
         </div>
       ) : null}
@@ -488,15 +527,14 @@ function LoopCreationAssistantPane({
             ) : null}
 
             <details className="assistant-disclosure" open>
-                <summary>当前进度</summary>
-                <div className="assistant-draft-grid">
+              <summary>当前进度</summary>
+              <div className="assistant-draft-grid">
                 <Metric label="项目路径" value={formatValue(draft.workspaceRoot, "待填写")} muted={!draft.workspaceRoot} />
                 <Metric label="项目名" value={formatValue(draft.projectName, "待填写")} muted={!draft.projectName} />
-                <Metric label="任务名称" value={formatValue(draft.loopName, "待填写")} muted={!draft.loopName} />
+                <Metric label="任务名" value={formatValue(draft.loopName, "待填写")} muted={!draft.loopName} />
                 <Metric label="分支" value={formatValue(draft.branch, "待填写")} muted={!draft.branch} />
-                </div>
-              </details>
-
+              </div>
+            </details>
             {plan.objectiveSummary ? (
               <details className="assistant-disclosure" open>
                 <summary>任务规划</summary>
@@ -505,9 +543,9 @@ function LoopCreationAssistantPane({
                     meta={plan.source === "ollama" ? "本地模型规划" : "模板规划"}
                     title={plan.objectiveSummary}
                     body={[
-                      `建议项目名：${formatValue(plan.suggestedProjectName, "暂无")}`,
-                      `建议任务名：${formatValue(plan.suggestedLoopName, "暂无")}`,
-                      `建议分支：${formatValue(plan.suggestedBranch, "暂无")}`,
+                      "建议项目名：" + formatValue(plan.suggestedProjectName, "暂无"),
+                      "建议任务名：" + formatValue(plan.suggestedLoopName, "暂无"),
+                      "建议分支：" + formatValue(plan.suggestedBranch, "暂无"),
                     ].join("\n")}
                   />
                   {plan.checklist?.length ? (
@@ -619,19 +657,19 @@ function ManagePane({
   const isFinalizing = snapshot?.state?.stopRequested || snapshot?.state?.finalizeRequested;
   const isRunning = snapshot?.state?.mode === "running";
   const runningHeadline = isFinalizing
-    ? "正在等待 Codex 收尾"
+    ? "正在收尾"
     : isDispatching
       ? "已发送，等待 Codex 完成"
       : isRunning
-        ? "自动循环已开启"
+        ? "循环运行中"
         : "当前 loop 已停止";
   const runningDescription = isFinalizing
-    ? "不会再发送新指令；等 Codex 输出完成摘要后会自动停住。"
+    ? "不会再发送新指令，等待当前轮结束后停止。"
     : isDispatching
-      ? "Codex 还在处理这一轮，中途回复只展示，不会触发下一轮。"
+      ? "Codex 正在处理当前轮，完成前不会继续追发。"
       : isRunning
-        ? "系统会等 Codex 完整结束一轮后，再决定是否继续发送。"
-        : "需要继续时点击开始循环；如需让本地模型整理下一条指令，请先配置 Ollama。";
+        ? "系统会等待 Codex 完整结束一轮，再决定是否继续发送。"
+        : "需要继续时点击开始循环；如需本地模型参与，请先开启全局 Ollama。";
   const thinkingStateClass = isFinalizing
     ? "is-finalizing"
     : isDispatching || isRunning
@@ -661,7 +699,7 @@ function ManagePane({
           }}
         >
           <p className="sidebar-help">
-            只有在第一次接入，或者想把 loop 切换到另一个可见线程时，才需要来这里修改。
+            第一次接入，或要把 loop 切换到另一个可见线程时，再来这里修改。
           </p>
           <label>
             <span>显示名称</span>
@@ -740,7 +778,7 @@ function ManagePane({
           }
         }}
       >
-        <summary>自动续跑</summary>
+        <summary>全局设置</summary>
         <form
           className="sidebar-form"
           onSubmit={(event) => {
@@ -810,7 +848,7 @@ function ManagePane({
               if (event.currentTarget.open) setActiveManageSection("ollama");
             }}
           >
-            <summary>智能增强</summary>
+            <summary>Ollama 设置</summary>
             <div className="settings-grid">
               <label className="toggle-row">
                 <input
@@ -823,7 +861,7 @@ function ManagePane({
                     }))
                   }
                 />
-                <span>启用本地模型生成下一条续跑提示</span>
+                <span>开启 Ollama 后，默认用于所有 loop</span>
               </label>
               <label>
                 <span>模型名称</span>
@@ -876,7 +914,7 @@ function ManagePane({
             </div>
             {!ollamaModels.length ? (
               <p className="sidebar-help">
-                还没有检测到可用的本地模型。你可以继续使用默认模式，不会影响日常任务运行。
+                还没有检测到可用的本地模型。不开启也能运行；开启后会默认用于整理 Codex 回复和生成下一步提示。
               </p>
             ) : null}
           </details>
@@ -887,12 +925,12 @@ function ManagePane({
               label="自动节奏"
               value={automationStatus?.connected ? `${automationStatus.intervalMinutes} 分钟` : "未连接"}
             />
-            <Metric label="提示词增强" value={promptGeneratorStatus} />
+            <Metric label="提示增强" value={promptGeneratorStatus} />
             <Metric label="启动状态" value={launcherPhase} />
           </div>
 
           <button type="submit" className="primary-button" disabled={submitting}>
-            保存自动续跑设置
+            保存全局设置
           </button>
         </form>
       </details>
@@ -912,7 +950,7 @@ function ManagePane({
             <Metric label="控制台地址" value={launcherWebUrl} />
             <Metric
               label="健康状态"
-              value={healthIssues.length ? `${healthIssues.length} 个提醒` : "当前正常"}
+              value={healthIssues.length ? `${healthIssues.length} 个提示` : "当前正常"}
             />
           </div>
           {healthIssues.length ? (
@@ -934,7 +972,7 @@ function ManagePane({
             <DetailCard
               meta="远程入口"
               title={remoteAccessStatus.url}
-              body="如果你需要在别的设备上查看状态，可以直接使用这个地址。"
+              body="如果你需要在别的设备上查看状态，可以使用这个地址。"
               quiet
             />
           ) : null}
@@ -957,7 +995,7 @@ function CreateWorkspaceView({
       <div className="workspace-focus-head">
         <span className="workspace-focus-eyebrow">创建新任务</span>
         <h1>对话创建 loop</h1>
-        <p>右侧会完整显示创建流程，你现在不用再挤在侧边栏里操作。</p>
+        <p>这里会完整显示创建流程，你不需要挤在侧边栏里操作。</p>
       </div>
 
       <LoopCreationAssistantPane
@@ -977,195 +1015,13 @@ function ManageWorkspaceView(props) {
   return (
     <section className="workspace-focus">
       <div className="workspace-focus-head">
-        <span className="workspace-focus-eyebrow">任务管理</span>
-        <h1>调整当前 loop</h1>
-        <p>连接窗口、自动续跑和模型增强集中放在这里。</p>
+        <span className="workspace-focus-eyebrow">全局设置</span>
+        <h1>调整 codex-loop 设置</h1>
+        <p>线程绑定、自动续跑、本地模型和关闭控制台都集中放在这里。</p>
       </div>
 
       <ManagePane {...props} />
     </section>
-  );
-}
-
-function DashboardHomeLegacy({
-  currentLoop,
-  snapshot,
-  modeText,
-  continuationStatus,
-  launcherPhase,
-  pollStatus,
-  pollState,
-  dashboardGuide,
-  submitting,
-  handleDashboardAction,
-  setActiveSidebarPane,
-  setActiveManageSection,
-  onRequestShutdown,
-  automationSchedule,
-  automationStatus,
-  threadLabel,
-  latestSummary,
-  changeSummary,
-  suggestedAction,
-  transcriptEntries,
-  latestPrompt,
-  mobileSummary,
-  bindingNote,
-  strategy,
-  settingsForm,
-  healthIssues,
-  uiError,
-}) {
-  const legacyLoopName = formatValue(
-    currentLoop?.name || snapshot?.config?.loopName,
-    "当前任务",
-  );
-  const legacyCodexConversation = snapshot?.codexConversation || {};
-  const legacyConversationEntries = [...(legacyCodexConversation.entries || []).slice(0, 8)].reverse();
-  const legacyLatestCodexUser = legacyCodexConversation.latestUser || null;
-  const legacyLatestCodexAssistant = legacyCodexConversation.latestAssistant || null;
-  const legacyLatestVisibleSummary = summarizeVisibleText(
-    snapshot?.thread?.latestCodexSummary || latestSummary,
-    "等待第一轮可见进展",
-  );
-  const legacyHealthSummary = healthIssues.length
-    ? healthIssues.join("\n")
-    : "当前没有明显异常，可以继续推进。";
-
-  return (
-    <>
-      <section className="workspace-hero">
-        <div className="workspace-hero-copy">
-          <span className="workspace-hero-project">
-            {formatValue(currentLoop?.projectName || snapshot?.config?.projectName, "当前项目")}
-          </span>
-          <h1>{formatValue(currentLoop?.name || snapshot?.config?.loopName, "当前任务")}</h1>
-          <p>这里用来确认当前 loop 是否在推进、上一条消息是否发到绑定线程，以及 Codex 是否已经完成一轮。</p>
-          <div className="workspace-status-row">
-            <StatusPill text={modeText} active={snapshot?.state?.mode === "running"} />
-            <StatusPill
-              text={continuationStatus}
-              tone={snapshot?.thread?.continuationStatus === "error" ? "danger" : "soft"}
-              active={snapshot?.thread?.continuationStatus === "dispatching"}
-            />
-            <StatusPill text={launcherPhase} tone="soft" />
-            <StatusPill text={pollStatus} tone="soft" active={pollState.syncing} />
-          </div>
-          <div className="workspace-guide-card is-actions-only">
-            <div className="workspace-guide-head">
-              <span className="workspace-guide-label">操作</span>
-              <strong>控制当前 loop</strong>
-            </div>
-            <div className="workspace-guide-actions">
-              <button
-                type="button"
-                className="primary-button"
-                disabled={submitting}
-                onClick={() => void handleDashboardAction("start-loop")}
-              >
-                开始循环
-              </button>
-              <button
-                type="button"
-                className="secondary-button"
-                disabled={submitting}
-                onClick={() => void handleDashboardAction("stop-loop")}
-              >
-                停止
-              </button>
-              <button
-                type="button"
-                className="ghost-button"
-                disabled={submitting}
-                onClick={() => setActiveSidebarPane("create")}
-              >
-                新建 loop
-              </button>
-              <button
-                type="button"
-                className="ghost-button"
-                disabled={submitting}
-                onClick={() => {
-                  setActiveManageSection("ollama");
-                  setActiveSidebarPane("manage");
-                }}
-              >
-                配置 Ollama
-              </button>
-              <button
-                type="button"
-                className="ghost-button danger-zone-button"
-                disabled={submitting}
-                onClick={() => void onRequestShutdown()}
-              >
-                彻底关闭
-              </button>
-            </div>
-          </div>
-        </div>
-
-        <div className="workspace-hero-aside">
-          <div className="workspace-hero-metrics">
-            {dashboardGuide.supportingMetrics.map((item) => (
-              <Metric
-                key={item.label}
-                label={item.label}
-                value={item.value}
-                muted={!item.value || item.value === "暂无"}
-              />
-            ))}
-          </div>
-
-          <div className={`workspace-thinking-card ${thinkingStateClass}`}>
-            <div className={`thinking-pulse ${thinkingStateClass}`} aria-hidden="true">
-              <span />
-              <span />
-              <span />
-            </div>
-            <div>
-              <strong>{runningHeadline}</strong>
-              <p>{runningDescription}</p>
-            </div>
-          </div>
-        </div>
-      </section>
-
-      {uiError ? <div className="error-banner">{uiError}</div> : null}
-
-      <div className="workspace-columns">
-        <div className="workspace-primary">
-          <Section
-            title="最近记录"
-            desc="这里显示本机线程记录；桌面端没刷新时，按 Ctrl+R 重载 Codex，或退出后用 codex app 重开。"
-          >
-            <ConversationTimeline
-              entries={legacyConversationEntries}
-              latestCodexUser={legacyLatestCodexUser}
-              latestCodexAssistant={legacyLatestCodexAssistant}
-              latestPrompt={latestPrompt}
-              latestVisibleSummary={legacyLatestVisibleSummary}
-              fallbackEntries={transcriptEntries}
-            />
-          </Section>
-        </div>
-
-        <aside className="workspace-secondary">
-          <Section
-            title="状态"
-            desc="只看当前能不能继续。"
-          >
-            <StatusSummaryPanel
-              modeText={modeText}
-              continuationStatus={continuationStatus}
-              currentLoopName={legacyLoopName}
-              modelStatus={settingsForm.promptGeneratorEnabled ? `已开启 · ${settingsForm.promptGeneratorModel}` : "未开启"}
-              automationSchedule={automationSchedule}
-              healthSummary={legacyHealthSummary}
-            />
-          </Section>
-        </aside>
-      </div>
-    </>
   );
 }
 
@@ -1177,100 +1033,82 @@ function DashboardHome({
   launcherPhase,
   pollStatus,
   pollState,
-  dashboardGuide,
   submitting,
   handleDashboardAction,
   setActiveSidebarPane,
   setActiveManageSection,
   onRequestShutdown,
-  automationSchedule,
-  automationStatus,
   threadLabel,
   latestSummary,
-  changeSummary,
-  suggestedAction,
   transcriptEntries,
   latestPrompt,
-  mobileSummary,
-  bindingNote,
-  strategy,
   settingsForm,
   healthIssues,
   uiError,
 }) {
-  const currentProjectName = formatValue(
+  const projectTitle = formatValue(
     currentLoop?.projectName || snapshot?.config?.projectName,
     "当前项目",
   );
-  const currentLoopName = formatValue(
+  const loopTitle = formatValue(
     currentLoop?.name || snapshot?.config?.loopName,
-    "当前任务",
+    "当前 loop",
   );
-  const latestVisibleSummary = summarizeVisibleText(
-    snapshot?.thread?.latestCodexSummary || latestSummary,
-    "等待第一轮可见进展",
-  );
-  const shortChangeSummary = summarizeVisibleText(changeSummary, "还没有新的推进摘要。");
-  const shortLatestPrompt = summarizeVisibleText(
-    latestPrompt.replace(/\s*\n+\s*/g, " "),
-    "暂时还没有续跑内容。",
-  );
-  const shortBindingNote = summarizeVisibleText(bindingNote, "暂无");
-  const visibleTranscriptEntries = transcriptEntries
-    .filter(isUsefulTranscriptEntry)
-    .slice(0, 3);
   const codexConversation = snapshot?.codexConversation || {};
   const latestCodexUser = codexConversation.latestUser || null;
   const latestCodexAssistant = codexConversation.latestAssistant || null;
-  const codexConversationEntries = [...(codexConversation.entries || []).slice(0, 8)].reverse();
+  const codexConversationEntries = [...(codexConversation.entries || []).slice(0, 10)].reverse();
+  const visibleTranscriptEntries = transcriptEntries.filter(isUsefulTranscriptEntry).slice(0, 4);
   const isDispatching = snapshot?.thread?.continuationStatus === "dispatching";
   const isFinalizing = snapshot?.state?.stopRequested || snapshot?.state?.finalizeRequested;
   const isRunning = snapshot?.state?.mode === "running";
-  const healthSummary = healthIssues.length
-    ? healthIssues.join("\n")
-    : "当前没有明显异常，可以继续推进。";
+  const healthSummary = healthIssues.length ? healthIssues.join("\n") : "当前没有明显异常。";
+  const modelStatus = settingsForm.promptGeneratorEnabled
+    ? "已开启 · " + settingsForm.promptGeneratorModel
+    : "未开启";
   const runningHeadline = isFinalizing
-    ? "正在等待 Codex 收尾"
+    ? "正在收尾"
     : isDispatching
       ? "已发送，等待 Codex 完成"
       : isRunning
-        ? "自动循环已开启"
-        : "当前 loop 已停止";
+        ? "循环运行中"
+        : "已停止";
   const runningDescription = isFinalizing
-    ? "不会再发送新指令；等 Codex 输出完成摘要后会自动停住。"
+    ? "不会再发送新指令，等待当前轮结束后停止。"
     : isDispatching
-      ? "Codex 还在处理这一轮，中途回复只展示，不会触发下一轮。"
+      ? "Codex 正在处理当前轮，完成前不会继续追发。"
       : isRunning
-        ? "系统会等 Codex 完整结束一轮后，再决定是否继续发送。"
-        : "需要继续时点击开始循环；如需让本地模型整理下一条指令，请先配置 Ollama。";
+        ? "系统会等待 Codex 完整完成一轮，再决定是否继续。"
+        : "需要继续时点击开始循环；如需本地模型参与，请先打开设置。";
   const thinkingStateClass = isFinalizing
     ? "is-finalizing"
     : isDispatching || isRunning
       ? "is-active"
       : "is-idle";
+  const latestVisibleSummary = summarizeVisibleText(
+    snapshot?.thread?.latestCodexSummary || latestSummary,
+    "等待第一轮可见进展",
+  );
+  const statusLine = `${runningHeadline} · ${threadLabel}`;
 
   return (
     <>
       <section className="workspace-hero">
         <div className="workspace-hero-copy">
-          <span className="workspace-hero-project">{currentProjectName}</span>
-          <h1>{currentLoopName}</h1>
-          <p>这里用来确认当前 loop 是否在推进、上一条消息是否真的发到绑定线程，以及 Codex 是否已经完成一轮。</p>
+          <span className="workspace-hero-project">{projectTitle}</span>
+          <h1>{loopTitle}</h1>
           <div className="workspace-status-row">
             <StatusPill text={modeText} active={snapshot?.state?.mode === "running"} />
             <StatusPill
               text={continuationStatus}
               tone={snapshot?.thread?.continuationStatus === "error" ? "danger" : "soft"}
-              active={snapshot?.thread?.continuationStatus === "dispatching"}
+              active={isDispatching}
             />
             <StatusPill text={launcherPhase} tone="soft" />
             <StatusPill text={pollStatus} tone="soft" active={pollState.syncing} />
           </div>
-          <div className="workspace-guide-card is-actions-only">
-            <div className="workspace-guide-head">
-              <span className="workspace-guide-label">操作</span>
-              <strong>控制当前 loop</strong>
-            </div>
+          <div className="workspace-guide-card is-actions-only compact-actions">
+            <strong>{statusLine}</strong>
             <div className="workspace-guide-actions">
               <button
                 type="button"
@@ -1305,7 +1143,7 @@ function DashboardHome({
                   setActiveSidebarPane("manage");
                 }}
               >
-                配置 Ollama
+                设置
               </button>
               <button
                 type="button"
@@ -1313,24 +1151,13 @@ function DashboardHome({
                 disabled={submitting}
                 onClick={() => void onRequestShutdown()}
               >
-                彻底关闭
+                关闭控制台
               </button>
             </div>
           </div>
         </div>
 
         <div className="workspace-hero-aside">
-          <div className="workspace-hero-metrics">
-            {dashboardGuide.supportingMetrics.map((item) => (
-              <Metric
-                key={item.label}
-                label={item.label}
-                value={item.value}
-                muted={!item.value || item.value === "暂无"}
-              />
-            ))}
-          </div>
-
           <div className={`workspace-thinking-card ${thinkingStateClass}`}>
             <div className={`thinking-pulse ${thinkingStateClass}`} aria-hidden="true">
               <span />
@@ -1349,32 +1176,27 @@ function DashboardHome({
 
       <div className="workspace-columns">
         <div className="workspace-primary">
-          <Section
-            title="最近记录"
-            desc="这里显示本机线程记录；桌面端没刷新时，按 Ctrl+R 重载 Codex，或退出后用 codex app 重开。"
-          >
+          <Section title="对话记录">
             <ConversationTimeline
               entries={codexConversationEntries}
               latestCodexUser={latestCodexUser}
               latestCodexAssistant={latestCodexAssistant}
-              latestPrompt={latestPrompt || shortLatestPrompt}
-              latestVisibleSummary={latestVisibleSummary}
+              latestPrompt={latestPrompt}
+              latestPromptAt={snapshot?.thread?.lastDispatchAt}
               fallbackEntries={visibleTranscriptEntries}
             />
           </Section>
         </div>
 
         <aside className="workspace-secondary">
-          <Section
-            title="状态"
-            desc="只看当前能不能继续。"
-          >
-            <StatusSummaryPanel
+          <Section title="状态" desc={latestVisibleSummary}>
+            <StatusSummaryPanelV2
               modeText={modeText}
               continuationStatus={continuationStatus}
-              currentLoopName={currentLoopName}
-              modelStatus={settingsForm.promptGeneratorEnabled ? `已开启 · ${settingsForm.promptGeneratorModel}` : "未开启"}
-              automationSchedule={automationSchedule}
+              currentLoopName={loopTitle}
+              threadLabel={threadLabel}
+              modelStatus={modelStatus}
+              pollStatus={pollStatus}
               healthSummary={healthSummary}
             />
           </Section>
@@ -1383,7 +1205,6 @@ function DashboardHome({
     </>
   );
 }
-
 export function App() {
   const [snapshot, setSnapshot] = useState(null);
   const [mobileView, setMobileView] = useState(null);
@@ -1468,7 +1289,10 @@ export function App() {
       setRemoteAccessStatus(nextRemoteAccessStatus);
       setOllamaModels(nextOllamaModels.models || []);
       setAssistantState(nextAssistantState);
-      setSelectedLoopId((current) => current || nextLoops.currentLoopId || "");
+      setSelectedLoopId((current) => {
+        const selected = pickVisibleLoop(nextLoops.loops || [], current || nextLoops.currentLoopId);
+        return selected?.id || nextLoops.currentLoopId || "";
+      });
       setThreadForm({
         workspaceName: nextSnapshot.thread.workspaceName || "",
         threadTitle: nextSnapshot.thread.threadTitle || "",
@@ -1563,8 +1387,8 @@ export function App() {
       !snapshot?.state?.stopRequested &&
       !snapshot?.state?.finalizeRequested;
     const message = runningActiveLoop
-      ? "当前任务还在运行。确认后会先请求优雅停止当前任务，再彻底关闭 codex-loop 服务，适合用于重启。是否继续？"
-      : "确认彻底关闭 codex-loop 服务吗？这会直接关闭当前控制台进程，适合用于重启。";
+      ? "当前任务还在运行。确认后会先请求停止当前任务，再关闭 codex-loop 服务。是否继续？"
+      : "确认关闭 codex-loop 服务吗？这会直接关闭当前控制台进程，适合用于重启。";
 
     if (!window.confirm(message)) {
       return;
@@ -1586,10 +1410,7 @@ export function App() {
   );
 
   const currentLoop = useMemo(
-    () =>
-      loopRegistry.loops.find((loop) => loop.id === (selectedLoopId || loopRegistry.currentLoopId)) ||
-      loopRegistry.loops.find((loop) => loop.id === loopRegistry.currentLoopId) ||
-      null,
+    () => pickVisibleLoop(loopRegistry.loops || [], selectedLoopId || loopRegistry.currentLoopId),
     [loopRegistry, selectedLoopId],
   );
   const visibleLoops = useMemo(
@@ -1634,7 +1455,7 @@ export function App() {
       ? `重试 ${pollState.failedCount}`
       : pollState.lastSuccessAt
         ? `更新于 ${formatTime(pollState.lastSuccessAt)}`
-        : "等待首轮同步";
+        : "等待首次同步";
   const threadTitle =
     snapshot?.thread?.threadTitle || snapshot?.thread?.workspaceName || "尚未绑定可见窗口";
   const threadLabel = snapshot?.thread?.threadId
@@ -1715,7 +1536,6 @@ export function App() {
               {[
                 ["loops", "任务"],
                 ["create", "创建"],
-                ["manage", "管理"],
               ].map(([id, label]) => (
                 <button
                   key={id}
@@ -1769,7 +1589,7 @@ export function App() {
                                     }
                                   >
                                     <strong>{loop.name}</strong>
-                                    <span>{formatValue(loop.boundThreadTitle, "未绑定线程")}</span>
+                                      <span>{formatValue(loop.boundThreadTitle, "未绑定线程")}</span>
                                     <span className="sidebar-loop-path">{formatValue(loop.branch, "dev")}</span>
                                   </button>
 
@@ -1792,7 +1612,7 @@ export function App() {
                                             setLoopMenuOpenId("");
                                           }}
                                         >
-                                          打开管理项
+                                          打开设置
                                         </button>
                                         <button
                                           type="button"
@@ -1843,14 +1663,28 @@ export function App() {
 
             {activeSidebarPane !== "loops" ? (
               <div className="sidebar-pane-hint">
-                <strong>{activeSidebarPane === "create" ? "正在创建新任务" : "正在调整当前任务"}</strong>
+                <strong>{activeSidebarPane === "create" ? "正在创建新任务" : "正在调整全局设置"}</strong>
                 <p>
                   {activeSidebarPane === "create"
                     ? "右侧已经切换到完整创建流程。"
-                    : "右侧已经切换到完整管理面板。"}
+                    : "右侧已经切换到完整设置面板。"}
                 </p>
               </div>
             ) : null}
+
+            <div className="sidebar-footer">
+              <button
+                type="button"
+                className={`sidebar-settings-button ${activeSidebarPane === "manage" ? "is-active" : ""}`}
+                onClick={() => {
+                  setActiveManageSection("ollama");
+                  setActiveSidebarPane("manage");
+                }}
+              >
+                <span className="sidebar-settings-icon" aria-hidden="true">设置</span>
+                <span>设置</span>
+              </button>
+            </div>
           </>
         ) : (
           <div className="sidebar-collapsed-list">
@@ -1872,6 +1706,17 @@ export function App() {
                 {loop.name.slice(0, 2)}
               </button>
             ))}
+            <button
+              type="button"
+              className={`collapsed-loop-pill ${activeSidebarPane === "manage" ? "is-active" : ""}`}
+              onClick={() => {
+                setActiveManageSection("ollama");
+                setActiveSidebarPane("manage");
+              }}
+              title="设置"
+            >
+              设置
+            </button>
           </div>
         )}
       </aside>

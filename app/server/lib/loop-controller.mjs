@@ -1,8 +1,9 @@
-import { readLoopSnapshot, runLoopTurn } from "./runtime-store.mjs";
+import { markContinuationFailed, readLoopSnapshot, runLoopTurn } from "./runtime-store.mjs";
 
 export function createLoopController({
   readSnapshot = readLoopSnapshot,
   runTurn = runLoopTurn,
+  markFailed = markContinuationFailed,
   schedule = setTimeout,
   cancel = clearTimeout,
 } = {}) {
@@ -69,7 +70,21 @@ export function createLoopController({
       if (activeLoops.has(startDir)) {
         scheduleNext(active, startDir, 1500);
       }
-    } catch {
+    } catch (error) {
+      try {
+        if (error?.codexLoopRecorded) {
+          activeLoops.delete(startDir);
+          return;
+        }
+        const snapshot = await readSnapshot(startDir);
+        await markFailed(startDir, snapshot, {
+          message: error.message,
+          latestSummary: "循环本轮没有成功发出指令，请查看最近错误后再继续。",
+          promptGenerator: "controller",
+        });
+      } catch {
+        // Keep the controller from crashing the whole dashboard if diagnostics fail.
+      }
       activeLoops.delete(startDir);
     }
   }

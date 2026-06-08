@@ -64,3 +64,34 @@ test("loop controller waits for a real completion signal before dispatching the 
   assert.equal(await flushScheduled(scheduled), true);
   assert.equal(runTurnCount, 2);
 });
+
+test("loop controller records a visible failure when a turn crashes", async () => {
+  const scheduled = [];
+  const failures = [];
+  const snapshot = {
+    state: { mode: "running", stopRequested: false, finalizeRequested: false },
+    thread: { continuationStatus: "idle", lastCompletionAt: "" },
+  };
+
+  const controller = createLoopController({
+    readSnapshot: async () => snapshot,
+    runTurn: async () => {
+      throw new Error("native dispatch unavailable");
+    },
+    markFailed: async (startDir, failedSnapshot, details) => {
+      failures.push({ startDir, failedSnapshot, details });
+    },
+    schedule: (fn) => {
+      scheduled.push(fn);
+      return fn;
+    },
+    cancel: () => {},
+  });
+
+  assert.equal(await controller.start("demo"), true);
+  assert.equal(await flushScheduled(scheduled), true);
+
+  assert.equal(failures.length, 1);
+  assert.equal(failures[0].details.message, "native dispatch unavailable");
+  assert.equal(controller.isRunning("demo"), false);
+});

@@ -383,8 +383,8 @@ export function buildHandler({
       sendJson(response, 404, { error: "Not found" });
     } catch (error) {
       sendJson(response, 500, {
-        error: error.message,
-        stack: error.stack,
+        error: error.message || "操作失败，请稍后重试。",
+        kind: "operation_failed",
       });
     }
   };

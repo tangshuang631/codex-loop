@@ -11,7 +11,7 @@ function safeText(value, fallback = "") {
 function summarize(text, maxLength = 360) {
   const compact = safeText(text, "").replace(/\s+/g, " ");
   if (compact.length <= maxLength) return compact;
-  return `${compact.slice(0, maxLength - 1).trimEnd()}…`;
+  return `${compact.slice(0, maxLength - 1).trimEnd()}...`;
 }
 
 async function walkJsonlFiles(dir) {
@@ -65,16 +65,40 @@ function messageText(payload) {
   return "";
 }
 
+function extractDelegatedInput(text) {
+  const value = safeText(text, "");
+  if (!value.includes("<codex_delegation>")) return value;
+
+  const inputMatch = value.match(/<input>([\s\S]*?)<\/input>/i);
+  if (!inputMatch) return "";
+
+  return safeText(inputMatch[1], "");
+}
+
+function isNoiseMessage(text) {
+  const value = safeText(text, "");
+  if (!value) return true;
+  return [
+    "<environment_context>",
+    "<permissions instructions>",
+    "<turn_aborted>",
+    "<collaboration_mode>",
+    "<personality_spec>",
+    "Filesystem sandboxing defines",
+    "Approval policy is currently",
+  ].some((pattern) => value.includes(pattern));
+}
+
 function conversationEntry(record) {
   const payload = record.payload || {};
-  const text = messageText(payload);
-  if (!text) return null;
+  const text = extractDelegatedInput(messageText(payload));
+  if (!text || isNoiseMessage(text)) return null;
 
   if (record.type === "response_item" && payload.type === "message") {
     const role = payload.role === "user" ? "user" : "assistant";
     return {
       role,
-      label: role === "user" ? "发出的指令" : "Codex 回复",
+      label: role === "user" ? "codex-loop 指令" : "Codex 回复",
       at: record.timestamp || "",
       text,
       preview: summarize(text),
@@ -110,6 +134,63 @@ function conversationEntry(record) {
   return null;
 }
 
+function normalizeConversationEntry(entry) {
+  if (!entry) return null;
+  if (entry.role === "user") {
+    return { ...entry, label: "codex-loop 指令" };
+  }
+  if (entry.completed) {
+    return { ...entry, label: "Codex 完成摘要" };
+  }
+  return { ...entry, label: "Codex 回复" };
+}
+
+function normalizeEntryText(text) {
+  return safeText(text, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function dedupeConversationEntries(entries) {
+  const deduped = [];
+  const indexByKey = new Map();
+
+  for (const entry of entries) {
+    const normalizedText = normalizeEntryText(entry.text);
+    if (!normalizedText) continue;
+
+    const key = `${entry.role}:${normalizedText}`;
+    const existingIndex = indexByKey.get(key);
+    if (existingIndex === undefined) {
+      indexByKey.set(key, deduped.length);
+      deduped.push(entry);
+      continue;
+    }
+
+    const existing = deduped[existingIndex];
+    const currentAt = Date.parse(entry.at || "");
+    const existingAt = Date.parse(existing.at || "");
+    const shouldPreferCurrent =
+      Boolean(entry.completed && !existing.completed) ||
+      (entry.completed === existing.completed &&
+        Number.isFinite(currentAt) &&
+        (!Number.isFinite(existingAt) || currentAt > existingAt));
+
+    if (shouldPreferCurrent) {
+      deduped[existingIndex] = entry;
+    }
+  }
+
+  return deduped.sort((a, b) => {
+    const left = Date.parse(a.at || "");
+    const right = Date.parse(b.at || "");
+    if (!Number.isFinite(left) && !Number.isFinite(right)) return 0;
+    if (!Number.isFinite(left)) return 1;
+    if (!Number.isFinite(right)) return -1;
+    return left - right;
+  });
+}
+
 export async function readCodexConversationMirror(threadId, { limit = 8 } = {}) {
   const cleanThreadId = safeText(threadId, "");
   if (!cleanThreadId) {
@@ -141,21 +222,14 @@ export async function readCodexConversationMirror(threadId, { limit = 8 } = {}) 
     .filter(Boolean)
     .map((line) => {
       try {
-        return conversationEntry(JSON.parse(line));
+        return normalizeConversationEntry(conversationEntry(JSON.parse(line)));
       } catch {
         return null;
       }
     })
     .filter(Boolean);
 
-  const deduped = [];
-  for (const entry of entries) {
-    const previous = deduped.at(-1);
-    if (previous && previous.role === entry.role && previous.text === entry.text) {
-      continue;
-    }
-    deduped.push(entry);
-  }
+  const deduped = dedupeConversationEntries(entries);
 
   const latestUser = [...deduped].reverse().find((entry) => entry.role === "user") || null;
   const latestAssistant = [...deduped].reverse().find((entry) => entry.role === "assistant") || null;

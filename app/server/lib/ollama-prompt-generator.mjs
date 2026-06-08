@@ -46,11 +46,11 @@ export async function generatePromptWithOllama({
   const model = safeText(generator.model, "qwen2.5:7b");
   const language = safeText(snapshot.profile?.resolved?.conversation?.language, "zh-CN");
   const contextBlocks = await collectContextBlocks(snapshot);
+  const englishPreferred = language.toLowerCase().startsWith("en");
 
-  const system =
-    language.toLowerCase().startsWith("en")
-      ? "Generate the next concise user follow-up message for the same Codex thread. Return only the message."
-      : "为同一个 Codex 线程生成下一条简洁、自然、可执行的用户续发消息。只返回消息正文。";
+  const system = englishPreferred
+    ? "Act as the product-manager NPC for codex-loop. Generate the next concise follow-up for the same Codex thread. Make low-risk product and design decisions from project docs and rules. Ask the human only for destructive, irreversible, credential, permission, strong security, or high-cost choices. Return only the message."
+    : "你是 codex-loop 的产品经理 NPC。为同一个 Codex 线程生成下一条简洁、自然、可执行的续跑消息。普通产品边界、方案取舍、实现顺序由你基于项目文档、开发规则和用户目标直接判断并回复；只有涉及高风险删除、不可逆操作、凭证权限、强安全风险或代价差异很大的选择，才要求人工确认。只返回消息正文。";
 
   const prompt = [
     `循环名称：${safeText(snapshot.config.loopName, snapshot.config.projectName)}`,
@@ -61,13 +61,18 @@ export async function generatePromptWithOllama({
     `最近 Codex 回复摘要：${safeText(snapshot.thread.latestCodexSummary, "暂无")}`,
     `最近本地摘要：${safeText(snapshot.thread.latestSummary || snapshot.state.recentSummary, "暂无")}`,
     "",
-    "请结合这些内容，生成下一条更像真人续聊的消息。",
-    "优先推动当前最高优先级且可验证的一小批任务。",
-    "不要复述系统说明，不要解释原因。",
+    englishPreferred
+      ? "Generate the next message as a practical PM/NPC decision. If Codex asks for ordinary product or design confirmation, choose the safest small verified path and tell it to continue. Do not defer to the human unless the choice is destructive, irreversible, credential/permission-related, security-sensitive, or has very different costs."
+      : "请像真实产品经理/NPC 一样生成下一条消息。如果 Codex 在询问普通产品边界、设计方案或实现偏好，请直接代表用户选择最安全、最小、可验证的路径，并让它继续。不要写“等用户确认后再继续”，除非涉及高风险删除、不可逆操作、凭证权限、强安全风险或代价差异很大的选择。",
+    englishPreferred
+      ? "Keep it concise. Do not output JSON. Do not explain your generation process."
+      : "保持简洁，不输出 JSON，不解释生成原因，不复述系统说明。",
     "",
     contextBlocks.length ? contextBlocks.join("\n\n") : "无额外文档片段。",
     "",
-    "如果仍不确定，可参考这个稳定回退模板的边界，但不要直接照抄：",
+    englishPreferred
+      ? "Fallback boundary for reference, do not copy mechanically:"
+      : "可参考这个稳定回退模板的边界，但不要机械照抄：",
     fallbackPrompt,
   ].join("\n");
 
@@ -96,7 +101,6 @@ export async function generatePromptWithOllama({
   }
   return generated;
 }
-
 export async function generateCodexSummaryWithOllama({
   snapshot,
   codexText,
