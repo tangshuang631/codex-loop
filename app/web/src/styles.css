@@ -1057,28 +1057,127 @@ select {
   font-style: normal;
 }
 
-.conversation-bubble pre {
-  margin: 0;
-  padding: 14px 0 0;
-  border-top: 0;
-  color: var(--text);
-  font-size: 14px;
-  line-height: 1.8;
-  white-space: pre-wrap;
-  word-break: break-word;
-  font-family: inherit;
+.conversation-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  color: var(--muted);
+  font-size: 12px;
 }
 
-.conversation-row.is-loop .conversation-bubble pre {
-  margin-top: 12px;
+.conversation-actions button,
+.markdown-code-block button,
+.file-path-chip {
+  border: 1px solid var(--line);
+  background: #ffffff;
+  color: var(--muted);
+  border-radius: 999px;
+  cursor: pointer;
+}
+
+.conversation-actions button {
+  padding: 4px 9px;
+}
+
+.markdown-message {
+  display: grid;
+  gap: 12px;
+  padding-top: 14px;
+  color: var(--text);
+  font-size: 15px;
+  line-height: 1.85;
+}
+
+.conversation-row.is-loop .markdown-message {
   padding: 12px 16px 16px;
   border-top: 1px solid #e2ded5;
-  color: var(--text);
 }
 
-.conversation-row.is-codex .conversation-bubble pre {
-  padding-left: 0;
-  padding-right: 0;
+.markdown-heading {
+  margin: 2px 0 0;
+  font-size: 17px;
+  line-height: 1.55;
+}
+
+.markdown-paragraph {
+  margin: 0;
+  word-break: break-word;
+}
+
+.markdown-list {
+  margin: 0;
+  padding-left: 1.4em;
+}
+
+.markdown-list li + li {
+  margin-top: 6px;
+}
+
+.inline-code {
+  padding: 2px 6px;
+  border-radius: 7px;
+  background: #f0f0eb;
+  color: #282823;
+  font-family: "Cascadia Code", "SFMono-Regular", Consolas, monospace;
+  font-size: 0.92em;
+}
+
+.file-path-chip {
+  display: inline-flex;
+  max-width: min(100%, 560px);
+  margin: 0 2px;
+  padding: 2px 8px;
+  vertical-align: baseline;
+  color: #3e5a78;
+  background: #f3f7fb;
+  border-color: #d8e2ec;
+  font-family: "Cascadia Code", "SFMono-Regular", Consolas, monospace;
+  font-size: 0.9em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.file-path-chip:hover,
+.conversation-actions button:hover,
+.markdown-code-block button:hover {
+  color: var(--text);
+  border-color: var(--line-strong);
+}
+
+.markdown-code-block {
+  margin: 2px 0;
+  overflow: hidden;
+  border: 1px solid #deded7;
+  border-radius: 16px;
+  background: #fbfbf8;
+}
+
+.markdown-code-block figcaption {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 9px 12px;
+  border-bottom: 1px solid #e7e7e1;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.markdown-code-block button {
+  padding: 4px 9px;
+}
+
+.markdown-code-block pre {
+  margin: 0;
+  padding: 14px;
+  overflow-x: auto;
+  color: #22221e;
+  font-size: 13px;
+  line-height: 1.7;
+  font-family: "Cascadia Code", "SFMono-Regular", Consolas, monospace;
+  white-space: pre;
 }
 
 .conversation-row.is-codex .conversation-bubble summary {
@@ -1224,7 +1323,7 @@ select {
 
 @media (max-width: 960px) {
   .workspace-main {
-    padding: 16px;
+    padding: 12px;
   }
 
   .workspace-hero,
@@ -1232,12 +1331,51 @@ select {
     grid-template-columns: 1fr;
   }
 
+  .workspace-hero {
+    padding: 18px;
+    border-radius: 24px;
+  }
+
+  .workspace-hero-copy h1 {
+    font-size: clamp(28px, 9vw, 44px);
+  }
+
   .workspace-section-head {
     flex-direction: column;
   }
 
-  .conversation-bubble {
-    width: 92%;
+  .conversation-row {
+    padding: 18px 0;
+  }
+
+  .conversation-row.is-loop {
+    justify-content: flex-end;
+  }
+
+  .conversation-row.is-loop .conversation-bubble {
+    width: 94%;
+  }
+
+  .conversation-bubble strong,
+  .markdown-message {
+    font-size: 14px;
+  }
+
+  .conversation-actions {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .file-path-chip {
+    max-width: 100%;
+  }
+
+  .markdown-code-block {
+    border-radius: 12px;
+  }
+
+  .markdown-code-block pre {
+    font-size: 12px;
   }
 
   .status-summary-row {

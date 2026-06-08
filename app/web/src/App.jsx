@@ -200,6 +200,230 @@ function summarizeVisibleText(value, fallback = "暂无", maxLength = 120) {
   return compact.length > maxLength ? compact.slice(0, maxLength) + "..." : compact;
 }
 
+function copyTextToClipboard(text) {
+  const value = formatValue(text, "");
+  if (!value) return;
+  if (navigator.clipboard?.writeText) {
+    void navigator.clipboard.writeText(value);
+    return;
+  }
+
+  const textarea = document.createElement("textarea");
+  textarea.value = value;
+  textarea.setAttribute("readonly", "true");
+  textarea.style.position = "fixed";
+  textarea.style.opacity = "0";
+  document.body.appendChild(textarea);
+  textarea.select();
+  document.execCommand("copy");
+  document.body.removeChild(textarea);
+}
+
+function trimPathToken(token) {
+  return formatValue(token, "").replace(/[),.;，。；）]+$/u, "");
+}
+
+function looksLikeFilePath(token) {
+  const value = trimPathToken(token);
+  return (
+    /^[A-Za-z]:[\\/][^\s]+/.test(value) ||
+    /^\.{1,2}[\\/][^\s]+/.test(value) ||
+    /^\/[^\s]+/.test(value)
+  );
+}
+
+function InlineMessageText({ text }) {
+  const value = formatValue(text, "");
+  if (!value) return null;
+
+  const pattern = /(`[^`]+`|\[[^\]]+\]\([^)]+\)|[A-Za-z]:[\\/][^\s`，。；：、（）()<>"]+|\.{1,2}[\\/][^\s`，。；：、（）()<>"]+|\/[^\s`，。；：、（）()<>"]+)/g;
+  const parts = [];
+  let lastIndex = 0;
+  let match;
+
+  while ((match = pattern.exec(value))) {
+    if (match.index > lastIndex) {
+      parts.push(value.slice(lastIndex, match.index));
+    }
+
+    const raw = match[0];
+    if (raw.startsWith("`") && raw.endsWith("`")) {
+      parts.push(
+        <code className="inline-code" key={`${match.index}-code`}>
+          {raw.slice(1, -1)}
+        </code>,
+      );
+    } else {
+      const linkMatch = raw.match(/^\[([^\]]+)\]\(([^)]+)\)$/);
+      const pathText = linkMatch ? linkMatch[2] : trimPathToken(raw);
+      if (looksLikeFilePath(pathText)) {
+        parts.push(
+          <button
+            type="button"
+            className="file-path-chip"
+            key={`${match.index}-path`}
+            title="右键复制路径"
+            onClick={() => copyTextToClipboard(pathText)}
+            onContextMenu={(event) => {
+              event.preventDefault();
+              copyTextToClipboard(pathText);
+            }}
+          >
+            {linkMatch ? linkMatch[1] : pathText}
+          </button>,
+        );
+      } else {
+        parts.push(raw);
+      }
+    }
+
+    lastIndex = match.index + raw.length;
+  }
+
+  if (lastIndex < value.length) {
+    parts.push(value.slice(lastIndex));
+  }
+
+  return parts.map((part, index) =>
+    typeof part === "string" ? <React.Fragment key={`text-${index}`}>{part}</React.Fragment> : part,
+  );
+}
+
+function MarkdownMessage({ text }) {
+  const value = formatValue(text, "");
+  if (!value) return null;
+
+  const blocks = [];
+  const fencePattern = /```([^\n`]*)\n([\s\S]*?)```/g;
+  let cursor = 0;
+  let match;
+
+  while ((match = fencePattern.exec(value))) {
+    if (match.index > cursor) {
+      blocks.push({ type: "text", content: value.slice(cursor, match.index) });
+    }
+    blocks.push({
+      type: "code",
+      lang: match[1].trim(),
+      content: match[2].replace(/\n$/u, ""),
+    });
+    cursor = match.index + match[0].length;
+  }
+
+  if (cursor < value.length) {
+    blocks.push({ type: "text", content: value.slice(cursor) });
+  }
+
+  function renderTextBlock(blockText, blockIndex) {
+    const paragraphs = blockText
+      .split(/\n\s*\n/u)
+      .map((item) => item.trim())
+      .filter(Boolean);
+
+    return paragraphs.map((paragraph, index) => {
+      const lines = paragraph.split(/\n/u).map((line) => line.trim()).filter(Boolean);
+      const heading = paragraph.match(/^(#{1,3})\s+(.+)$/u);
+      if (heading) {
+        const Tag = heading[1].length === 1 ? "h3" : "h4";
+        return (
+          <Tag className="markdown-heading" key={`${blockIndex}-${index}`}>
+            <InlineMessageText text={heading[2]} />
+          </Tag>
+        );
+      }
+
+      if (lines.every((line) => /^[-*]\s+/.test(line))) {
+        return (
+          <ul className="markdown-list" key={`${blockIndex}-${index}`}>
+            {lines.map((line, itemIndex) => (
+              <li key={`${blockIndex}-${index}-${itemIndex}`}>
+                <InlineMessageText text={line.replace(/^[-*]\s+/, "")} />
+              </li>
+            ))}
+          </ul>
+        );
+      }
+
+      if (lines.every((line) => /^\d+\.\s+/.test(line))) {
+        return (
+          <ol className="markdown-list" key={`${blockIndex}-${index}`}>
+            {lines.map((line, itemIndex) => (
+              <li key={`${blockIndex}-${index}-${itemIndex}`}>
+                <InlineMessageText text={line.replace(/^\d+\.\s+/, "")} />
+              </li>
+            ))}
+          </ol>
+        );
+      }
+
+      const mixedNodes = [];
+      let cursor = 0;
+      while (cursor < lines.length) {
+        const line = lines[cursor];
+        const bullet = /^[-*]\s+/.test(line);
+        const numbered = /^\d+\.\s+/.test(line);
+
+        if (bullet || numbered) {
+          const listLines = [];
+          while (
+            cursor < lines.length &&
+            (bullet ? /^[-*]\s+/.test(lines[cursor]) : /^\d+\.\s+/.test(lines[cursor]))
+          ) {
+            listLines.push(lines[cursor]);
+            cursor += 1;
+          }
+          const ListTag = numbered ? "ol" : "ul";
+          mixedNodes.push(
+            <ListTag className="markdown-list" key={`${blockIndex}-${index}-list-${cursor}`}>
+              {listLines.map((item, itemIndex) => (
+                <li key={`${blockIndex}-${index}-list-${cursor}-${itemIndex}`}>
+                  <InlineMessageText text={item.replace(numbered ? /^\d+\.\s+/ : /^[-*]\s+/, "")} />
+                </li>
+              ))}
+            </ListTag>,
+          );
+          continue;
+        }
+
+        mixedNodes.push(
+          <p className="markdown-paragraph" key={`${blockIndex}-${index}-p-${cursor}`}>
+            <InlineMessageText text={line} />
+          </p>,
+        );
+        cursor += 1;
+      }
+
+      return (
+        <React.Fragment key={`${blockIndex}-${index}`}>
+          {mixedNodes}
+        </React.Fragment>
+      );
+    });
+  }
+
+  return (
+    <div className="markdown-message">
+      {blocks.map((block, index) =>
+        block.type === "code" ? (
+          <figure className="markdown-code-block" key={`code-${index}`}>
+            <figcaption>
+              <span>{block.lang || "代码"}</span>
+              <button type="button" onClick={() => copyTextToClipboard(block.content)}>
+                复制
+              </button>
+            </figcaption>
+            <pre>{block.content}</pre>
+          </figure>
+        ) : (
+          <React.Fragment key={`text-${index}`}>
+            {renderTextBlock(block.content, index)}
+          </React.Fragment>
+        ),
+      )}
+    </div>
+  );
+}
+
 function translateHealthIssue(issue) {
   const value = formatValue(issue, "");
   if (value === "transcript:stale") {
@@ -395,9 +619,22 @@ function ConversationTimeline({
                   {formatTime(entry.at, "未知时间")} · {isLoopMessage ? "codex-loop 指令" : "Codex 回复"}
                 </span>
                 <strong>{summary}</strong>
-                <em>{fullText ? (isLoopMessage ? "点击展开完整指令" : "点击收起完整回复") : "等待完整内容同步"}</em>
+                <span className="conversation-actions">
+                  <em>{fullText ? (isLoopMessage ? "点击展开完整指令" : "点击收起完整回复") : "等待完整内容同步"}</em>
+                  {fullText ? (
+                    <button
+                      type="button"
+                      onClick={(event) => {
+                        event.preventDefault();
+                        copyTextToClipboard(fullText);
+                      }}
+                    >
+                      复制全文
+                    </button>
+                  ) : null}
+                </span>
               </summary>
-              {fullText ? <pre>{fullText}</pre> : null}
+              {fullText ? <MarkdownMessage text={fullText} /> : null}
             </details>
           </article>
         );
