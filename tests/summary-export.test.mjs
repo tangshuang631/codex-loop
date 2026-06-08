@@ -9,6 +9,7 @@ import {
   exportMobileView,
   exportLoopSummary,
   recordHeartbeat,
+  reviewCodexMilestone,
   saveThreadBinding,
   savePendingGuidance,
   startRun,
@@ -169,6 +170,33 @@ test("exportMobileView returns a direct process status for production monitoring
   assert.match(mobile.processStatus.pendingGuidancePreview, /\u79fb\u52a8\u7aef\u8fdb\u7a0b\u72b6\u6001/);
   assert.match(mobile.processStatus.stopLimit, /\u6700\u957f.*\u5206\u949f/);
   assert.match(mobile.processStatus.stopLimit, /token/);
+});
+
+test("exportMobileView exposes supervisor review and next instruction for monitoring", async () => {
+  const configRoot = await createWorkspace();
+  await ensureLoopArtifacts(configRoot);
+  await saveThreadBinding(configRoot, {
+    workspaceName: "demo",
+    threadTitle: "\u76d1\u7763\u590d\u76d8\u7ebf\u7a0b",
+    threadId: "thread-supervisor-mobile",
+    singleThreadMode: true,
+  });
+  await reviewCodexMilestone(configRoot, {
+    generateMilestoneReview: async () => ({
+      summary: "\u76d1\u7763\u590d\u76d8\uff1aCodex \u5df2\u5b8c\u6210\u9996\u9875\u72b6\u6001\u6536\u53e3\uff0c\u4e0b\u4e00\u8f6e\u5e94\u8be5\u505a\u79fb\u52a8\u7aef\u771f\u5b9e\u9a8c\u6536\u3002",
+      nextInstruction:
+        "\u5148\u4ee5\u771f\u5b9e\u7528\u6237\u89c6\u89d2\u68c0\u67e5\u79fb\u52a8\u7aef loop \u89c2\u5bdf\u9875\uff0c\u4fee\u590d\u6700\u5f71\u54cd\u5224\u65ad\u72b6\u6001\u7684\u95ee\u9898\u3002",
+      shouldContinue: true,
+      risks: [],
+    }),
+  });
+
+  const mobile = await exportMobileView(configRoot);
+
+  assert.equal(mobile.processStatus.hasSupervisorReview, true);
+  assert.match(mobile.processStatus.supervisorReview, /\u76d1\u7763\u590d\u76d8/);
+  assert.match(mobile.processStatus.supervisorInstructionPreview, /\u771f\u5b9e\u7528\u6237/);
+  assert.equal(mobile.processStatus.supervisorSource, "ollama");
 });
 
 test("exportMobileView suggests binding a visible thread before starting when thread is missing", async () => {

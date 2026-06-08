@@ -555,6 +555,7 @@ function buildLoopProgressItems({ processStatus, runtimeEvents = [], healthSumma
   const hasStopLimit =
     processStatus?.stopLimit && processStatus.stopLimit !== "未设置停止条件";
   const hasPendingGuidance = Boolean(processStatus?.hasPendingGuidance);
+  const hasSupervisorReview = Boolean(processStatus?.hasSupervisorReview);
   const hasHealthIssue = healthSummary && healthSummary !== "当前没有明显异常。";
 
   return [
@@ -580,6 +581,14 @@ function buildLoopProgressItems({ processStatus, runtimeEvents = [], healthSumma
             : processStatus?.canSendNextTurn
               ? "done"
               : "pending",
+    },
+    {
+      key: "supervisor",
+      label: "监督复盘",
+      detail: hasSupervisorReview
+        ? processStatus?.supervisorInstructionPreview || processStatus?.supervisorReview
+        : "等待 Codex 完成后再由本地模型复盘",
+      state: hasSupervisorReview ? "done" : "pending",
     },
     {
       key: "guidance",
@@ -648,6 +657,12 @@ function StatusSummaryPanel({
   const rows = [
     ["当前", `${modeText} · ${processStatus?.headline || continuationStatus}`],
     ["说明", processDetail],
+    processStatus?.hasSupervisorReview
+      ? ["监督复盘", processStatus?.supervisorReview || "已完成监督复盘"]
+      : null,
+    processStatus?.hasSupervisorReview
+      ? ["下一条指令", processStatus?.supervisorInstructionPreview || "等待生成下一条指令"]
+      : null,
     ["停止条件", processStatus?.stopLimit || "未设置停止条件"],
     processStatus?.hasPendingGuidance
       ? ["待合并补充", processStatus?.pendingGuidancePreview || "已记录"]

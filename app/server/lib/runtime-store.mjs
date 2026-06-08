@@ -1286,6 +1286,9 @@ function buildProcessStatus(snapshot) {
   const waitingForCodex = continuationStatus === "dispatching";
   const hasPendingGuidance = Boolean(snapshot.thread.pendingUserGuidance);
   const promptGenerationWarning = safeText(snapshot.thread.promptGenerationWarning, "");
+  const supervisorReview = safeText(snapshot.thread.lastSupervisorReview, "");
+  const supervisorInstruction = safeText(snapshot.thread.lastSupervisorInstruction, "");
+  const supervisorReviewWarning = safeText(snapshot.thread.supervisorReviewWarning, "");
   const isFinalizing =
     mode === "finalize_after_current" ||
     Boolean(snapshot.state.stopRequested || snapshot.state.finalizeRequested);
@@ -1334,6 +1337,13 @@ function buildProcessStatus(snapshot) {
     canSendNextTurn,
     hasPendingGuidance,
     pendingGuidancePreview: buildPromptPreview(snapshot.thread.pendingUserGuidance || ""),
+    hasSupervisorReview: Boolean(supervisorReview || supervisorInstruction),
+    supervisorReview: supervisorReview ? summarizeForFollowup(supervisorReview, 180) : "",
+    supervisorInstructionPreview: supervisorInstruction
+      ? buildPromptPreview(supervisorInstruction, 180)
+      : "",
+    supervisorSource: snapshot.thread.lastSupervisorSource || "",
+    supervisorReviewWarning,
     promptGenerationWarning,
     stopLimit: formatLoopStopLimit(snapshot.state.budgets || snapshot.config.budgets || {}),
     lastDispatchAt: snapshot.thread.lastDispatchAt || "",

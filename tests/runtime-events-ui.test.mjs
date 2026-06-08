@@ -21,6 +21,16 @@ test("dashboard uses mobile process status as the primary runtime status source"
   assert.match(appSource, /待合并补充/);
 });
 
+test("dashboard surfaces supervisor review without adding noisy debug cards", async () => {
+  const appSource = await fs.readFile("app/web/src/App.jsx", "utf8");
+
+  assert.match(appSource, /processStatus\?\.hasSupervisorReview/);
+  assert.match(appSource, /processStatus\?\.supervisorReview/);
+  assert.match(appSource, /processStatus\?\.supervisorInstructionPreview/);
+  assert.match(appSource, /监督复盘/);
+  assert.match(appSource, /下一条指令/);
+});
+
 test("dashboard shows a compact Codex-style loop progress panel", async () => {
   const appSource = await fs.readFile("app/web/src/App.jsx", "utf8");
   const stylesSource = await fs.readFile("app/web/src/styles.css", "utf8");
