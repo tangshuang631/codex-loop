@@ -222,14 +222,15 @@ function copyTextToClipboard(text) {
 const THREAD_ID_REQUEST_PROMPT =
   "请告诉我当前这个 Codex 窗口的 threadId，只输出 threadId，不要输出解释。";
 
-function ThreadIdHelpCard() {
+function ThreadIdHelpCard({ compact = false }) {
   return (
-    <div className="thread-id-help-card">
+    <div className={`thread-id-help-card ${compact ? "is-compact" : ""}`}>
       <div>
-        <strong>获取线程号</strong>
+        <strong>{compact ? "绑定新窗口" : "获取线程号"}</strong>
         <p>
-          打开新的 Codex 窗口，复制这句话发给 Codex。它返回 threadId 后，
-          粘贴到线程 ID，再保存绑定。
+          {compact
+            ? "先在目标 Codex 窗口发出这句话，Codex 返回 threadId 后，再回到这里继续填写新 loop。"
+            : "打开新的 Codex 窗口，复制这句话发给 Codex。它返回 threadId 后，粘贴到线程 ID，再保存绑定。"}
         </p>
       </div>
       <div className="thread-id-copy-row">
@@ -539,6 +540,7 @@ function StatusSummaryPanel({
   modelStatus,
   pollStatus,
   healthSummary,
+  runtimeEvents,
 }) {
   const rows = [
     ["运行", `${modeText} · ${continuationStatus}`],
@@ -558,11 +560,35 @@ function StatusSummaryPanel({
           <strong>{value}</strong>
         </div>
       ))}
+      <RuntimeEventList events={runtimeEvents} />
     </div>
   );
 }
 
 const StatusSummaryPanelV2 = StatusSummaryPanel;
+
+function RuntimeEventList({ events = [] }) {
+  const visibleEvents = events.slice(0, 4);
+  if (!visibleEvents.length) {
+    return null;
+  }
+
+  return (
+    <div className="runtime-event-list">
+      <div className="runtime-event-heading">运行记录</div>
+      {visibleEvents.map((event, index) => (
+        <article
+          className={`runtime-event-item ${event.tone === "danger" ? "is-danger" : ""}`}
+          key={`${event.at || index}-${event.type || "event"}`}
+        >
+          <span>{formatTime(event.at, "刚刚")}</span>
+          <strong className="runtime-event-title">{formatValue(event.title, "运行记录")}</strong>
+          {event.detail ? <p>{event.detail}</p> : null}
+        </article>
+      ))}
+    </div>
+  );
+}
 
 function ConversationTimeline({
   entries,
@@ -749,7 +775,6 @@ function LoopCreationAssistantPane({
       <p className="sidebar-help">
         先确认项目、任务名和分支，再开始循环。
       </p>
-      <ThreadIdHelpCard />
 
       {assistantState?.status === "completed" && createdLoop ? (
         <div className="assistant-result">
@@ -769,6 +794,7 @@ function LoopCreationAssistantPane({
         <>
           <div className="assistant-thread">
             <DetailCard meta="当前步骤" title="继续填写" body={currentQuestion.prompt} quiet />
+            <ThreadIdHelpCard compact />
 
             {messages.length ? (
               <details className="assistant-disclosure" open>
@@ -1433,6 +1459,7 @@ function DashboardHome({
   );
   const statusLine = `${runningHeadline} · ${threadLabel}`;
   const savedPendingGuidance = snapshot?.thread?.pendingUserGuidance || "";
+  const runtimeEvents = snapshot?.runtimeEvents || [];
 
   return (
     <>
@@ -1573,6 +1600,7 @@ function DashboardHome({
               modelStatus={modelStatus}
               pollStatus={pollStatus}
               healthSummary={healthSummary}
+              runtimeEvents={runtimeEvents}
             />
           </Section>
         </aside>
