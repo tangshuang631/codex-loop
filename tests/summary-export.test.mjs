@@ -144,6 +144,33 @@ test("exportMobileView returns readable runtime events for mobile monitoring", a
   assert.doesNotMatch(mobile.runtimeEvents[0].title, /_/);
 });
 
+test("exportMobileView returns a direct process status for production monitoring", async () => {
+  const configRoot = await createWorkspace();
+  await ensureLoopArtifacts(configRoot);
+  await saveThreadBinding(configRoot, {
+    workspaceName: "demo",
+    threadTitle: "\u79fb\u52a8\u7aef\u8fdb\u7a0b\u76d1\u63a7",
+    threadId: "thread-process-status",
+    singleThreadMode: true,
+  });
+  await startRun(configRoot);
+  await savePendingGuidance(configRoot, {
+    text: "\u4e0b\u4e00\u8f6e\u5148\u68c0\u67e5\u79fb\u52a8\u7aef\u8fdb\u7a0b\u72b6\u6001\u5c55\u793a\u3002",
+  });
+
+  const mobile = await exportMobileView(configRoot);
+
+  assert.equal(mobile.processStatus.state, "waiting_next_turn");
+  assert.equal(mobile.processStatus.canSendNextTurn, true);
+  assert.equal(mobile.processStatus.waitingForCodex, false);
+  assert.equal(mobile.processStatus.hasPendingGuidance, true);
+  assert.match(mobile.processStatus.headline, /\u7b49\u5f85\u4e0b\u4e00\u8f6e/);
+  assert.match(mobile.processStatus.detail, /\u53ef\u4ee5.*\u53d1\u9001|\u4e0b\u4e00\u8f6e/);
+  assert.match(mobile.processStatus.pendingGuidancePreview, /\u79fb\u52a8\u7aef\u8fdb\u7a0b\u72b6\u6001/);
+  assert.match(mobile.processStatus.stopLimit, /\u6700\u957f.*\u5206\u949f/);
+  assert.match(mobile.processStatus.stopLimit, /token/);
+});
+
 test("exportMobileView suggests binding a visible thread before starting when thread is missing", async () => {
   const configRoot = await createWorkspace();
   await ensureLoopArtifacts(configRoot);

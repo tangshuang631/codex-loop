@@ -553,6 +553,7 @@ function StatusSummaryPanel({
   modeText,
   continuationStatus,
   codexWorkStatus,
+  processStatus,
   currentLoopName,
   threadLabel,
   modelStatus,
@@ -560,15 +561,21 @@ function StatusSummaryPanel({
   healthSummary,
   runtimeEvents,
 }) {
+  const processDetail = processStatus?.detail || codexWorkStatus;
   const rows = [
     ["运行", `${modeText} · ${continuationStatus}`],
-    ["Codex", codexWorkStatus],
+    ["Codex", processStatus?.headline || codexWorkStatus],
+    ["说明", processDetail],
+    ["停止条件", processStatus?.stopLimit || "未设置停止条件"],
+    processStatus?.hasPendingGuidance
+      ? ["待合并补充", processStatus?.pendingGuidancePreview || "已记录"]
+      : null,
     ["任务", currentLoopName],
     ["线程", threadLabel],
     ["模型", modelStatus],
     ["同步", pollStatus],
     ["提醒", healthSummary],
-  ];
+  ].filter(Boolean);
 
   return (
     <div className="status-summary-panel">
@@ -1435,6 +1442,7 @@ function DashboardHome({
   latestSummary,
   transcriptEntries,
   latestPrompt,
+  processStatus,
   settingsForm,
   healthIssues,
   uiError,
@@ -1462,20 +1470,20 @@ function DashboardHome({
   const modelStatus = settingsForm.promptGeneratorEnabled
     ? "已开启 · " + settingsForm.promptGeneratorModel
     : "未开启";
-  const runningHeadline = isFinalizing
+  const runningHeadline = processStatus?.headline || (isFinalizing
     ? "正在收尾"
     : isDispatching
       ? "已发送，等待 Codex 完成"
       : isRunning
         ? "循环运行中"
-        : "已停止";
-  const runningDescription = isFinalizing
+        : "已停止");
+  const runningDescription = processStatus?.detail || (isFinalizing
     ? "不会再发送新指令，等待当前轮结束后停止。"
     : isDispatching
       ? "Codex 正在处理当前轮，完成前不会继续追发。"
       : isRunning
         ? "系统会等待 Codex 完整完成一轮，再决定是否继续。"
-        : "需要继续时点击开始循环；如需本地模型参与，请先打开设置。";
+        : "需要继续时点击开始循环；如需本地模型参与，请先打开设置。");
   const thinkingStateClass = isFinalizing
     ? "is-finalizing"
     : isDispatching || isRunning
@@ -1630,6 +1638,7 @@ function DashboardHome({
               modeText={modeText}
               continuationStatus={continuationStatus}
               codexWorkStatus={codexWorkStatus}
+              processStatus={processStatus}
               currentLoopName={loopTitle}
               threadLabel={threadLabel}
               modelStatus={modelStatus}
@@ -1891,6 +1900,7 @@ export function App() {
     "等待第一轮进展";
   const latestPrompt = snapshot?.thread?.lastDispatchPrompt || "";
   const transcriptEntries = mobileView?.transcriptEntries || [];
+  const processStatus = mobileView?.processStatus || null;
   const strategy = mobileView?.strategy || {
     contextCard: {},
     rhythmCard: {},
@@ -2265,6 +2275,7 @@ export function App() {
             suggestedAction={suggestedAction}
             transcriptEntries={transcriptEntries}
             latestPrompt={latestPrompt}
+            processStatus={processStatus}
             mobileSummary={mobileSummary}
             bindingNote={bindingNote}
             strategy={strategy}

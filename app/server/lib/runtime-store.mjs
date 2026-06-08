@@ -1221,6 +1221,95 @@ function buildContinuationStrategy(snapshot) {
   };
 }
 
+function formatLoopStopLimit(budgets = {}) {
+  const maxMinutes = Number(budgets.maxMinutes);
+  const maxTokens = Number(budgets.maxTokens);
+  const finalizeLeadMinutes = Number(budgets.finalizeLeadMinutes || 0);
+  const finalizeLeadTokens = Number(budgets.finalizeLeadTokens || 0);
+  const parts = [];
+
+  if (Number.isFinite(maxMinutes) && maxMinutes > 0) {
+    parts.push(`最长 ${maxMinutes} 分钟`);
+  }
+  if (Number.isFinite(maxTokens) && maxTokens > 0) {
+    parts.push(`最大 ${maxTokens} token`);
+  }
+  if (
+    (Number.isFinite(finalizeLeadMinutes) && finalizeLeadMinutes > 0) ||
+    (Number.isFinite(finalizeLeadTokens) && finalizeLeadTokens > 0)
+  ) {
+    const leadParts = [];
+    if (finalizeLeadMinutes > 0) {
+      leadParts.push(`${finalizeLeadMinutes} 分钟`);
+    }
+    if (finalizeLeadTokens > 0) {
+      leadParts.push(`${finalizeLeadTokens} token`);
+    }
+    parts.push(`提前 ${leadParts.join(" / ")} 收尾`);
+  }
+
+  return parts.length ? parts.join(" · ") : "未设置停止条件";
+}
+
+function buildProcessStatus(snapshot) {
+  const mode = snapshot.state.mode || "stopped";
+  const continuationStatus = snapshot.thread.continuationStatus || "idle";
+  const hasThread = Boolean(snapshot.thread.threadId);
+  const waitingForCodex = continuationStatus === "dispatching";
+  const hasPendingGuidance = Boolean(snapshot.thread.pendingUserGuidance);
+  const isFinalizing =
+    mode === "finalize_after_current" ||
+    Boolean(snapshot.state.stopRequested || snapshot.state.finalizeRequested);
+
+  let state = "waiting_next_turn";
+  let headline = "等待下一轮";
+  let detail = "当前可以发送下一轮指令；如果开启了本地模型，会先合并 Codex 回复和你的补充引导。";
+  let canSendNextTurn = hasThread && mode === "running" && continuationStatus === "idle";
+
+  if (!hasThread) {
+    state = "unbound";
+    headline = "尚未绑定线程";
+    detail = "先绑定要接入的 Codex 窗口，再开始循环。";
+    canSendNextTurn = false;
+  } else if (isFinalizing) {
+    state = "finalizing";
+    headline = "正在收尾";
+    detail = waitingForCodex
+      ? "Codex 正在处理当前轮，完成后 codex-loop 会停止，不会再发送下一条。"
+      : "已进入收尾状态，不会再发送下一条指令。";
+    canSendNextTurn = false;
+  } else if (mode === "stopped") {
+    state = "stopped";
+    headline = "已停止";
+    detail = "当前不会自动发送指令；需要继续时可以手动开始循环。";
+    canSendNextTurn = false;
+  } else if (continuationStatus === "error") {
+    state = "error";
+    headline = "续跑失败";
+    detail = snapshot.thread.lastContinuationError || "上一轮没有成功发送或确认，请查看最近记录后再继续。";
+    canSendNextTurn = false;
+  } else if (waitingForCodex) {
+    state = "codex_working";
+    headline = "Codex 正在处理";
+    detail = "当前轮还没有完成，codex-loop 不会追加发送，避免打断 Codex。";
+    canSendNextTurn = false;
+  }
+
+  return {
+    state,
+    headline,
+    detail,
+    waitingForCodex,
+    canSendNextTurn,
+    hasPendingGuidance,
+    pendingGuidancePreview: buildPromptPreview(snapshot.thread.pendingUserGuidance || ""),
+    stopLimit: formatLoopStopLimit(snapshot.state.budgets || snapshot.config.budgets || {}),
+    lastDispatchAt: snapshot.thread.lastDispatchAt || "",
+    lastCompletionAt: snapshot.thread.lastCompletionAt || "",
+    latestEventType: snapshot.thread.latestEventType || snapshot.state.events?.at(-1)?.type || "",
+  };
+}
+
 function parseTranscriptEntries(transcriptText) {
   const lines = transcriptText.split(/\r?\n/);
   const entries = [];
@@ -1335,6 +1424,7 @@ export async function exportMobileView(startDir = process.cwd()) {
   const transcriptEntries = parseTranscriptEntries(transcriptText);
   const runtimeEvents = await readReadableRuntimeEvents(snapshot.paths.logPath);
   const strategy = buildContinuationStrategy(snapshot);
+  const processStatus = buildProcessStatus(snapshot);
   const boundThreadLabel = snapshot.thread.threadTitle || snapshot.thread.threadId;
   const bindingNote = safeText(
     snapshot.thread.note,
@@ -1371,6 +1461,7 @@ export async function exportMobileView(startDir = process.cwd()) {
     launcher,
     summary,
     strategy,
+    processStatus,
     bindingNote,
     suggestedAction,
     latestPrompt: snapshot.thread.lastDispatchPrompt || "",
