@@ -25,6 +25,7 @@ import {
   requestGracefulStop,
   saveThreadBinding,
   syncCodexThreadMirror,
+  updateBudgets,
 } from "../app/server/lib/runtime-store.mjs";
 import { saveUserOverrides } from "../app/server/lib/adapter-store.mjs";
 import {
@@ -1391,6 +1392,33 @@ test("createLoop persists a new loop and selectLoop switches active config", asy
   assert.equal(selected.config.currentRunId, "run-phase-2");
   assert.equal(selected.config.loopName, "二阶段验证");
   assert.equal(selected.thread.threadTitle, "二阶段验证");
+});
+
+test("updateBudgets normalizes stop limits and syncs the current loop registry", async () => {
+  const configRoot = await createWorkspace();
+
+  const snapshot = await updateBudgets(configRoot, {
+    maxMinutes: "240",
+    maxTokens: "",
+    finalizeLeadMinutes: "-5",
+    finalizeLeadTokens: "8000",
+  });
+  const loops = await listLoops(configRoot);
+  const currentLoop = loops.loops.find((loop) => loop.id === loops.currentLoopId);
+  const config = JSON.parse(
+    await fs.readFile(path.join(configRoot, "codex_loop", "config.json"), "utf8"),
+  );
+
+  assert.equal(snapshot.state.budgets.maxMinutes, 240);
+  assert.equal(snapshot.state.budgets.maxTokens, 50000);
+  assert.equal(snapshot.state.budgets.finalizeLeadMinutes, 15);
+  assert.equal(snapshot.state.budgets.finalizeLeadTokens, 8000);
+  assert.equal(currentLoop.budgets.maxMinutes, 240);
+  assert.equal(currentLoop.budgets.maxTokens, 50000);
+  assert.equal(currentLoop.budgets.finalizeLeadMinutes, 15);
+  assert.equal(currentLoop.budgets.finalizeLeadTokens, 8000);
+  assert.equal(config.budgets.maxMinutes, 240);
+  assert.equal(config.budgets.maxTokens, 50000);
 });
 
 test("selectLoop restores the saved thread binding for that loop", async () => {

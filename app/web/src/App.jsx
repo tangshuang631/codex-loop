@@ -1079,9 +1079,13 @@ function ManagePane({
 
       <details
         className="sidebar-disclosure"
-        open={activeManageSection === "automation" || activeManageSection === "ollama"}
+        open={
+          activeManageSection === "automation" ||
+          activeManageSection === "ollama" ||
+          activeManageSection === "budgets"
+        }
         onToggle={(event) => {
-          if (event.currentTarget.open && activeManageSection !== "ollama") {
+          if (event.currentTarget.open && activeManageSection !== "ollama" && activeManageSection !== "budgets") {
             setActiveManageSection("automation");
           }
         }}
@@ -1230,6 +1234,24 @@ function ManagePane({
               </label>
             </div>
 
+            {!ollamaModels.length ? (
+              <p className="sidebar-help">
+                还没有检测到可用的本地模型。不开启也能运行；开启后会默认用于整理 Codex 回复和生成下一步提示。
+              </p>
+            ) : null}
+          </details>
+
+          <details
+            className="workspace-details"
+            open={activeManageSection === "budgets"}
+            onToggle={(event) => {
+              if (event.currentTarget.open) setActiveManageSection("budgets");
+            }}
+          >
+            <summary>循环停止条件</summary>
+            <p className="sidebar-help">
+              到达限制后不会再发送下一条指令；如果 Codex 正在处理，会等当前轮结束后收尾。
+            </p>
             <div className="settings-grid">
               <label>
                 <span>最长运行时间（分钟）</span>
@@ -1288,11 +1310,6 @@ function ManagePane({
                 />
               </label>
             </div>
-            {!ollamaModels.length ? (
-              <p className="sidebar-help">
-                还没有检测到可用的本地模型。不开启也能运行；开启后会默认用于整理 Codex 回复和生成下一步提示。
-              </p>
-            ) : null}
           </details>
 
           <div className="metric-grid compact-metric-grid">

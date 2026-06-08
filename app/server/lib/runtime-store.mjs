@@ -115,6 +115,31 @@ function buildPromptPreview(prompt, maxLength = 180) {
   return summarizeForFollowup(prompt, maxLength);
 }
 
+function normalizePositiveNumber(value, fallback, { min = 1 } = {}) {
+  const nextValue = Number(value);
+  if (!Number.isFinite(nextValue) || nextValue < min) {
+    return fallback;
+  }
+  return Math.floor(nextValue);
+}
+
+function normalizeBudgetsPatch(payload = {}, currentBudgets = {}) {
+  return {
+    maxMinutes: normalizePositiveNumber(payload.maxMinutes, currentBudgets.maxMinutes, { min: 1 }),
+    maxTokens: normalizePositiveNumber(payload.maxTokens, currentBudgets.maxTokens, { min: 1 }),
+    finalizeLeadMinutes: normalizePositiveNumber(
+      payload.finalizeLeadMinutes,
+      currentBudgets.finalizeLeadMinutes,
+      { min: 0 },
+    ),
+    finalizeLeadTokens: normalizePositiveNumber(
+      payload.finalizeLeadTokens,
+      currentBudgets.finalizeLeadTokens,
+      { min: 0 },
+    ),
+  };
+}
+
 async function readJsonLines(filePath, limit = 20) {
   try {
     const text = await fs.readFile(filePath, "utf8");
@@ -2159,11 +2184,15 @@ export async function requestGracefulStop(startDir = process.cwd(), payload = {}
 
 export async function updateBudgets(startDir = process.cwd(), payload) {
   const snapshot = await ensureLoopArtifacts(startDir);
+  const nextBudgets = normalizeBudgetsPatch(payload, {
+    ...snapshot.config.budgets,
+    ...snapshot.state.budgets,
+  });
   const nextConfig = {
     ...snapshot.config,
     budgets: {
       ...snapshot.config.budgets,
-      ...payload,
+      ...nextBudgets,
     },
   };
   await saveLoopConfig(snapshot.paths.codexLoopRoot, nextConfig);
@@ -2172,10 +2201,20 @@ export async function updateBudgets(startDir = process.cwd(), payload) {
     ...snapshot.state,
     budgets: {
       ...snapshot.state.budgets,
-      ...payload,
+      ...nextBudgets,
     },
   };
   await writeJson(snapshot.paths.statePath, nextState);
+  await updateRegistryLoopBinding(
+    snapshot.paths.codexLoopRoot,
+    snapshot.config.currentRunId,
+    (loop) => ({
+      budgets: {
+        ...(loop.budgets || {}),
+        ...nextBudgets,
+      },
+    }),
+  );
   await appendJsonLine(snapshot.paths.logPath, {
     type: "budgets_updated",
     at: nowIso(),
