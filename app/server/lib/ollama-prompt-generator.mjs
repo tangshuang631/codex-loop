@@ -55,9 +55,17 @@ function extractJsonMessage(text) {
 }
 
 function shouldReplaceOrdinaryUserDeferral(text) {
-  return /(?:如果)?没有偏好|等待.*用户|用户确认|待.*确认|等.*确认后再继续|defer to the human|wait for user confirmation/i.test(
-    safeText(text, ""),
-  );
+  const value = safeText(text, "");
+  if (!value) return false;
+  const asksForConfirmation =
+    /(?:如果)?没有偏好|等待.*用户|用户确认|待.*确认|等.*确认后再继续|defer to the human|wait for user confirmation/i.test(
+      value,
+    );
+  const highRisk =
+    /删除|清空|覆盖|重置|回滚|不可逆|凭证|密钥|token|权限|授权|登录|安全|支付|费用|生产环境|destructive|irreversible|credential|permission|security|payment|production/i.test(
+      value,
+    );
+  return asksForConfirmation && !highRisk;
 }
 
 function decisiveContinuationFallback(englishPreferred = false) {
