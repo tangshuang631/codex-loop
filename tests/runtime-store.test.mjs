@@ -21,6 +21,7 @@ import {
   selectLoop,
   renameLoop,
   recordHeartbeat,
+  savePendingGuidance,
   requestGracefulStop,
   saveThreadBinding,
   syncCodexThreadMirror,
@@ -573,6 +574,59 @@ test("runLoopTurn uses ollama-generated prompt when advanced continuation is ena
   assert.equal(snapshot.thread.latestEventType, "codex_followup_completed");
 });
 
+test("pending user guidance is saved for the next ollama continuation and cleared after dispatch", async () => {
+  const configRoot = await createWorkspace();
+  await ensureLoopArtifacts(configRoot);
+  await saveUserOverrides(configRoot, {
+    conversation: {
+      language: "zh-CN",
+      promptGenerator: {
+        enabled: true,
+        provider: "ollama",
+        model: "qwen2.5:7b",
+      },
+    },
+  });
+  await saveThreadBinding(configRoot, {
+    workspaceName: "demo",
+    threadTitle: "补充引导线程",
+    threadId: "thread-guidance",
+    singleThreadMode: true,
+  });
+  await syncCodexThreadMirror(configRoot, {
+    latestCodexSummary: "上一轮已经完成移动端观察入口。",
+  });
+
+  const saved = await savePendingGuidance(configRoot, {
+    text: "下一轮优先补移动端状态摘要，不要扩大范围。",
+  });
+  assert.equal(
+    saved.thread.pendingUserGuidance,
+    "下一轮优先补移动端状态摘要，不要扩大范围。",
+  );
+
+  let generatorSawGuidance = "";
+  const snapshot = await runLoopTurn(configRoot, {
+    generateFollowupPrompt: async ({ snapshot: currentSnapshot }) => {
+      generatorSawGuidance = currentSnapshot.thread.pendingUserGuidance;
+      return "已融合用户补充：下一轮优先补移动端状态摘要。";
+    },
+    dispatchThreadMessage: async ({ prompt }) => {
+      assert.match(prompt, /移动端状态摘要/);
+      return {
+        deliveryObserved: true,
+        completionObserved: false,
+        lastMessage: "",
+      };
+    },
+  });
+
+  assert.equal(generatorSawGuidance, "下一轮优先补移动端状态摘要，不要扩大范围。");
+  assert.equal(snapshot.thread.continuationStatus, "dispatching");
+  assert.equal(snapshot.thread.pendingUserGuidance, "");
+  assert.equal(snapshot.thread.latestEventType, "codex_followup_sent_waiting");
+});
+
 test("syncCodexThreadMirror uses ollama summary when advanced continuation is enabled", async () => {
   const configRoot = await createWorkspace();
   await ensureLoopArtifacts(configRoot);
@@ -659,6 +713,50 @@ test("ollama requests disable thinking output for dashboard summaries and prompt
   assert.match(requestBodies[0].prompt, /直接代表用户选择|Do not defer to the human/i);
   assert.match(requestBodies[0].prompt, /高风险删除|destructive/i);
   assert.equal(requestBodies[1].think, false);
+});
+
+test("ollama prompt includes pending user guidance as next-turn context", async () => {
+  const configRoot = await createWorkspace();
+  await ensureLoopArtifacts(configRoot);
+  await saveUserOverrides(configRoot, {
+    conversation: {
+      language: "zh-CN",
+      promptGenerator: {
+        enabled: true,
+        provider: "ollama",
+        model: "qwen2.5:7b",
+        baseUrl: "http://127.0.0.1:11434",
+      },
+    },
+  });
+  await saveThreadBinding(configRoot, {
+    workspaceName: "demo",
+    threadTitle: "补充引导线程",
+    threadId: "thread-guidance-prompt",
+    singleThreadMode: true,
+  });
+  await savePendingGuidance(configRoot, {
+    text: "请优先根据文档补齐移动端状态摘要，不要扩大范围。",
+  });
+  const snapshot = await readLoopSnapshot(configRoot);
+  let requestBody = null;
+  const fetchImpl = async (_url, init) => {
+    requestBody = JSON.parse(init.body);
+    return {
+      ok: true,
+      json: async () => ({ response: "继续补齐移动端状态摘要。" }),
+    };
+  };
+
+  await generatePromptWithOllama({
+    snapshot,
+    fallbackPrompt: "继续推进下一步。",
+    fetchImpl,
+  });
+
+  assert.match(requestBody.prompt, /用户临时补充/);
+  assert.match(requestBody.prompt, /移动端状态摘要/);
+  assert.match(requestBody.prompt, /不要机械照抄|融合到下一条指令/);
 });
 
 test("runLoopTurn falls back to template prompt when ollama generation fails", async () => {

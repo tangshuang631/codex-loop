@@ -634,6 +634,60 @@ test("handler dispatches thread sync route", async () => {
   assert.match(chunks.join(""), /"synced":true/);
 });
 
+test("handler dispatches pending guidance route", async () => {
+  let savedPayload = null;
+  const handler = buildHandler({
+    operations: {
+      readLoopSnapshot: async () => ({}),
+      exportLoopSummary: async () => ({}),
+      startRun: async () => ({}),
+      renameLoop: async () => ({}),
+      requestGracefulStop: async () => ({}),
+      updateBudgets: async () => ({}),
+      saveThreadBinding: async () => ({}),
+      syncCodexThreadMirror: async () => ({}),
+      savePendingGuidance: async (_cwd, body) => {
+        savedPayload = body;
+        return { thread: { pendingUserGuidance: body.text } };
+      },
+      recordHeartbeat: async () => ({}),
+      recordError: async () => ({}),
+      saveUserOverrides: async () => ({}),
+    },
+  });
+
+  const chunks = [];
+  const response = {
+    writeHead(statusCode, headers) {
+      this.statusCode = statusCode;
+      this.headers = headers;
+    },
+    end(text) {
+      chunks.push(text);
+    },
+  };
+
+  await handler(
+    {
+      method: "POST",
+      url: "/api/pending-guidance",
+      [Symbol.asyncIterator]: async function* iterator() {
+        yield Buffer.from(
+          JSON.stringify({
+            text: "下一轮先补移动端状态摘要。",
+          }),
+          "utf8",
+        );
+      },
+    },
+    response,
+  );
+
+  assert.equal(response.statusCode, 200);
+  assert.equal(savedPayload.text, "下一轮先补移动端状态摘要。");
+  assert.match(chunks.join(""), /移动端状态摘要/);
+});
+
 test("handler dispatches run turn route", async () => {
   const handler = buildHandler({
     operations: {

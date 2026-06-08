@@ -226,10 +226,10 @@ function ThreadIdHelpCard() {
   return (
     <div className="thread-id-help-card">
       <div>
-        <strong>还没有线程号？</strong>
+        <strong>获取线程号</strong>
         <p>
-          先打开你要让 loop 接管的 Codex 窗口，把下面这句话发给它。拿到返回的
-          threadId 后，粘贴到“线程 ID”里保存。
+          打开新的 Codex 窗口，复制这句话发给 Codex。它返回 threadId 后，
+          粘贴到线程 ID，再保存绑定。
         </p>
       </div>
       <div className="thread-id-copy-row">
@@ -1377,6 +1377,9 @@ function DashboardHome({
   settingsForm,
   healthIssues,
   uiError,
+  pendingGuidanceText,
+  setPendingGuidanceText,
+  onSavePendingGuidance,
 }) {
   const projectTitle = formatValue(
     currentLoop?.projectName || snapshot?.config?.projectName,
@@ -1429,6 +1432,7 @@ function DashboardHome({
     "等待第一轮可见进展",
   );
   const statusLine = `${runningHeadline} · ${threadLabel}`;
+  const savedPendingGuidance = snapshot?.thread?.pendingUserGuidance || "";
 
   return (
     <>
@@ -1493,6 +1497,37 @@ function DashboardHome({
                 关闭控制台
               </button>
             </div>
+            <form
+              className="pending-guidance-form"
+              onSubmit={(event) => {
+                event.preventDefault();
+                void onSavePendingGuidance(pendingGuidanceText);
+              }}
+            >
+              <label>
+                <span>补充下一轮引导</span>
+                <textarea
+                  rows={2}
+                  value={pendingGuidanceText}
+                  placeholder="例如：下一轮先补移动端状态摘要，不要扩大范围。"
+                  onChange={(event) => setPendingGuidanceText(event.target.value)}
+                />
+              </label>
+              <div className="pending-guidance-actions">
+                <small>
+                  {savedPendingGuidance
+                    ? "已记录：" + summarizeVisibleText(savedPendingGuidance, "", 56)
+                    : "会等 Codex 当前轮完成后交给本地模型合并，不会立刻打断 Codex。"}
+                </small>
+                <button
+                  type="submit"
+                  className="secondary-button"
+                  disabled={submitting || !pendingGuidanceText.trim()}
+                >
+                  保存补充
+                </button>
+              </div>
+            </form>
           </div>
         </div>
 
@@ -1558,6 +1593,7 @@ export function App() {
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [uiError, setUiError] = useState("");
+  const [pendingGuidanceText, setPendingGuidanceText] = useState("");
   const [collapsedProjects, setCollapsedProjects] = useState({});
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [activeSidebarPane, setActiveSidebarPane] = useState("loops");
@@ -1749,6 +1785,21 @@ export function App() {
           reason: "manual shutdown from dashboard",
         }),
       });
+    });
+  }
+
+  async function savePendingGuidance(text) {
+    const cleanText = formatValue(text, "").trim();
+    if (!cleanText) {
+      return;
+    }
+
+    await withSubmit(async () => {
+      await requestJson("/pending-guidance", {
+        method: "POST",
+        body: JSON.stringify({ text: cleanText }),
+      });
+      setPendingGuidanceText("");
     });
   }
 
@@ -2157,6 +2208,9 @@ export function App() {
             settingsForm={settingsForm}
             healthIssues={healthIssues}
             uiError={uiError}
+            pendingGuidanceText={pendingGuidanceText}
+            setPendingGuidanceText={setPendingGuidanceText}
+            onSavePendingGuidance={savePendingGuidance}
           />
         ) : null}
 

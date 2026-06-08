@@ -177,6 +177,8 @@ async function markDispatchSentWithoutCompletion(startDir, { promptGenerator = "
     {
       continuationEnabled: true,
       continuationStatus: "dispatching",
+      pendingUserGuidance: "",
+      pendingUserGuidanceAt: "",
       lastContinuationError: promptGenerationError,
       latestSummary: "消息已送达绑定线程，正在等待 Codex 完成这一轮回复。",
       latestEventType: "codex_followup_sent_waiting",
@@ -1338,6 +1340,10 @@ function buildThreadMirror(thread, state, overrides = {}) {
     lastCompletionAt: overrides.lastCompletionAt ?? thread.lastCompletionAt ?? "",
     lastDispatchPrompt:
       overrides.lastDispatchPrompt ?? thread.lastDispatchPrompt ?? "",
+    pendingUserGuidance:
+      overrides.pendingUserGuidance ?? thread.pendingUserGuidance ?? "",
+    pendingUserGuidanceAt:
+      overrides.pendingUserGuidanceAt ?? thread.pendingUserGuidanceAt ?? "",
     lastContinuationError,
     lastUpdatedAt: overrides.lastUpdatedAt ?? nowIso(),
   };
@@ -1954,6 +1960,48 @@ export async function saveThreadBinding(startDir = process.cwd(), payload) {
   });
 
   await writeText(snapshot.paths.transcriptPath, defaultTranscript(nextThread));
+  return readLoopSnapshot(startDir);
+}
+
+export async function savePendingGuidance(startDir = process.cwd(), payload = {}) {
+  const snapshot = await ensureLoopArtifacts(startDir);
+  const text = safeText(payload.text, "");
+  if (!text) {
+    throw new Error("补充内容不能为空。");
+  }
+
+  const at = nowIso();
+  const nextThread = await persistThreadMirror(
+    snapshot.paths.threadPath,
+    snapshot.thread,
+    snapshot.state,
+    {
+      pendingUserGuidance: text,
+      pendingUserGuidanceAt: at,
+      latestSummary: "已记录补充引导，会在 Codex 当前轮完成后交给本地模型合并到下一条指令。",
+      latestEventType: "pending_guidance_saved",
+      lastUpdatedAt: at,
+    },
+  );
+
+  await updateRegistryLoopBinding(
+    snapshot.paths.codexLoopRoot,
+    snapshot.config.currentRunId,
+    (loop) => ({ threadBinding: { ...(loop.threadBinding || {}), ...nextThread } }),
+  );
+  await appendJsonLine(snapshot.paths.logPath, {
+    type: "pending_guidance_saved",
+    at,
+    threadId: nextThread.threadId,
+    preview: buildPromptPreview(text),
+  });
+  await appendTranscriptEntry(snapshot.paths.transcriptPath, {
+    at,
+    activeTask: snapshot.state.activeTask,
+    note: "pending_guidance_saved",
+    summary: "已记录补充引导：" + buildPromptPreview(text),
+    mode: snapshot.state.mode,
+  });
   return readLoopSnapshot(startDir);
 }
 
@@ -2881,6 +2929,12 @@ export async function syncCodexThreadMirror(
     lastContinuationError: completedCurrentDispatch
       ? ""
       : snapshot.thread.lastContinuationError,
+    pendingUserGuidance: completedCurrentDispatch
+      ? ""
+      : snapshot.thread.pendingUserGuidance,
+    pendingUserGuidanceAt: completedCurrentDispatch
+      ? ""
+      : snapshot.thread.pendingUserGuidanceAt,
     latestEventType:
       completedCurrentDispatch
         ? "codex_followup_completed"

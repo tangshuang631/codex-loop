@@ -47,6 +47,7 @@ export async function generatePromptWithOllama({
   const language = safeText(snapshot.profile?.resolved?.conversation?.language, "zh-CN");
   const contextBlocks = await collectContextBlocks(snapshot);
   const englishPreferred = language.toLowerCase().startsWith("en");
+  const pendingUserGuidance = safeText(snapshot.thread.pendingUserGuidance, "");
 
   const system = englishPreferred
     ? "Act as the product-manager NPC for codex-loop. Generate the next concise follow-up for the same Codex thread. Make low-risk product and design decisions from project docs and rules. Ask the human only for destructive, irreversible, credential, permission, strong security, or high-cost choices. Return only the message."
@@ -60,7 +61,15 @@ export async function generatePromptWithOllama({
     `上一轮 Codex 动作：${safeText(snapshot.thread.lastAssistantActionSummary, "暂无")}`,
     `最近 Codex 回复摘要：${safeText(snapshot.thread.latestCodexSummary, "暂无")}`,
     `最近本地摘要：${safeText(snapshot.thread.latestSummary || snapshot.state.recentSummary, "暂无")}`,
+    pendingUserGuidance
+      ? `用户临时补充：${pendingUserGuidance}`
+      : "用户临时补充：暂无",
     "",
+    pendingUserGuidance
+      ? englishPreferred
+        ? "The user added this guidance while Codex was working. Merge it into the next instruction together with the latest Codex reply and project rules. Do not copy it mechanically."
+        : "用户是在 Codex 当前轮工作期间补充的这句话。请结合 Codex 最新回复、项目文档和开发规则，把它融合到下一条指令里，不要机械照抄。"
+      : "",
     englishPreferred
       ? "Generate the next message as a practical PM/NPC decision. If Codex asks for ordinary product or design confirmation, choose the safest small verified path and tell it to continue. Do not defer to the human unless the choice is destructive, irreversible, credential/permission-related, security-sensitive, or has very different costs."
       : "请像真实产品经理/NPC 一样生成下一条消息。如果 Codex 在询问普通产品边界、设计方案或实现偏好，请直接代表用户选择最安全、最小、可验证的路径，并让它继续。不要写“等用户确认后再继续”，除非涉及高风险删除、不可逆操作、凭证权限、强安全风险或代价差异很大的选择。",

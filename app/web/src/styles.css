@@ -762,6 +762,47 @@ select {
   line-height: 1.7;
 }
 
+.pending-guidance-form {
+  display: grid;
+  gap: 10px;
+  padding-top: 14px;
+  border-top: 1px solid var(--line);
+}
+
+.pending-guidance-form label {
+  display: grid;
+  gap: 8px;
+}
+
+.pending-guidance-form span {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.pending-guidance-form textarea {
+  width: 100%;
+  min-height: 58px;
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  background: rgba(255, 255, 255, 0.88);
+  color: var(--text);
+  padding: 12px 14px;
+  resize: vertical;
+}
+
+.pending-guidance-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.pending-guidance-actions small {
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.6;
+}
+
 .workspace-thinking-card {
   display: grid;
   grid-template-columns: auto 1fr;

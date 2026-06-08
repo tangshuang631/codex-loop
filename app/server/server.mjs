@@ -15,6 +15,7 @@ import {
   renameLoop,
   requestGracefulStop,
   runLoopTurn,
+  savePendingGuidance,
   saveThreadBinding,
   startRun,
   syncCodexThreadMirror,
@@ -127,6 +128,7 @@ export function buildHandler({
       replyLoopCreationAssistant,
       requestGracefulStop,
       runLoopTurn,
+      savePendingGuidance,
       updateBudgets,
       saveThreadBinding,
       syncCodexThreadMirror,
@@ -353,6 +355,16 @@ export function buildHandler({
           response,
           200,
           await operations.syncCodexThreadMirror(process.cwd(), body),
+        );
+        return;
+      }
+
+      if (request.method === "POST" && request.url === "/api/pending-guidance") {
+        const body = await readBody(request);
+        sendJson(
+          response,
+          200,
+          await operations.savePendingGuidance(process.cwd(), body),
         );
         return;
       }

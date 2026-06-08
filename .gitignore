@@ -4,6 +4,7 @@ runtime/
 .DS_Store
 Thumbs.db
 *.log
+.tmp-dev-*
 coverage/
 .vite/
 
