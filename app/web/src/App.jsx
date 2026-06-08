@@ -663,6 +663,16 @@ function StatusSummaryPanel({
     processStatus?.hasSupervisorReview
       ? ["下一条指令", processStatus?.supervisorInstructionPreview || "等待生成下一条指令"]
       : null,
+    processStatus?.needsIndependentVerification
+      ? ["验收建议", processStatus?.acceptanceFocusPreview || "建议先做独立验收"]
+      : null,
+    processStatus?.verificationCommands?.length
+      ? [
+          "验证命令",
+          processStatus?.verificationCommandPreview ||
+            processStatus.verificationCommands.join(" · "),
+        ]
+      : null,
     ["停止条件", processStatus?.stopLimit || "未设置停止条件"],
     processStatus?.hasPendingGuidance
       ? ["待合并补充", processStatus?.pendingGuidancePreview || "已记录"]
@@ -1188,10 +1198,16 @@ function ManagePane({
         open={
           activeManageSection === "automation" ||
           activeManageSection === "ollama" ||
+          activeManageSection === "npc" ||
           activeManageSection === "budgets"
         }
         onToggle={(event) => {
-          if (event.currentTarget.open && activeManageSection !== "ollama" && activeManageSection !== "budgets") {
+          if (
+            event.currentTarget.open &&
+            activeManageSection !== "ollama" &&
+            activeManageSection !== "npc" &&
+            activeManageSection !== "budgets"
+          ) {
             setActiveManageSection("automation");
           }
         }}
@@ -1212,6 +1228,11 @@ function ManagePane({
                       provider: "ollama",
                       model: settingsForm.promptGeneratorModel,
                       baseUrl: settingsForm.promptGeneratorBaseUrl,
+                    },
+                    supervisor: {
+                      roleTraits: settingsForm.supervisorRoleTraits,
+                      testingRules: settingsForm.supervisorTestingRules,
+                      acceptanceCriteria: settingsForm.supervisorAcceptanceCriteria,
                     },
                   },
                 }),
@@ -1345,6 +1366,60 @@ function ManagePane({
                 还没有检测到可用的本地模型。不开启也能运行；开启后会默认用于整理 Codex 回复和生成下一步提示。
               </p>
             ) : null}
+          </details>
+
+          <details
+            className="workspace-details"
+            open={activeManageSection === "npc"}
+            onToggle={(event) => {
+              if (event.currentTarget.open) setActiveManageSection("npc");
+            }}
+          >
+            <summary>NPC 角色</summary>
+            <p className="sidebar-help">
+              定义 codex-loop 作为产品经理、测试人员和真实用户时的长期偏好；临时引导仍在首页补充。
+            </p>
+            <div className="settings-grid">
+              <label>
+                <span>角色特性</span>
+                <textarea
+                  rows={3}
+                  value={settingsForm.supervisorRoleTraits}
+                  onChange={(event) =>
+                    setSettingsForm((current) => ({
+                      ...current,
+                      supervisorRoleTraits: event.target.value,
+                    }))
+                  }
+                />
+              </label>
+              <label>
+                <span>测试规则</span>
+                <textarea
+                  rows={3}
+                  value={settingsForm.supervisorTestingRules}
+                  onChange={(event) =>
+                    setSettingsForm((current) => ({
+                      ...current,
+                      supervisorTestingRules: event.target.value,
+                    }))
+                  }
+                />
+              </label>
+              <label>
+                <span>验收标准</span>
+                <textarea
+                  rows={3}
+                  value={settingsForm.supervisorAcceptanceCriteria}
+                  onChange={(event) =>
+                    setSettingsForm((current) => ({
+                      ...current,
+                      supervisorAcceptanceCriteria: event.target.value,
+                    }))
+                  }
+                />
+              </label>
+            </div>
           </details>
 
           <details
@@ -1786,6 +1861,12 @@ export function App() {
     promptGeneratorEnabled: "auto",
     promptGeneratorModel: "qwen2.5:7b",
     promptGeneratorBaseUrl: "http://127.0.0.1:11434",
+    supervisorRoleTraits:
+      "同时扮演产品经理、测试人员和真实用户：控制范围，关注可用性，主动发现偏离用户目标的问题。",
+    supervisorTestingRules:
+      "Codex 完成一个清晰里程碑后再做独立验收；优先检查用户能否看懂状态、历史记录和下一步。",
+    supervisorAcceptanceCriteria:
+      "每轮只推进一小批可验证改动；完成后必须能说明改了什么、如何验证、还有什么风险。",
     maxMinutes: "180",
     maxTokens: "120000",
     finalizeLeadMinutes: "20",
@@ -1866,6 +1947,12 @@ export function App() {
         promptGeneratorBaseUrl:
           nextSnapshot.profile?.resolved?.conversation?.promptGenerator?.baseUrl ||
           "http://127.0.0.1:11434",
+        supervisorRoleTraits:
+          nextSnapshot.profile?.resolved?.conversation?.supervisor?.roleTraits || "",
+        supervisorTestingRules:
+          nextSnapshot.profile?.resolved?.conversation?.supervisor?.testingRules || "",
+        supervisorAcceptanceCriteria:
+          nextSnapshot.profile?.resolved?.conversation?.supervisor?.acceptanceCriteria || "",
         maxMinutes: String(nextSnapshot.state?.budgets?.maxMinutes ?? 180),
         maxTokens: String(nextSnapshot.state?.budgets?.maxTokens ?? 120000),
         finalizeLeadMinutes: String(nextSnapshot.state?.budgets?.finalizeLeadMinutes ?? 20),

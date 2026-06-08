@@ -31,6 +31,16 @@ test("dashboard surfaces supervisor review without adding noisy debug cards", as
   assert.match(appSource, /下一条指令/);
 });
 
+test("dashboard surfaces supervisor verification plan as compact status rows", async () => {
+  const appSource = await fs.readFile("app/web/src/App.jsx", "utf8");
+
+  assert.match(appSource, /processStatus\?\.needsIndependentVerification/);
+  assert.match(appSource, /processStatus\?\.verificationCommands/);
+  assert.match(appSource, /processStatus\?\.acceptanceFocusPreview/);
+  assert.match(appSource, /验收建议/);
+  assert.match(appSource, /验证命令/);
+});
+
 test("dashboard shows a compact Codex-style loop progress panel", async () => {
   const appSource = await fs.readFile("app/web/src/App.jsx", "utf8");
   const stylesSource = await fs.readFile("app/web/src/styles.css", "utf8");

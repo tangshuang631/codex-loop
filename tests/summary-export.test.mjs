@@ -15,6 +15,7 @@ import {
   startRun,
   requestGracefulStop,
 } from "../app/server/lib/runtime-store.mjs";
+import { saveUserOverrides } from "../app/server/lib/adapter-store.mjs";
 import { writeLauncherStatus } from "../app/server/lib/launcher-status.mjs";
 
 async function createWorkspace() {
@@ -187,6 +188,12 @@ test("exportMobileView exposes supervisor review and next instruction for monito
       nextInstruction:
         "\u5148\u4ee5\u771f\u5b9e\u7528\u6237\u89c6\u89d2\u68c0\u67e5\u79fb\u52a8\u7aef loop \u89c2\u5bdf\u9875\uff0c\u4fee\u590d\u6700\u5f71\u54cd\u5224\u65ad\u72b6\u6001\u7684\u95ee\u9898\u3002",
       shouldContinue: true,
+      needsIndependentVerification: true,
+      verificationCommands: ["npm run test", "npm run build:web"],
+      acceptanceFocus: [
+        "\u9996\u9875\u72b6\u6001\u662f\u5426\u4e00\u773c\u80fd\u5224\u65ad",
+        "\u79fb\u52a8\u7aef\u89c2\u5bdf\u9875\u662f\u5426\u8db3\u591f\u6e05\u695a",
+      ],
       risks: [],
     }),
   });
@@ -197,6 +204,40 @@ test("exportMobileView exposes supervisor review and next instruction for monito
   assert.match(mobile.processStatus.supervisorReview, /\u76d1\u7763\u590d\u76d8/);
   assert.match(mobile.processStatus.supervisorInstructionPreview, /\u771f\u5b9e\u7528\u6237/);
   assert.equal(mobile.processStatus.supervisorSource, "ollama");
+  assert.equal(mobile.processStatus.needsIndependentVerification, true);
+  assert.deepEqual(mobile.processStatus.verificationCommands, ["npm run test", "npm run build:web"]);
+  assert.match(mobile.processStatus.acceptanceFocusPreview, /\u9996\u9875\u72b6\u6001/);
+});
+
+test("exportMobileView exposes customized npc rules and pending mobile guidance", async () => {
+  const configRoot = await createWorkspace();
+  await ensureLoopArtifacts(configRoot);
+  await saveUserOverrides(configRoot, {
+    conversation: {
+      supervisor: {
+        roleTraits: "像产品经理、测试人员和真实用户一样监督项目，不允许偏离用户目标。",
+        testingRules: "每个移动端改动都要检查状态、历史记录和补充引导入口。",
+        acceptanceCriteria: "用户在手机上 10 秒内能判断当前 loop 是否健康。",
+      },
+    },
+  });
+  await saveThreadBinding(configRoot, {
+    workspaceName: "demo",
+    threadTitle: "移动端监督线程",
+    threadId: "thread-mobile-npc",
+    singleThreadMode: true,
+  });
+  await savePendingGuidance(configRoot, {
+    text: "下一轮请重点检查移动端实时引导是否清楚。",
+  });
+
+  const mobile = await exportMobileView(configRoot);
+
+  assert.match(mobile.supervisor.roleTraits, /产品经理、测试人员和真实用户/);
+  assert.match(mobile.supervisor.testingRules, /移动端改动/);
+  assert.match(mobile.supervisor.acceptanceCriteria, /10 秒/);
+  assert.equal(mobile.pendingGuidance.text, "下一轮请重点检查移动端实时引导是否清楚。");
+  assert.equal(mobile.pendingGuidance.mergeTiming, "codex_completed");
 });
 
 test("exportMobileView suggests binding a visible thread before starting when thread is missing", async () => {

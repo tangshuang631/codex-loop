@@ -7,6 +7,23 @@ import { resolveProjectLayout } from "./paths.mjs";
 
 const moduleDir = path.dirname(fileURLToPath(import.meta.url));
 const bundledProjectsRoot = path.resolve(moduleDir, "../../..", "projects");
+const DEFAULT_CONVERSATION = {
+  language: "zh-CN",
+  promptGenerator: {
+    enabled: "auto",
+    provider: "ollama",
+    model: "qwen2.5:7b",
+    baseUrl: "http://127.0.0.1:11434",
+  },
+  supervisor: {
+    roleTraits:
+      "同时扮演产品经理、测试人员和真实用户：控制范围，关注可用性，主动发现偏离用户目标的问题。",
+    testingRules:
+      "Codex 完成一个清晰里程碑后再做独立验收；优先检查用户能否看懂状态、历史记录和下一步。",
+    acceptanceCriteria:
+      "每轮只推进一小批可验证改动；完成后必须能说明改了什么、如何验证、还有什么风险。",
+  },
+};
 
 async function readJson(filePath, fallbackValue = null) {
   try {
@@ -103,20 +120,13 @@ export async function ensureAdapterArtifacts(startDir = process.cwd()) {
       stopPolicy: {},
       threadPolicy: {},
       verification: {},
-      conversation: {
-        language: "zh-CN",
-        promptGenerator: {
-          enabled: "auto",
-          provider: "ollama",
-          model: "qwen2.5:7b",
-          baseUrl: "http://127.0.0.1:11434",
-        },
-      },
+      conversation: DEFAULT_CONVERSATION,
     };
 
   const resolved = mergeObjects(
     {
       ...adapter,
+      conversation: DEFAULT_CONVERSATION,
       budgets: {
         ...adapter.budgets,
         ...config.budgets,

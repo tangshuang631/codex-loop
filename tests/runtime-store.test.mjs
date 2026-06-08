@@ -31,6 +31,7 @@ import {
 import { saveUserOverrides } from "../app/server/lib/adapter-store.mjs";
 import {
   generateCodexSummaryWithOllama,
+  generateMilestoneReviewWithOllama,
   generatePromptWithOllama,
 } from "../app/server/lib/ollama-prompt-generator.mjs";
 
@@ -658,6 +659,9 @@ test("milestone review stores supervisor guidance that the next loop turn uses",
         nextInstruction:
           "先以真实用户和测试人员视角验收移动端 loop 观察页，修复最影响判断状态的问题；不要扩大到新功能。",
         shouldContinue: true,
+        needsIndependentVerification: true,
+        verificationCommands: ["npm run test", "npm run build:web"],
+        acceptanceFocus: ["移动端状态是否一眼能判断", "首页是否仍然简洁"],
         risks: ["移动端信息过密"],
       };
     },
@@ -667,6 +671,15 @@ test("milestone review stores supervisor guidance that the next loop turn uses",
   assert.match(reviewed.thread.lastSupervisorReview, /监督复盘/);
   assert.match(reviewed.thread.lastSupervisorInstruction, /真实用户和测试人员视角/);
   assert.equal(reviewed.thread.lastSupervisorSource, "ollama");
+  assert.equal(reviewed.thread.supervisorNeedsIndependentVerification, true);
+  assert.deepEqual(reviewed.thread.lastSupervisorVerificationCommands, [
+    "npm run test",
+    "npm run build:web",
+  ]);
+  assert.deepEqual(reviewed.thread.lastSupervisorAcceptanceFocus, [
+    "移动端状态是否一眼能判断",
+    "首页是否仍然简洁",
+  ]);
 
   let dispatchedPrompt = "";
   await runLoopTurn(configRoot, {
@@ -1065,6 +1078,78 @@ test("ollama prompt includes pending user guidance as next-turn context", async 
   assert.match(requestBody.prompt, /用户临时补充/);
   assert.match(requestBody.prompt, /移动端状态摘要/);
   assert.match(requestBody.prompt, /不要机械照抄|融合到下一条指令/);
+});
+
+test("ollama supervisor review includes user customized npc rules", async () => {
+  const configRoot = await createWorkspace();
+  await ensureLoopArtifacts(configRoot);
+  await saveUserOverrides(configRoot, {
+    conversation: {
+      promptGenerator: {
+        enabled: true,
+        provider: "ollama",
+        model: "qwen2.5:7b",
+        baseUrl: "http://127.0.0.1:11434",
+      },
+      supervisor: {
+        roleTraits:
+          "像挑剔真实用户一样关注首次使用是否一眼看懂，同时像产品经理一样控制范围。",
+        testingRules:
+          "每次涉及移动端都要检查小屏状态、历史记录和补充引导是否清楚。",
+        acceptanceCriteria:
+          "只有当用户能在 10 秒内判断 loop 是否在工作，才认为移动端体验合格。",
+      },
+    },
+  });
+  await saveThreadBinding(configRoot, {
+    workspaceName: "demo",
+    threadTitle: "NPC 自定义线程",
+    threadId: "thread-supervisor-custom",
+    singleThreadMode: true,
+  });
+  await syncCodexThreadMirror(configRoot, {
+    lastUserInstructionSummary: "把 codex-loop 做成长期可用的 AI 编程助手",
+    latestCodexSummary: "Codex 已完成移动端状态和对话记录初版。",
+  });
+  await savePendingGuidance(configRoot, {
+    text: "下一轮重点检查移动端是否能及时引导项目方向。",
+  });
+  const snapshot = await readLoopSnapshot(configRoot);
+  let requestBody = null;
+  const fetchImpl = async (_url, init) => {
+    requestBody = JSON.parse(init.body);
+    return {
+      ok: true,
+      json: async () => ({
+        response: JSON.stringify({
+          summary: "监督复盘：移动端初版可用，但还要按自定义验收标准检查。",
+          nextInstruction: "先按用户自定义测试规则验收移动端状态和补充引导。",
+          shouldContinue: true,
+          needsIndependentVerification: true,
+          verificationCommands: ["npm run test"],
+          acceptanceFocus: ["移动端 10 秒内判断状态"],
+          risks: [],
+        }),
+      }),
+    };
+  };
+
+  await generateMilestoneReviewWithOllama({
+    snapshot,
+    fallbackReview: {
+      summary: "降级复盘",
+      nextInstruction: "继续推进。",
+      verificationCommands: ["npm run test"],
+      acceptanceFocus: ["移动端状态"],
+    },
+    fetchImpl,
+  });
+
+  assert.match(requestBody.system, /产品经理|真实挑剔用户/);
+  assert.match(requestBody.prompt, /像挑剔真实用户一样关注首次使用/);
+  assert.match(requestBody.prompt, /每次涉及移动端都要检查小屏状态/);
+  assert.match(requestBody.prompt, /10 秒内判断 loop 是否在工作/);
+  assert.match(requestBody.prompt, /下一轮重点检查移动端/);
 });
 
 test("runLoopTurn falls back to template prompt when ollama generation fails", async () => {

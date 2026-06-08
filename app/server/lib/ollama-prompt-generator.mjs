@@ -143,6 +143,7 @@ export async function generatePromptWithOllama({
   const contextBlocks = await collectContextBlocks(snapshot);
   const englishPreferred = language.toLowerCase().startsWith("en");
   const pendingUserGuidance = safeText(snapshot.thread.pendingUserGuidance, "");
+  const supervisorRuleLines = buildSupervisorRuleLines(snapshot, englishPreferred);
 
   const system = englishPreferred
     ? "Act as the product-manager NPC for codex-loop. Generate the next concise follow-up for the same Codex thread. Make low-risk product and design decisions from project docs and rules. Ask the human only for destructive, irreversible, credential, permission, strong security, or high-cost choices. Return only the message."
@@ -156,6 +157,7 @@ export async function generatePromptWithOllama({
     `上一轮 Codex 动作：${safeText(snapshot.thread.lastAssistantActionSummary, "暂无")}`,
     `最近 Codex 回复摘要：${safeText(snapshot.thread.latestCodexSummary, "暂无")}`,
     `最近本地摘要：${safeText(snapshot.thread.latestSummary || snapshot.state.recentSummary, "暂无")}`,
+    supervisorRuleLines.length ? supervisorRuleLines.join("\n") : "",
     pendingUserGuidance
       ? `用户临时补充：${pendingUserGuidance}`
       : "用户临时补充：暂无",
@@ -269,6 +271,48 @@ export async function generateCodexSummaryWithOllama({
   return generated;
 }
 
+function cleanGeneratedList(value, maxItems = 5, maxChars = 140) {
+  const items = Array.isArray(value)
+    ? value
+    : safeText(value, "").split(/\r?\n|[,，]/u);
+  return items
+    .map((item) => cleanGeneratedMessage(item, maxChars))
+    .filter(Boolean)
+    .slice(0, maxItems);
+}
+
+function buildSupervisorRuleLines(snapshot, englishPreferred = false) {
+  const supervisor = snapshot.profile?.resolved?.conversation?.supervisor || {};
+  const roleTraits = safeText(supervisor.roleTraits, "");
+  const testingRules = safeText(supervisor.testingRules, "");
+  const acceptanceCriteria = safeText(supervisor.acceptanceCriteria, "");
+  const lines = [];
+
+  if (roleTraits) {
+    lines.push(
+      englishPreferred
+        ? `Supervisor role traits: ${roleTraits}`
+        : `NPC 角色特性：${roleTraits}`,
+    );
+  }
+  if (testingRules) {
+    lines.push(
+      englishPreferred
+        ? `Supervisor testing rules: ${testingRules}`
+        : `NPC 测试规则：${testingRules}`,
+    );
+  }
+  if (acceptanceCriteria) {
+    lines.push(
+      englishPreferred
+        ? `Supervisor acceptance criteria: ${acceptanceCriteria}`
+        : `NPC 验收标准：${acceptanceCriteria}`,
+    );
+  }
+
+  return lines;
+}
+
 function parseMilestoneReviewResponse(text) {
   const value = safeText(text, "");
   if (!value) {
@@ -301,6 +345,29 @@ function parseMilestoneReviewResponse(text) {
             { replaceOrdinaryUserDeferral: true },
           ),
           shouldContinue: parsed.shouldContinue !== false,
+          needsIndependentVerification: Boolean(
+            parsed.needsIndependentVerification ??
+              parsed.needs_independent_verification ??
+              parsed.needIndependentVerification ??
+              false,
+          ),
+          verificationCommands: cleanGeneratedList(
+            parsed.verificationCommands ||
+              parsed.verification_commands ||
+              parsed.commands ||
+              [],
+            5,
+            120,
+          ),
+          acceptanceFocus: cleanGeneratedList(
+            parsed.acceptanceFocus ||
+              parsed.acceptance_focus ||
+              parsed.acceptance ||
+              parsed.testFocus ||
+              [],
+            5,
+            120,
+          ),
           risks: Array.isArray(parsed.risks)
             ? parsed.risks.map((item) => cleanGeneratedMessage(item, 120)).filter(Boolean)
             : [],
@@ -319,6 +386,9 @@ function parseMilestoneReviewResponse(text) {
         summary: cleaned.slice(0, 420),
         nextInstruction: cleaned,
         shouldContinue: true,
+        needsIndependentVerification: false,
+        verificationCommands: [],
+        acceptanceFocus: [],
         risks: [],
       }
     : null;
@@ -339,6 +409,21 @@ export async function generateMilestoneReviewWithOllama({
     snapshot.thread.latestCodexSummary,
   );
   const pendingUserGuidance = safeText(snapshot.thread.pendingUserGuidance, "");
+  const supervisorRuleLines = buildSupervisorRuleLines(snapshot, englishPreferred);
+  const verificationCommands = [
+    ...(Array.isArray(snapshot.config?.verification?.commands)
+      ? snapshot.config.verification.commands
+      : []),
+    ...(Array.isArray(snapshot.profile?.resolved?.verification?.commands)
+      ? snapshot.profile.resolved.verification.commands
+      : []),
+    ...(Array.isArray(fallbackReview?.verificationCommands)
+      ? fallbackReview.verificationCommands
+      : []),
+  ]
+    .map((command) => safeText(command, ""))
+    .filter(Boolean)
+    .slice(0, 6);
   const contextBlocks = await collectContextBlocks(snapshot);
 
   const system = englishPreferred
@@ -347,8 +432,8 @@ export async function generateMilestoneReviewWithOllama({
 
   const prompt = [
     englishPreferred
-      ? "Return JSON: {\"summary\":\"...\",\"nextInstruction\":\"...\",\"shouldContinue\":true,\"risks\":[\"...\"]}"
-      : "请返回 JSON：{\"summary\":\"复盘摘要\",\"nextInstruction\":\"下一条发给 Codex 的简洁指令\",\"shouldContinue\":true,\"risks\":[\"需要注意的问题\"]}",
+      ? "Return JSON: {\"summary\":\"...\",\"nextInstruction\":\"...\",\"shouldContinue\":true,\"needsIndependentVerification\":true,\"verificationCommands\":[\"...\"],\"acceptanceFocus\":[\"...\"],\"risks\":[\"...\"]}"
+      : "请返回 JSON：{\"summary\":\"复盘摘要\",\"nextInstruction\":\"下一条发给 Codex 的简洁指令\",\"shouldContinue\":true,\"needsIndependentVerification\":true,\"verificationCommands\":[\"建议验证命令\"],\"acceptanceFocus\":[\"验收重点\"],\"risks\":[\"需要注意的问题\"]}",
     "",
     `Loop: ${safeText(snapshot.config.loopName, snapshot.config.projectName)}`,
     `Branch: ${safeText(snapshot.config.branch, "dev")}`,
@@ -359,11 +444,19 @@ export async function generateMilestoneReviewWithOllama({
     englishPreferred
       ? `Latest Codex completion:\n${latestCodexText.slice(0, 7000)}`
       : `Codex 最新完成结果：\n${latestCodexText.slice(0, 7000)}`,
+    supervisorRuleLines.length ? supervisorRuleLines.join("\n") : "",
     pendingUserGuidance
       ? englishPreferred
         ? `User added guidance while Codex was working: ${pendingUserGuidance}`
         : `用户在 Codex 工作期间补充的引导：${pendingUserGuidance}`
       : "",
+    verificationCommands.length
+      ? englishPreferred
+        ? `Available verification commands: ${verificationCommands.join(" ; ")}`
+        : `可用验证命令：${verificationCommands.join(" ; ")}`
+      : englishPreferred
+        ? "Available verification commands: none detected"
+        : "可用验证命令：暂未探测到",
     "",
     englishPreferred
       ? "Act like a PM + QA + real user: identify what is done, what still feels weak, whether independent testing is needed now, and write the next short actionable instruction. Avoid token-wasteful restatement."

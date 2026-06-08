@@ -116,6 +116,16 @@ function buildPromptPreview(prompt, maxLength = 180) {
   return summarizeForFollowup(prompt, maxLength);
 }
 
+function normalizeTextList(value, maxItems = 5, maxLength = 120) {
+  const items = Array.isArray(value)
+    ? value
+    : safeText(value, "").split(/\r?\n|[,，]/u);
+  return items
+    .map((item) => summarizeForFollowup(item, maxLength))
+    .filter(Boolean)
+    .slice(0, maxItems);
+}
+
 function normalizePositiveNumber(value, fallback, { min = 1 } = {}) {
   const nextValue = Number(value);
   if (!Number.isFinite(nextValue) || nextValue < min) {
@@ -404,6 +414,9 @@ function createThreadDefaults(config) {
     lastSupervisorReviewAt: "",
     lastSupervisorInstruction: "",
     lastSupervisorSource: "",
+    supervisorNeedsIndependentVerification: false,
+    lastSupervisorVerificationCommands: [],
+    lastSupervisorAcceptanceFocus: [],
     supervisorReviewWarning: "",
     lastUpdatedAt: nowIso(),
   };
@@ -1289,6 +1302,16 @@ function buildProcessStatus(snapshot) {
   const supervisorReview = safeText(snapshot.thread.lastSupervisorReview, "");
   const supervisorInstruction = safeText(snapshot.thread.lastSupervisorInstruction, "");
   const supervisorReviewWarning = safeText(snapshot.thread.supervisorReviewWarning, "");
+  const verificationCommands = normalizeTextList(
+    snapshot.thread.lastSupervisorVerificationCommands || [],
+    5,
+    120,
+  );
+  const acceptanceFocus = normalizeTextList(
+    snapshot.thread.lastSupervisorAcceptanceFocus || [],
+    5,
+    120,
+  );
   const isFinalizing =
     mode === "finalize_after_current" ||
     Boolean(snapshot.state.stopRequested || snapshot.state.finalizeRequested);
@@ -1343,6 +1366,12 @@ function buildProcessStatus(snapshot) {
       ? buildPromptPreview(supervisorInstruction, 180)
       : "",
     supervisorSource: snapshot.thread.lastSupervisorSource || "",
+    needsIndependentVerification: Boolean(
+      snapshot.thread.supervisorNeedsIndependentVerification,
+    ),
+    verificationCommands,
+    verificationCommandPreview: verificationCommands.join(" · "),
+    acceptanceFocusPreview: acceptanceFocus.join(" · "),
     supervisorReviewWarning,
     promptGenerationWarning,
     stopLimit: formatLoopStopLimit(snapshot.state.budgets || snapshot.config.budgets || {}),
@@ -1467,6 +1496,8 @@ export async function exportMobileView(startDir = process.cwd()) {
   const runtimeEvents = await readReadableRuntimeEvents(snapshot.paths.logPath);
   const strategy = buildContinuationStrategy(snapshot);
   const processStatus = buildProcessStatus(snapshot);
+  const supervisor = snapshot.profile?.resolved?.conversation?.supervisor || {};
+  const pendingGuidanceText = safeText(snapshot.thread.pendingUserGuidance, "");
   const boundThreadLabel = snapshot.thread.threadTitle || snapshot.thread.threadId;
   const bindingNote = safeText(
     snapshot.thread.note,
@@ -1504,6 +1535,18 @@ export async function exportMobileView(startDir = process.cwd()) {
     summary,
     strategy,
     processStatus,
+    supervisor: {
+      roleTraits: safeText(supervisor.roleTraits, ""),
+      testingRules: safeText(supervisor.testingRules, ""),
+      acceptanceCriteria: safeText(supervisor.acceptanceCriteria, ""),
+    },
+    pendingGuidance: {
+      text: pendingGuidanceText,
+      preview: buildPromptPreview(pendingGuidanceText),
+      hasPending: Boolean(pendingGuidanceText),
+      mergeTiming: "codex_completed",
+      mergeTimingLabel: "等 Codex 完成后合并到下一条指令",
+    },
     bindingNote,
     suggestedAction,
     latestPrompt: snapshot.thread.lastDispatchPrompt || "",
@@ -1598,6 +1641,18 @@ function buildThreadMirror(thread, state, overrides = {}) {
       overrides.lastSupervisorInstruction ?? thread.lastSupervisorInstruction ?? "",
     lastSupervisorSource:
       overrides.lastSupervisorSource ?? thread.lastSupervisorSource ?? "",
+    supervisorNeedsIndependentVerification:
+      overrides.supervisorNeedsIndependentVerification ??
+      thread.supervisorNeedsIndependentVerification ??
+      false,
+    lastSupervisorVerificationCommands:
+      overrides.lastSupervisorVerificationCommands ??
+      thread.lastSupervisorVerificationCommands ??
+      [],
+    lastSupervisorAcceptanceFocus:
+      overrides.lastSupervisorAcceptanceFocus ??
+      thread.lastSupervisorAcceptanceFocus ??
+      [],
     supervisorReviewWarning:
       overrides.supervisorReviewWarning ?? thread.supervisorReviewWarning ?? "",
     promptGenerationWarning:
@@ -3175,6 +3230,18 @@ async function resolveVisibleCodexSummary(
 function buildFallbackMilestoneReview(snapshot) {
   const latestCodexSummary = safeText(snapshot.thread.latestCodexSummary, "");
   const pendingGuidance = safeText(snapshot.thread.pendingUserGuidance, "");
+  const verificationCommands = normalizeTextList(
+    [
+      ...(Array.isArray(snapshot.config?.verification?.commands)
+        ? snapshot.config.verification.commands
+        : []),
+      ...(Array.isArray(snapshot.profile?.resolved?.verification?.commands)
+        ? snapshot.profile.resolved.verification.commands
+        : []),
+    ],
+    5,
+    120,
+  );
   const focus = firstNonEmpty(
     pendingGuidance,
     latestCodexSummary,
@@ -3192,6 +3259,12 @@ function buildFallbackMilestoneReview(snapshot) {
       summarizeForFollowup(focus, 260) +
       "。优先做一小批可验证改动；完成后回复改动摘要、验证结果和下一步建议。",
     shouldContinue: true,
+    needsIndependentVerification: true,
+    verificationCommands,
+    acceptanceFocus: [
+      "确认上一轮改动是否符合用户目标和文档规则。",
+      "优先检查最影响用户判断 loop 状态的可见问题。",
+    ],
     risks: [],
   };
 }
@@ -3199,13 +3272,25 @@ function buildFallbackMilestoneReview(snapshot) {
 function normalizeMilestoneReviewResult(result = {}, fallback = {}) {
   const summary = safeText(result.summary, fallback.summary);
   const nextInstruction = safeText(result.nextInstruction, fallback.nextInstruction);
-  const risks = Array.isArray(result.risks)
-    ? result.risks.map((item) => summarizeForFollowup(item, 120)).filter(Boolean)
-    : [];
+  const risks = normalizeTextList(result.risks, 5, 120);
+  const verificationCommands = normalizeTextList(
+    result.verificationCommands?.length ? result.verificationCommands : fallback.verificationCommands,
+    5,
+    120,
+  );
+  const acceptanceFocus = normalizeTextList(
+    result.acceptanceFocus?.length ? result.acceptanceFocus : fallback.acceptanceFocus,
+    5,
+    120,
+  );
   return {
     summary: summarizeForFollowup(summary, 420),
     nextInstruction: summarizeForFollowup(nextInstruction, 700),
     shouldContinue: result.shouldContinue !== false,
+    needsIndependentVerification:
+      result.needsIndependentVerification ?? fallback.needsIndependentVerification ?? false,
+    verificationCommands,
+    acceptanceFocus,
     risks,
   };
 }
@@ -3261,6 +3346,9 @@ export async function reviewCodexMilestone(
       lastSupervisorReviewAt: at,
       lastSupervisorInstruction: review.nextInstruction,
       lastSupervisorSource: source,
+      supervisorNeedsIndependentVerification: Boolean(review.needsIndependentVerification),
+      lastSupervisorVerificationCommands: review.verificationCommands,
+      lastSupervisorAcceptanceFocus: review.acceptanceFocus,
       supervisorReviewWarning: warning,
       latestSummary: review.summary,
       latestEventType: review.shouldContinue
@@ -3286,6 +3374,9 @@ export async function reviewCodexMilestone(
     warning,
     summary: review.summary,
     nextInstructionPreview: buildPromptPreview(review.nextInstruction),
+    needsIndependentVerification: Boolean(review.needsIndependentVerification),
+    verificationCommands: review.verificationCommands,
+    acceptanceFocus: review.acceptanceFocus,
     risks: review.risks,
   });
   await appendTranscriptEntry(snapshot.paths.transcriptPath, {
