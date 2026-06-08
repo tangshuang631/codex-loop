@@ -779,6 +779,47 @@ test("ollama generated follow-up is cleaned before it is sent to Codex", async (
   assert.doesNotMatch(generated, /think|message|JSON|^\{/i);
 });
 
+test("ollama follow-up does not defer ordinary product choices back to the user", async () => {
+  const configRoot = await createWorkspace();
+  await ensureLoopArtifacts(configRoot);
+  await saveUserOverrides(configRoot, {
+    conversation: {
+      language: "zh-CN",
+      promptGenerator: {
+        enabled: true,
+        provider: "ollama",
+        model: "qwen2.5:7b",
+        baseUrl: "http://127.0.0.1:11434",
+      },
+    },
+  });
+  await saveThreadBinding(configRoot, {
+    workspaceName: "demo",
+    threadTitle: "普通决策代理线程",
+    threadId: "thread-product-decision",
+    singleThreadMode: true,
+  });
+  await syncCodexThreadMirror(configRoot, {
+    latestCodexSummary: "Codex 询问如果没有偏好，是否等待用户确认后再继续。",
+  });
+  const snapshot = await readLoopSnapshot(configRoot);
+  const fetchImpl = async () => ({
+    ok: true,
+    json: async () => ({
+      response: "如果没有偏好，请等待用户确认后再继续。",
+    }),
+  });
+
+  const generated = await generatePromptWithOllama({
+    snapshot,
+    fallbackPrompt: "继续推进下一步。",
+    fetchImpl,
+  });
+
+  assert.doesNotMatch(generated, /等待.*用户|用户确认|没有偏好/);
+  assert.match(generated, /最安全|可验证|继续/);
+});
+
 test("ollama prompt includes pending user guidance as next-turn context", async () => {
   const configRoot = await createWorkspace();
   await ensureLoopArtifacts(configRoot);

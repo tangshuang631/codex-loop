@@ -54,7 +54,19 @@ function extractJsonMessage(text) {
   return "";
 }
 
-function cleanGeneratedMessage(value, maxChars = 900) {
+function shouldReplaceOrdinaryUserDeferral(text) {
+  return /(?:如果)?没有偏好|等待.*用户|用户确认|待.*确认|等.*确认后再继续|defer to the human|wait for user confirmation/i.test(
+    safeText(text, ""),
+  );
+}
+
+function decisiveContinuationFallback(englishPreferred = false) {
+  return englishPreferred
+    ? "Choose the safest small verifiable path from the project docs and current rules, then continue. After finishing, report the change summary, verification result, and the next recommended step."
+    : "请基于项目文档和现有规则，直接选择最安全、最小、可验证的方案继续推进；完成后给出改动摘要、验证结果和下一步建议。";
+}
+
+function cleanGeneratedMessage(value, maxChars = 900, options = {}) {
   let text = safeText(value, "");
   if (!text) return "";
 
@@ -73,6 +85,10 @@ function cleanGeneratedMessage(value, maxChars = 900) {
     .join("\n")
     .replace(/^(?:message|prompt|instruction|text|下一步指令|回复)[:：]\s*/i, "")
     .trim();
+
+  if (options.replaceOrdinaryUserDeferral && shouldReplaceOrdinaryUserDeferral(text)) {
+    text = decisiveContinuationFallback(options.englishPreferred);
+  }
 
   if (text.length <= maxChars) return text;
   const clipped = text.slice(0, maxChars);
@@ -169,7 +185,10 @@ export async function generatePromptWithOllama({
   }
 
   const data = await response.json();
-  const generated = cleanGeneratedMessage(data.response);
+  const generated = cleanGeneratedMessage(data.response, 900, {
+    replaceOrdinaryUserDeferral: true,
+    englishPreferred,
+  });
   if (!generated) {
     throw new Error("ollama returned an empty prompt");
   }
