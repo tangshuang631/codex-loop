@@ -268,3 +268,138 @@ export async function generateCodexSummaryWithOllama({
   }
   return generated;
 }
+
+function parseMilestoneReviewResponse(text) {
+  const value = safeText(text, "");
+  if (!value) {
+    return null;
+  }
+
+  const candidates = [value];
+  const firstBrace = value.indexOf("{");
+  const lastBrace = value.lastIndexOf("}");
+  if (firstBrace >= 0 && lastBrace > firstBrace) {
+    candidates.push(value.slice(firstBrace, lastBrace + 1));
+  }
+
+  for (const candidate of candidates) {
+    try {
+      const parsed = JSON.parse(candidate);
+      if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+        return {
+          summary: cleanGeneratedMessage(
+            parsed.summary || parsed.review || parsed.result || "",
+            420,
+          ),
+          nextInstruction: cleanGeneratedMessage(
+            parsed.nextInstruction ||
+              parsed.next_instruction ||
+              parsed.instruction ||
+              parsed.next ||
+              "",
+            700,
+            { replaceOrdinaryUserDeferral: true },
+          ),
+          shouldContinue: parsed.shouldContinue !== false,
+          risks: Array.isArray(parsed.risks)
+            ? parsed.risks.map((item) => cleanGeneratedMessage(item, 120)).filter(Boolean)
+            : [],
+        };
+      }
+    } catch {
+      // Try the next candidate, then fall back to free-form text.
+    }
+  }
+
+  const cleaned = cleanGeneratedMessage(value, 700, {
+    replaceOrdinaryUserDeferral: true,
+  });
+  return cleaned
+    ? {
+        summary: cleaned.slice(0, 420),
+        nextInstruction: cleaned,
+        shouldContinue: true,
+        risks: [],
+      }
+    : null;
+}
+
+export async function generateMilestoneReviewWithOllama({
+  snapshot,
+  fallbackReview,
+  fetchImpl = globalThis.fetch,
+}) {
+  const generator = snapshot.profile?.resolved?.conversation?.promptGenerator || {};
+  const baseUrl = safeText(generator.baseUrl, "http://127.0.0.1:11434");
+  const model = safeText(generator.model, "qwen2.5:7b");
+  const language = safeText(snapshot.profile?.resolved?.conversation?.language, "zh-CN");
+  const englishPreferred = language.toLowerCase().startsWith("en");
+  const latestCodexText = safeText(
+    snapshot.codexConversation?.latestCompletion?.text,
+    snapshot.thread.latestCodexSummary,
+  );
+  const pendingUserGuidance = safeText(snapshot.thread.pendingUserGuidance, "");
+  const contextBlocks = await collectContextBlocks(snapshot);
+
+  const system = englishPreferred
+    ? "You are codex-loop's supervisor NPC: product manager, QA tester, and realistic user. Review Codex's latest completed milestone, decide whether it is safe to continue, and write the next concise instruction. Do not ask the human for ordinary product/design choices; decide from docs and rules. Return strict JSON only."
+    : "你是 codex-loop 的监督 NPC，同时扮演产品经理、测试人员和真实挑剔用户。请复盘 Codex 刚完成的里程碑，判断是否可以继续，并生成下一条简洁指令。普通产品/设计/实现取舍由你基于文档和规则决定，不要交回给用户。只返回严格 JSON。";
+
+  const prompt = [
+    englishPreferred
+      ? "Return JSON: {\"summary\":\"...\",\"nextInstruction\":\"...\",\"shouldContinue\":true,\"risks\":[\"...\"]}"
+      : "请返回 JSON：{\"summary\":\"复盘摘要\",\"nextInstruction\":\"下一条发给 Codex 的简洁指令\",\"shouldContinue\":true,\"risks\":[\"需要注意的问题\"]}",
+    "",
+    `Loop: ${safeText(snapshot.config.loopName, snapshot.config.projectName)}`,
+    `Branch: ${safeText(snapshot.config.branch, "dev")}`,
+    `Thread: ${safeText(snapshot.thread.threadTitle, snapshot.thread.threadId)}`,
+    englishPreferred
+      ? `User goal: ${safeText(snapshot.thread.lastUserInstructionSummary, "Continue current loop")}`
+      : `用户目标：${safeText(snapshot.thread.lastUserInstructionSummary, "继续当前 loop")}`,
+    englishPreferred
+      ? `Latest Codex completion:\n${latestCodexText.slice(0, 7000)}`
+      : `Codex 最新完成结果：\n${latestCodexText.slice(0, 7000)}`,
+    pendingUserGuidance
+      ? englishPreferred
+        ? `User added guidance while Codex was working: ${pendingUserGuidance}`
+        : `用户在 Codex 工作期间补充的引导：${pendingUserGuidance}`
+      : "",
+    "",
+    englishPreferred
+      ? "Act like a PM + QA + real user: identify what is done, what still feels weak, whether independent testing is needed now, and write the next short actionable instruction. Avoid token-wasteful restatement."
+      : "请像产品经理 + 测试人员 + 真实用户一样判断：完成了什么、哪里还不够好、是否需要现在做独立测试、下一步应该让 Codex 做什么。不要重复大段背景，不要浪费 token。",
+    englishPreferred
+      ? "Only set shouldContinue=false for destructive, irreversible, credential, permission, security, high-cost, or genuinely blocked choices."
+      : "只有遇到高风险删除、不可逆操作、凭证权限、安全强风险、高成本选择或真正阻塞时，才把 shouldContinue 设为 false。",
+    "",
+    contextBlocks.length ? contextBlocks.join("\n\n") : "",
+    "",
+    englishPreferred ? "Fallback review if model is unsure:" : "如果模型不确定，可参考这个降级复盘边界：",
+    JSON.stringify(fallbackReview),
+  ].join("\n");
+
+  const response = await fetchImpl(`${baseUrl}/api/generate`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      model,
+      stream: false,
+      think: false,
+      system,
+      prompt,
+    }),
+  });
+
+  if (!response.ok) {
+    throw new Error(`ollama milestone review request failed with status ${response.status}`);
+  }
+
+  const data = await response.json();
+  const parsed = parseMilestoneReviewResponse(data.response);
+  if (!parsed?.summary && !parsed?.nextInstruction) {
+    throw new Error("ollama returned an empty milestone review");
+  }
+  return parsed;
+}

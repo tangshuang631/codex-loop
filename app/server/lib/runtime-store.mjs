@@ -13,6 +13,7 @@ import { readLauncherStatus } from "./launcher-status.mjs";
 import { planLoopWithFallback } from "./ollama-loop-planner.mjs";
 import {
   generateCodexSummaryWithOllama,
+  generateMilestoneReviewWithOllama,
   generatePromptWithOllama,
 } from "./ollama-prompt-generator.mjs";
 import { resolveProjectLayout } from "./paths.mjs";
@@ -175,6 +176,8 @@ function readableRuntimeEventTitle(type) {
     codex_followup_dispatched: "正在等待 Codex 回复",
     codex_followup_sent_waiting: "指令已送达，等待 Codex",
     codex_followup_completed: "Codex 已完成一轮",
+    supervisor_review_completed: "已完成监督复盘",
+    supervisor_review_skipped: "已跳过监督复盘",
     codex_thread_mirror_synced: "已同步 Codex 记录",
     codex_conversation_mirror_synced: "已同步 Codex 对话",
     codex_followup_failed: "续跑失败",
@@ -397,6 +400,11 @@ function createThreadDefaults(config) {
     lastCompletionAt: "",
     lastDispatchPrompt: "",
     lastContinuationError: "",
+    lastSupervisorReview: "",
+    lastSupervisorReviewAt: "",
+    lastSupervisorInstruction: "",
+    lastSupervisorSource: "",
+    supervisorReviewWarning: "",
     lastUpdatedAt: nowIso(),
   };
 }
@@ -1572,6 +1580,16 @@ function buildThreadMirror(thread, state, overrides = {}) {
     pendingUserGuidanceAt:
       overrides.pendingUserGuidanceAt ?? thread.pendingUserGuidanceAt ?? "",
     lastContinuationError,
+    lastSupervisorReview:
+      overrides.lastSupervisorReview ?? thread.lastSupervisorReview ?? "",
+    lastSupervisorReviewAt:
+      overrides.lastSupervisorReviewAt ?? thread.lastSupervisorReviewAt ?? "",
+    lastSupervisorInstruction:
+      overrides.lastSupervisorInstruction ?? thread.lastSupervisorInstruction ?? "",
+    lastSupervisorSource:
+      overrides.lastSupervisorSource ?? thread.lastSupervisorSource ?? "",
+    supervisorReviewWarning:
+      overrides.supervisorReviewWarning ?? thread.supervisorReviewWarning ?? "",
     promptGenerationWarning:
       overrides.promptGenerationWarning ?? thread.promptGenerationWarning ?? "",
     lastUpdatedAt: overrides.lastUpdatedAt ?? nowIso(),
@@ -1615,7 +1633,10 @@ function buildFollowupPrompt(snapshot) {
   const englishPreferred = language.startsWith("en");
   const loopName = safeText(snapshot.config.loopName, snapshot.config.projectName || "current loop");
   const branch = safeText(snapshot.config.branch, "dev");
-  const latestSummary = safeText(snapshot.thread.latestCodexSummary, "");
+  const latestSummary = firstNonEmpty(
+    safeText(snapshot.thread.lastSupervisorInstruction, ""),
+    safeText(snapshot.thread.latestCodexSummary, ""),
+  );
   const lastAction = safeText(snapshot.thread.lastAssistantActionSummary, "");
   const userIntent = safeText(
     snapshot.thread.lastUserInstructionSummary,
@@ -1649,6 +1670,7 @@ function buildVisibleThreadPrompt(snapshot) {
   ).toLowerCase();
   const englishPreferred = language.startsWith("en");
   const focus = firstNonEmpty(
+    summarizeForFollowup(snapshot.thread.lastSupervisorInstruction),
     summarizeForFollowup(snapshot.thread.latestCodexSummary),
     summarizeForFollowup(snapshot.thread.lastAssistantActionSummary),
     summarizeForFollowup(snapshot.thread.lastUserInstructionSummary),
@@ -3138,6 +3160,133 @@ async function resolveVisibleCodexSummary(
       error: safeText(error?.message, "本地模型整理 Codex 回复失败。"),
     };
   }
+}
+
+function buildFallbackMilestoneReview(snapshot) {
+  const latestCodexSummary = safeText(snapshot.thread.latestCodexSummary, "");
+  const pendingGuidance = safeText(snapshot.thread.pendingUserGuidance, "");
+  const focus = firstNonEmpty(
+    pendingGuidance,
+    latestCodexSummary,
+    snapshot.thread.lastAssistantActionSummary,
+    snapshot.thread.lastUserInstructionSummary,
+    "继续当前最高优先级、边界清晰、可验证的小任务。",
+  );
+
+  return {
+    summary: latestCodexSummary
+      ? "Codex 已完成上一轮，可进入监督复盘后的下一步推进。"
+      : "Codex 已返回完成信号，可继续下一轮小步推进。",
+    nextInstruction:
+      "请基于项目文档、开发规则和上一轮结果，继续推进：" +
+      summarizeForFollowup(focus, 260) +
+      "。优先做一小批可验证改动；完成后回复改动摘要、验证结果和下一步建议。",
+    shouldContinue: true,
+    risks: [],
+  };
+}
+
+function normalizeMilestoneReviewResult(result = {}, fallback = {}) {
+  const summary = safeText(result.summary, fallback.summary);
+  const nextInstruction = safeText(result.nextInstruction, fallback.nextInstruction);
+  const risks = Array.isArray(result.risks)
+    ? result.risks.map((item) => summarizeForFollowup(item, 120)).filter(Boolean)
+    : [];
+  return {
+    summary: summarizeForFollowup(summary, 420),
+    nextInstruction: summarizeForFollowup(nextInstruction, 700),
+    shouldContinue: result.shouldContinue !== false,
+    risks,
+  };
+}
+
+export async function reviewCodexMilestone(
+  startDir = process.cwd(),
+  {
+    generateMilestoneReview = generateMilestoneReviewWithOllama,
+  } = {},
+) {
+  const snapshot = await ensureLoopArtifacts(startDir);
+  const at = nowIso();
+  const fallbackReview = buildFallbackMilestoneReview(snapshot);
+  const generator = snapshot.profile?.resolved?.conversation?.promptGenerator || {};
+  const useOllamaReview =
+    (generator.enabled === true || generator.enabled === "auto") &&
+    generator.provider === "ollama";
+  const ollamaAutoMode = generator.enabled === "auto";
+
+  let review = fallbackReview;
+  let source = "template";
+  let warning = "";
+
+  if (useOllamaReview) {
+    try {
+      review = normalizeMilestoneReviewResult(
+        await generateMilestoneReview({
+          snapshot,
+          fallbackReview,
+        }),
+        fallbackReview,
+      );
+      source = "ollama";
+    } catch (error) {
+      warning = safeText(
+        error?.message,
+        "本地模型监督复盘失败，已使用精简复盘继续推进。",
+      );
+      if (!ollamaAutoMode) {
+        throw new Error("本地模型监督复盘失败，请检查 Ollama 和模型配置。");
+      }
+      review = fallbackReview;
+      source = "template";
+    }
+  }
+
+  const nextThread = await persistThreadMirror(
+    snapshot.paths.threadPath,
+    snapshot.thread,
+    snapshot.state,
+    {
+      lastSupervisorReview: review.summary,
+      lastSupervisorReviewAt: at,
+      lastSupervisorInstruction: review.nextInstruction,
+      lastSupervisorSource: source,
+      supervisorReviewWarning: warning,
+      latestSummary: review.summary,
+      latestEventType: review.shouldContinue
+        ? "supervisor_review_completed"
+        : "supervisor_review_skipped",
+      lastContinuationError: review.shouldContinue ? "" : "监督复盘建议暂停等待人工确认。",
+      lastUpdatedAt: at,
+    },
+  );
+
+  await updateRegistryLoopBinding(
+    snapshot.paths.codexLoopRoot,
+    snapshot.config.currentRunId,
+    (loop) => ({ threadBinding: { ...(loop.threadBinding || {}), ...nextThread } }),
+  );
+  await appendJsonLine(snapshot.paths.logPath, {
+    type: review.shouldContinue
+      ? "supervisor_review_completed"
+      : "supervisor_review_skipped",
+    at,
+    threadId: nextThread.threadId,
+    source,
+    warning,
+    summary: review.summary,
+    nextInstructionPreview: buildPromptPreview(review.nextInstruction),
+    risks: review.risks,
+  });
+  await appendTranscriptEntry(snapshot.paths.transcriptPath, {
+    at,
+    activeTask: snapshot.state.activeTask,
+    note: "supervisor_review_completed",
+    summary: review.summary + " 下一步：" + buildPromptPreview(review.nextInstruction),
+    mode: snapshot.state.mode,
+  });
+
+  return readLoopSnapshot(startDir);
 }
 
 export async function syncCodexThreadMirror(

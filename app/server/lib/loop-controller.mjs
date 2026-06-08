@@ -1,6 +1,7 @@
 import {
   markContinuationFailed,
   readLoopSnapshot,
+  reviewCodexMilestone,
   requestGracefulStop,
   runLoopTurn,
 } from "./runtime-store.mjs";
@@ -24,6 +25,7 @@ export function createLoopController({
   readSnapshot = readLoopSnapshot,
   runTurn = runLoopTurn,
   markFailed = markContinuationFailed,
+  reviewCompletion = reviewCodexMilestone,
   requestStop = requestGracefulStop,
   schedule = setTimeout,
   cancel = clearTimeout,
@@ -81,6 +83,14 @@ export function createLoopController({
 
         active.lastCompletionAt = completionAt;
         active.awaitingCompletion = false;
+        const review = await reviewCompletion(startDir, snapshot);
+        if (
+          review?.shouldContinue === false ||
+          review?.thread?.latestEventType === "supervisor_review_skipped"
+        ) {
+          activeLoops.delete(startDir);
+          return;
+        }
       }
 
       await runTurn(startDir);

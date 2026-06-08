@@ -44,6 +44,7 @@ test("loop controller waits for a real completion signal before dispatching the 
 
   const controller = createLoopController({
     readSnapshot: async () => snapshots[Math.min(readCount++, snapshots.length - 1)],
+    reviewCompletion: async () => {},
     runTurn: async () => {
       runTurnCount += 1;
     },
@@ -63,6 +64,103 @@ test("loop controller waits for a real completion signal before dispatching the 
 
   assert.equal(await flushScheduled(scheduled), true);
   assert.equal(runTurnCount, 2);
+});
+
+test("loop controller reviews a completed Codex turn before dispatching the next turn", async () => {
+  let readCount = 0;
+  const calls = [];
+  const scheduled = [];
+
+  const snapshots = [
+    {
+      state: { mode: "running", stopRequested: false, finalizeRequested: false },
+      thread: { continuationStatus: "idle", lastCompletionAt: "" },
+    },
+    {
+      state: { mode: "running", stopRequested: false, finalizeRequested: false },
+      thread: { continuationStatus: "dispatching", lastCompletionAt: "" },
+    },
+    {
+      state: { mode: "running", stopRequested: false, finalizeRequested: false },
+      thread: { continuationStatus: "idle", lastCompletionAt: "2026-06-08T02:15:00.000Z" },
+    },
+    {
+      state: { mode: "running", stopRequested: false, finalizeRequested: false },
+      thread: { continuationStatus: "dispatching", lastCompletionAt: "2026-06-08T02:15:00.000Z" },
+    },
+  ];
+
+  const controller = createLoopController({
+    readSnapshot: async () => snapshots[Math.min(readCount++, snapshots.length - 1)],
+    reviewCompletion: async (startDir, snapshot) => {
+      calls.push(`review:${startDir}:${snapshot.thread.lastCompletionAt}`);
+    },
+    runTurn: async (startDir) => {
+      calls.push(`run:${startDir}`);
+    },
+    schedule: (fn) => {
+      scheduled.push(fn);
+      return fn;
+    },
+    cancel: () => {},
+  });
+
+  assert.equal(await controller.start("demo"), true);
+  assert.equal(await flushScheduled(scheduled), true);
+  assert.deepEqual(calls, ["run:demo"]);
+
+  assert.equal(await flushScheduled(scheduled), true);
+  assert.deepEqual(calls, [
+    "run:demo",
+    "review:demo:2026-06-08T02:15:00.000Z",
+    "run:demo",
+  ]);
+});
+
+test("loop controller stops before dispatching when supervisor review asks to pause", async () => {
+  let readCount = 0;
+  const calls = [];
+  const scheduled = [];
+
+  const snapshots = [
+    {
+      state: { mode: "running", stopRequested: false, finalizeRequested: false },
+      thread: { continuationStatus: "idle", lastCompletionAt: "" },
+    },
+    {
+      state: { mode: "running", stopRequested: false, finalizeRequested: false },
+      thread: { continuationStatus: "idle", lastCompletionAt: "2026-06-08T02:30:00.000Z" },
+    },
+  ];
+
+  const controller = createLoopController({
+    readSnapshot: async () => snapshots[Math.min(readCount++, snapshots.length - 1)],
+    reviewCompletion: async () => {
+      calls.push("review");
+      return {
+        thread: {
+          latestEventType: "supervisor_review_skipped",
+          lastContinuationError: "监督复盘建议暂停等待人工确认。",
+        },
+      };
+    },
+    runTurn: async () => {
+      calls.push("run");
+    },
+    schedule: (fn) => {
+      scheduled.push(fn);
+      return fn;
+    },
+    cancel: () => {},
+  });
+
+  assert.equal(await controller.start("demo"), true);
+  assert.equal(await flushScheduled(scheduled), true);
+  assert.deepEqual(calls, ["run"]);
+
+  assert.equal(await flushScheduled(scheduled), true);
+  assert.deepEqual(calls, ["run", "review"]);
+  assert.equal(controller.isRunning("demo"), false);
 });
 
 test("loop controller records a visible failure when a turn crashes", async () => {

@@ -21,6 +21,7 @@ import {
   selectLoop,
   renameLoop,
   recordHeartbeat,
+  reviewCodexMilestone,
   savePendingGuidance,
   requestGracefulStop,
   saveThreadBinding,
@@ -632,6 +633,56 @@ test("runLoopTurn tries ollama by default as the global loop brain", async () =>
   assert.equal(generatorCalled, true);
   assert.match(dispatchedPrompt, /产品经理、测试人员和真实用户视角/);
   assert.equal(snapshot.thread.latestEventType, "codex_followup_completed");
+});
+
+test("milestone review stores supervisor guidance that the next loop turn uses", async () => {
+  const configRoot = await createWorkspace();
+  await ensureLoopArtifacts(configRoot);
+  await saveThreadBinding(configRoot, {
+    workspaceName: "demo",
+    threadTitle: "监督复盘线程",
+    threadId: "thread-supervisor-review",
+    singleThreadMode: true,
+  });
+  await syncCodexThreadMirror(configRoot, {
+    lastUserInstructionSummary: "把 codex-loop 做成可长期使用的产品",
+    latestCodexSummary: "Codex 已完成首页状态精简和移动端观察入口，需要决定下一批验收点。",
+  });
+
+  let reviewSawSummary = "";
+  const reviewed = await reviewCodexMilestone(configRoot, {
+    generateMilestoneReview: async ({ snapshot }) => {
+      reviewSawSummary = snapshot.thread.latestCodexSummary;
+      return {
+        summary: "监督复盘：上一批可见状态已完成，下一轮要用真实用户视角做移动端验收。",
+        nextInstruction:
+          "先以真实用户和测试人员视角验收移动端 loop 观察页，修复最影响判断状态的问题；不要扩大到新功能。",
+        shouldContinue: true,
+        risks: ["移动端信息过密"],
+      };
+    },
+  });
+
+  assert.match(reviewSawSummary, /移动端观察入口/);
+  assert.match(reviewed.thread.lastSupervisorReview, /监督复盘/);
+  assert.match(reviewed.thread.lastSupervisorInstruction, /真实用户和测试人员视角/);
+  assert.equal(reviewed.thread.lastSupervisorSource, "ollama");
+
+  let dispatchedPrompt = "";
+  await runLoopTurn(configRoot, {
+    generateFollowupPrompt: async ({ fallbackPrompt }) => fallbackPrompt,
+    dispatchThreadMessage: async ({ prompt }) => {
+      dispatchedPrompt = prompt;
+      return {
+        deliveryObserved: true,
+        completionObserved: false,
+        lastMessage: "",
+      };
+    },
+  });
+
+  assert.match(dispatchedPrompt, /真实用户和测试人员视角/);
+  assert.match(dispatchedPrompt, /不要扩大到新功能/);
 });
 
 test("runLoopTurn degrades to compact template when default ollama is unavailable", async () => {
