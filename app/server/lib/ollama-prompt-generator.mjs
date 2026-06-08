@@ -21,6 +21,71 @@ async function readSnippet(targetPath, maxChars = 1800) {
   }
 }
 
+function extractJsonMessage(text) {
+  const value = safeText(text, "");
+  if (!value) return "";
+
+  const candidates = [value];
+  const firstBrace = value.indexOf("{");
+  const lastBrace = value.lastIndexOf("}");
+  if (firstBrace >= 0 && lastBrace > firstBrace) {
+    candidates.push(value.slice(firstBrace, lastBrace + 1));
+  }
+
+  for (const candidate of candidates) {
+    try {
+      const parsed = JSON.parse(candidate);
+      if (typeof parsed === "string") return safeText(parsed, "");
+      if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+        for (const key of ["message", "prompt", "instruction", "text", "content", "next"]) {
+          const picked = safeText(parsed[key], "");
+          if (picked) return picked;
+        }
+      }
+      if (Array.isArray(parsed)) {
+        const picked = parsed.map((item) => safeText(item, "")).filter(Boolean).join("\n");
+        if (picked) return picked;
+      }
+    } catch {
+      // Keep trying other candidates; malformed JSON should not block a usable prompt.
+    }
+  }
+
+  return "";
+}
+
+function cleanGeneratedMessage(value, maxChars = 900) {
+  let text = safeText(value, "");
+  if (!text) return "";
+
+  text = text
+    .replace(/<think\b[^>]*>[\s\S]*?<\/think>/gi, "")
+    .replace(/<\/?think\b[^>]*>/gi, "")
+    .replace(/```(?:json|text|markdown)?\s*([\s\S]*?)```/gi, "$1")
+    .trim();
+
+  text = extractJsonMessage(text) || text;
+  text = text
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .filter((line) => !/^(以下是|生成结果|我的思考|原因[:：]|解释[:：])/i.test(line))
+    .join("\n")
+    .replace(/^(?:message|prompt|instruction|text|下一步指令|回复)[:：]\s*/i, "")
+    .trim();
+
+  if (text.length <= maxChars) return text;
+  const clipped = text.slice(0, maxChars);
+  const boundary = Math.max(
+    clipped.lastIndexOf("。"),
+    clipped.lastIndexOf("！"),
+    clipped.lastIndexOf("？"),
+    clipped.lastIndexOf("."),
+    clipped.lastIndexOf("\n"),
+  );
+  return `${clipped.slice(0, boundary > 160 ? boundary + 1 : maxChars).trim()}…`;
+}
+
 async function collectContextBlocks(snapshot) {
   const files = Array.isArray(snapshot.config.startContextPaths)
     ? snapshot.config.startContextPaths
@@ -104,7 +169,7 @@ export async function generatePromptWithOllama({
   }
 
   const data = await response.json();
-  const generated = safeText(data.response, "");
+  const generated = cleanGeneratedMessage(data.response);
   if (!generated) {
     throw new Error("ollama returned an empty prompt");
   }
@@ -158,7 +223,7 @@ export async function generateCodexSummaryWithOllama({
   }
 
   const data = await response.json();
-  const generated = safeText(data.response, "");
+  const generated = cleanGeneratedMessage(data.response, 360);
   if (!generated) {
     throw new Error("ollama returned an empty summary");
   }

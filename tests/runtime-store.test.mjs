@@ -737,6 +737,48 @@ test("ollama requests disable thinking output for dashboard summaries and prompt
   assert.equal(requestBodies[1].think, false);
 });
 
+test("ollama generated follow-up is cleaned before it is sent to Codex", async () => {
+  const configRoot = await createWorkspace();
+  await ensureLoopArtifacts(configRoot);
+  await saveUserOverrides(configRoot, {
+    conversation: {
+      language: "zh-CN",
+      promptGenerator: {
+        enabled: true,
+        provider: "ollama",
+        model: "qwen2.5:7b",
+        baseUrl: "http://127.0.0.1:11434",
+      },
+    },
+  });
+  await saveThreadBinding(configRoot, {
+    workspaceName: "demo",
+    threadTitle: "清洗模型输出线程",
+    threadId: "thread-clean-ollama",
+    singleThreadMode: true,
+  });
+  const snapshot = await readLoopSnapshot(configRoot);
+  const fetchImpl = async () => ({
+    ok: true,
+    json: async () => ({
+      response:
+        '<think>先分析很多内部推理，不应该发给 Codex。</think>\n{"message":"继续按文档规则推进核心链路，只做下一批可验证的小改动，并在完成后给出验证结果。"}',
+    }),
+  });
+
+  const generated = await generatePromptWithOllama({
+    snapshot,
+    fallbackPrompt: "继续推进下一步。",
+    fetchImpl,
+  });
+
+  assert.equal(
+    generated,
+    "继续按文档规则推进核心链路，只做下一批可验证的小改动，并在完成后给出验证结果。",
+  );
+  assert.doesNotMatch(generated, /think|message|JSON|^\{/i);
+});
+
 test("ollama prompt includes pending user guidance as next-turn context", async () => {
   const configRoot = await createWorkspace();
   await ensureLoopArtifacts(configRoot);
