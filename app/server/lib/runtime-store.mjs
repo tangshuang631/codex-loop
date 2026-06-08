@@ -11,7 +11,10 @@ import { dispatchThreadMessage as defaultDispatchThreadMessage } from "./codex-d
 import { readCodexConversationMirror } from "./codex-session-reader.mjs";
 import { readLauncherStatus } from "./launcher-status.mjs";
 import { planLoopWithFallback } from "./ollama-loop-planner.mjs";
-import { generatePromptWithOllama } from "./ollama-prompt-generator.mjs";
+import {
+  generateCodexSummaryWithOllama,
+  generatePromptWithOllama,
+} from "./ollama-prompt-generator.mjs";
 import { resolveProjectLayout } from "./paths.mjs";
 
 function nowIso() {
@@ -1652,9 +1655,19 @@ export async function ensureLoopArtifacts(startDir = process.cwd()) {
 
   if (shouldSyncCodexConversation) {
     const syncedAt = codexConversation.latestCompletion.at || nowIso();
+    const visibleCompletion = await resolveVisibleCodexSummary(
+      {
+        config,
+        state,
+        thread,
+        profile,
+        paths,
+      },
+      latestCompletionText,
+    );
     thread = buildThreadMirror(thread, state, {
       currentRunId: runId,
-      latestCodexSummary: latestCompletionText,
+      latestCodexSummary: visibleCompletion.summary,
       latestSummary: "Codex 已返回最新进展，首页已同步。",
       continuationStatus: "idle",
       continuationCycleCount:
@@ -1677,6 +1690,8 @@ export async function ensureLoopArtifacts(startDir = process.cwd()) {
       threadId: thread.threadId,
       latestAssistantAt: codexConversation.latestCompletion.at,
       latestAssistantPreview: summarizeForFollowup(latestCompletionText),
+      summarySource: visibleCompletion.source,
+      summaryError: visibleCompletion.error,
     });
   }
 
@@ -2650,9 +2665,55 @@ export async function exportLoopSummary(startDir = process.cwd()) {
   return summaryPayload;
 }
 
-export async function syncCodexThreadMirror(startDir = process.cwd(), payload = {}) {
+async function resolveVisibleCodexSummary(
+  snapshot,
+  rawCodexSummary,
+  {
+    generateCodexSummary = generateCodexSummaryWithOllama,
+  } = {},
+) {
+  const cleanSummary = safeText(rawCodexSummary, "");
+  const generator = snapshot.profile?.resolved?.conversation?.promptGenerator || {};
+  if (!cleanSummary || !generator.enabled || generator.provider !== "ollama") {
+    return {
+      summary: cleanSummary,
+      source: "raw",
+      error: "",
+    };
+  }
+
+  try {
+    return {
+      summary: await generateCodexSummary({
+        snapshot,
+        codexText: cleanSummary,
+      }),
+      source: "ollama",
+      error: "",
+    };
+  } catch (error) {
+    return {
+      summary: cleanSummary,
+      source: "raw",
+      error: safeText(error?.message, "本地模型整理 Codex 回复摘要失败。"),
+    };
+  }
+}
+
+export async function syncCodexThreadMirror(
+  startDir = process.cwd(),
+  payload = {},
+  {
+    generateCodexSummary = generateCodexSummaryWithOllama,
+  } = {},
+) {
   const snapshot = await ensureLoopArtifacts(startDir);
-  const nextCodexSummary = sanitizeCodexSummary(payload.latestCodexSummary, {
+  const visibleSummary = await resolveVisibleCodexSummary(
+    snapshot,
+    payload.latestCodexSummary,
+    { generateCodexSummary },
+  );
+  const nextCodexSummary = sanitizeCodexSummary(visibleSummary.summary, {
     previous: snapshot.thread.latestCodexSummary,
     threadId: snapshot.thread.threadId,
   });
@@ -2702,6 +2763,8 @@ export async function syncCodexThreadMirror(startDir = process.cwd(), payload = 
     type: "codex_thread_mirror_synced",
     at: nextThread.lastUpdatedAt,
     threadId: nextThread.threadId,
+    summarySource: visibleSummary.source,
+    summaryError: visibleSummary.error,
   });
   if (codexSummaryChanged) {
     await appendJsonLine(snapshot.paths.logPath, {

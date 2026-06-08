@@ -79,6 +79,7 @@ export async function generatePromptWithOllama({
     body: JSON.stringify({
       model,
       stream: false,
+      think: false,
       system,
       prompt,
     }),
@@ -92,6 +93,61 @@ export async function generatePromptWithOllama({
   const generated = safeText(data.response, "");
   if (!generated) {
     throw new Error("ollama returned an empty prompt");
+  }
+  return generated;
+}
+
+export async function generateCodexSummaryWithOllama({
+  snapshot,
+  codexText,
+  fetchImpl = globalThis.fetch,
+}) {
+  const generator = snapshot.profile?.resolved?.conversation?.promptGenerator || {};
+  const baseUrl = safeText(generator.baseUrl, "http://127.0.0.1:11434");
+  const model = safeText(generator.model, "qwen2.5:7b");
+  const language = safeText(snapshot.profile?.resolved?.conversation?.language, "zh-CN");
+  const sourceText = safeText(codexText, "");
+  if (!sourceText) {
+    return "";
+  }
+
+  const system =
+    language.toLowerCase().startsWith("en")
+      ? "Summarize the latest Codex reply for a product dashboard. Return only the concise summary."
+      : "把最新 Codex 回复整理成产品首页可读的中文摘要。只返回摘要正文。";
+
+  const prompt = [
+    `循环名称：${safeText(snapshot.config.loopName, snapshot.config.projectName)}`,
+    `用户目标摘要：${safeText(snapshot.thread.lastUserInstructionSummary, "继续当前循环")}`,
+    "请用 1-2 句总结 Codex 这一轮真正完成了什么、是否需要用户注意。",
+    "不要输出 JSON，不要输出调试信息，不要复述线程 ID。",
+    "",
+    "Codex 原始回复：",
+    sourceText.slice(0, 6000),
+  ].join("\n");
+
+  const response = await fetchImpl(`${baseUrl}/api/generate`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      model,
+      stream: false,
+      think: false,
+      system,
+      prompt,
+    }),
+  });
+
+  if (!response.ok) {
+    throw new Error(`ollama summary request failed with status ${response.status}`);
+  }
+
+  const data = await response.json();
+  const generated = safeText(data.response, "");
+  if (!generated) {
+    throw new Error("ollama returned an empty summary");
   }
   return generated;
 }

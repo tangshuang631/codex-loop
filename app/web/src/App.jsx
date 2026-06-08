@@ -355,7 +355,11 @@ function ConversationTimeline({
           entry.text,
           isLoopMessage ? latestPrompt : latestVisibleSummary,
         );
-        const summary = summarizeVisibleText(fullText, "暂无摘要", 220);
+        const summaryText =
+          !isLoopMessage && latestVisibleSummary
+            ? latestVisibleSummary
+            : fullText;
+        const summary = summarizeVisibleText(summaryText, "暂无摘要", 220);
         return (
           <article
             className={`conversation-row ${isLoopMessage ? "is-loop" : "is-codex"}`}
@@ -608,7 +612,8 @@ function ManagePane({
   snapshot,
   submitting,
   withSubmit,
-  onRequestShutdown,
+  activeManageSection,
+  setActiveManageSection,
 }) {
   const isDispatching = snapshot?.thread?.continuationStatus === "dispatching";
   const isFinalizing = snapshot?.state?.stopRequested || snapshot?.state?.finalizeRequested;
@@ -635,7 +640,13 @@ function ManagePane({
 
   return (
     <div className="sidebar-pane-stack">
-      <details className="sidebar-disclosure">
+      <details
+        className="sidebar-disclosure"
+        open={activeManageSection === "thread"}
+        onToggle={(event) => {
+          if (event.currentTarget.open) setActiveManageSection("thread");
+        }}
+      >
         <summary>绑定线程</summary>
         <form
           className="sidebar-form"
@@ -720,7 +731,15 @@ function ManagePane({
         </form>
       </details>
 
-      <details className="sidebar-disclosure">
+      <details
+        className="sidebar-disclosure"
+        open={activeManageSection === "automation" || activeManageSection === "ollama"}
+        onToggle={(event) => {
+          if (event.currentTarget.open && activeManageSection !== "ollama") {
+            setActiveManageSection("automation");
+          }
+        }}
+      >
         <summary>自动续跑</summary>
         <form
           className="sidebar-form"
@@ -784,7 +803,13 @@ function ManagePane({
             </label>
           </div>
 
-          <details className="workspace-details">
+          <details
+            className="workspace-details"
+            open={activeManageSection === "ollama"}
+            onToggle={(event) => {
+              if (event.currentTarget.open) setActiveManageSection("ollama");
+            }}
+          >
             <summary>智能增强</summary>
             <div className="settings-grid">
               <label className="toggle-row">
@@ -872,7 +897,13 @@ function ManagePane({
         </form>
       </details>
 
-      <details className="sidebar-disclosure">
+      <details
+        className="sidebar-disclosure"
+        open={activeManageSection === "safety"}
+        onToggle={(event) => {
+          if (event.currentTarget.open) setActiveManageSection("safety");
+        }}
+      >
         <summary>运行与安全</summary>
         <div className="sidebar-form">
           <div className="metric-grid compact-metric-grid">
@@ -907,14 +938,6 @@ function ManagePane({
               quiet
             />
           ) : null}
-          <button
-            type="button"
-            className="ghost-button danger-zone-button"
-            disabled={submitting}
-            onClick={() => void onRequestShutdown()}
-          >
-            关闭当前控制台
-          </button>
         </div>
       </details>
     </div>
@@ -956,7 +979,7 @@ function ManageWorkspaceView(props) {
       <div className="workspace-focus-head">
         <span className="workspace-focus-eyebrow">任务管理</span>
         <h1>调整当前 loop</h1>
-        <p>连接窗口、自动续跑、模型增强和关闭控制台都集中放在这里。</p>
+        <p>连接窗口、自动续跑和模型增强集中放在这里。</p>
       </div>
 
       <ManagePane {...props} />
@@ -976,6 +999,8 @@ function DashboardHomeLegacy({
   submitting,
   handleDashboardAction,
   setActiveSidebarPane,
+  setActiveManageSection,
+  onRequestShutdown,
   automationSchedule,
   automationStatus,
   threadLabel,
@@ -1060,9 +1085,20 @@ function DashboardHomeLegacy({
                 type="button"
                 className="ghost-button"
                 disabled={submitting}
-                onClick={() => setActiveSidebarPane("manage")}
+                onClick={() => {
+                  setActiveManageSection("ollama");
+                  setActiveSidebarPane("manage");
+                }}
               >
                 配置 Ollama
+              </button>
+              <button
+                type="button"
+                className="ghost-button danger-zone-button"
+                disabled={submitting}
+                onClick={() => void onRequestShutdown()}
+              >
+                彻底关闭
               </button>
             </div>
           </div>
@@ -1145,6 +1181,8 @@ function DashboardHome({
   submitting,
   handleDashboardAction,
   setActiveSidebarPane,
+  setActiveManageSection,
+  onRequestShutdown,
   automationSchedule,
   automationStatus,
   threadLabel,
@@ -1262,9 +1300,20 @@ function DashboardHome({
                 type="button"
                 className="ghost-button"
                 disabled={submitting}
-                onClick={() => setActiveSidebarPane("manage")}
+                onClick={() => {
+                  setActiveManageSection("ollama");
+                  setActiveSidebarPane("manage");
+                }}
               >
                 配置 Ollama
+              </button>
+              <button
+                type="button"
+                className="ghost-button danger-zone-button"
+                disabled={submitting}
+                onClick={() => void onRequestShutdown()}
+              >
+                彻底关闭
               </button>
             </div>
           </div>
@@ -1351,6 +1400,7 @@ export function App() {
   const [collapsedProjects, setCollapsedProjects] = useState({});
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [activeSidebarPane, setActiveSidebarPane] = useState("loops");
+  const [activeManageSection, setActiveManageSection] = useState("automation");
   const [selectedLoopId, setSelectedLoopId] = useState("");
   const [loopMenuOpenId, setLoopMenuOpenId] = useState("");
   const [threadForm, setThreadForm] = useState({
@@ -1880,7 +1930,8 @@ export function App() {
             snapshot={snapshot}
             submitting={submitting}
             withSubmit={withSubmit}
-            onRequestShutdown={requestFullShutdown}
+            activeManageSection={activeManageSection}
+            setActiveManageSection={setActiveManageSection}
           />
         ) : null}
 
@@ -1897,6 +1948,8 @@ export function App() {
             submitting={submitting}
             handleDashboardAction={handleDashboardAction}
             setActiveSidebarPane={setActiveSidebarPane}
+            setActiveManageSection={setActiveManageSection}
+            onRequestShutdown={requestFullShutdown}
             automationSchedule={automationSchedule}
             automationStatus={automationStatus}
             threadLabel={threadLabel}

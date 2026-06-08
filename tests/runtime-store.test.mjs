@@ -26,6 +26,10 @@ import {
   syncCodexThreadMirror,
 } from "../app/server/lib/runtime-store.mjs";
 import { saveUserOverrides } from "../app/server/lib/adapter-store.mjs";
+import {
+  generateCodexSummaryWithOllama,
+  generatePromptWithOllama,
+} from "../app/server/lib/ollama-prompt-generator.mjs";
 
 function buildConfig() {
   return {
@@ -567,6 +571,91 @@ test("runLoopTurn uses ollama-generated prompt when advanced continuation is ena
   );
   assert.equal(snapshot.thread.continuationStatus, "idle");
   assert.equal(snapshot.thread.latestEventType, "codex_followup_completed");
+});
+
+test("syncCodexThreadMirror uses ollama summary when advanced continuation is enabled", async () => {
+  const configRoot = await createWorkspace();
+  await ensureLoopArtifacts(configRoot);
+  await saveUserOverrides(configRoot, {
+    conversation: {
+      language: "zh-CN",
+      promptGenerator: {
+        enabled: true,
+        provider: "ollama",
+        model: "qwen2.5:7b",
+      },
+    },
+  });
+  await saveThreadBinding(configRoot, {
+    workspaceName: "demo",
+    threadTitle: "摘要线程",
+    threadId: "thread-summary-ollama",
+    singleThreadMode: true,
+  });
+
+  let summarizedText = "";
+  const snapshot = await syncCodexThreadMirror(
+    configRoot,
+    {
+      latestCodexSummary:
+        "Codex wrote a long completion message with implementation details, verification notes, and follow-up risks.",
+    },
+    {
+      generateCodexSummary: async ({ codexText }) => {
+        summarizedText = codexText;
+        return "已完成实现和验证，并整理了后续风险。";
+      },
+    },
+  );
+
+  assert.match(summarizedText, /long completion message/);
+  assert.equal(snapshot.thread.latestCodexSummary, "已完成实现和验证，并整理了后续风险。");
+});
+
+test("ollama requests disable thinking output for dashboard summaries and prompts", async () => {
+  const configRoot = await createWorkspace();
+  await ensureLoopArtifacts(configRoot);
+  await saveUserOverrides(configRoot, {
+    conversation: {
+      language: "zh-CN",
+      promptGenerator: {
+        enabled: true,
+        provider: "ollama",
+        model: "qwen3.5:9b",
+        baseUrl: "http://127.0.0.1:11434",
+      },
+    },
+  });
+  await saveThreadBinding(configRoot, {
+    workspaceName: "demo",
+    threadTitle: "think false thread",
+    threadId: "thread-think-false",
+    singleThreadMode: true,
+  });
+  const snapshot = await readLoopSnapshot(configRoot);
+  const requestBodies = [];
+  const fetchImpl = async (_url, init) => {
+    requestBodies.push(JSON.parse(init.body));
+    return {
+      ok: true,
+      json: async () => ({ response: "模型处理后的文本" }),
+    };
+  };
+
+  await generatePromptWithOllama({
+    snapshot,
+    fallbackPrompt: "继续推进下一步。",
+    fetchImpl,
+  });
+  await generateCodexSummaryWithOllama({
+    snapshot,
+    codexText: "Codex 完成了新的验证批次。",
+    fetchImpl,
+  });
+
+  assert.equal(requestBodies.length, 2);
+  assert.equal(requestBodies[0].think, false);
+  assert.equal(requestBodies[1].think, false);
 });
 
 test("runLoopTurn falls back to template prompt when ollama generation fails", async () => {
