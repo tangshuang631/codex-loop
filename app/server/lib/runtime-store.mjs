@@ -2047,6 +2047,13 @@ function buildProcessStatus(snapshot) {
     canSendNextTurn = false;
     holdReason = "Codex 正在执行当前轮，完成前不能追加发送。";
     nextAction = "等待 Codex 完成；如果要补充方向，先写入下一轮引导。";
+  } else if (snapshot.state.monitorOnly) {
+    state = "monitoring";
+    headline = "监控中";
+    detail = "监控模式不会自动循环；可以查看 Codex 历史，或在底部补充后手动发送一次引导。";
+    canSendNextTurn = false;
+    holdReason = "这次手动引导已经结束，codex-loop 不会自动发送下一轮。";
+    nextAction = "继续查看记录；需要介入时，在底部写补充并手动发送。";
   }
 
   const monitorStatus = deriveMonitorStatus(state);
@@ -2223,6 +2230,14 @@ export async function exportMobileView(startDir = process.cwd()) {
     suggestedAction = snapshot.thread.threadId
       ? "当前处于监控模式，可以查看记录或手动发送引导；不会自动循环。"
       : "当前已停止，请先绑定线程。";
+  } else if (snapshot.state.monitorOnly) {
+    if (snapshot.thread.continuationStatus === "dispatching") {
+      suggestedAction = "监控模式引导已发送，正在等待 Codex 完成当前轮。";
+    } else if (snapshot.thread.continuationStatus === "reviewing") {
+      suggestedAction = "监控模式正在复盘 Codex 回复，请等待本地模型给出下一步判断。";
+    } else {
+      suggestedAction = "当前处于监控模式，可以查看记录或手动发送引导；不会自动派发下一轮。";
+    }
   } else if (snapshot.thread.threadId) {
     if (snapshot.thread.continuationStatus === "dispatching") {
       suggestedAction = "Codex 正在处理当前轮，请等待完成后再继续。";

@@ -1588,6 +1588,50 @@ test("sendPendingGuidanceOnce sends queued guidance from monitor mode without st
   assert.match(snapshot.runtimeEvents[0].detail, /监控模式|只发送这一条|不会开启自动循环/);
 });
 
+test("exportMobileView keeps monitor mode explicit after one-shot guidance completes", async () => {
+  const configRoot = await createWorkspace();
+  await ensureLoopArtifacts(configRoot);
+  await saveThreadBinding(configRoot, {
+    workspaceName: "demo",
+    threadTitle: "监控完成线程",
+    threadId: "thread-monitor-completed",
+    singleThreadMode: true,
+  });
+  await syncCodexThreadMirror(configRoot, {
+    latestCodexSummary: "Codex 已完成上一轮，等待引导。",
+  });
+  await requestGracefulStop(configRoot, {
+    reason: "enter monitor mode",
+  });
+  await savePendingGuidance(configRoot, {
+    text: "请按真实用户视角检查移动端状态是否清楚。",
+  });
+
+  await sendPendingGuidanceOnce(configRoot, {
+    generateFollowupPrompt: async ({ fallbackPrompt }) => fallbackPrompt,
+    dispatchThreadMessage: async () => ({
+      deliveryObserved: true,
+      completionObserved: false,
+      lastMessage: "",
+    }),
+  });
+  await syncCodexThreadMirror(configRoot, {
+    latestCodexSummary: "Codex 已完成这条监控模式引导，等待用户下一次手动引导。",
+  });
+
+  const mobile = await exportMobileView(configRoot);
+
+  assert.equal(mobile.loop.mode, "running");
+  assert.equal(mobile.processStatus.state, "monitoring");
+  assert.equal(mobile.processStatus.monitorLabel, "监控中");
+  assert.equal(mobile.processStatus.canSendNextTurn, false);
+  assert.match(mobile.processStatus.detail, /监控模式|不会自动循环/);
+  assert.match(mobile.processStatus.holdReason, /不会自动|手动/);
+  assert.match(mobile.processStatus.nextAction, /查看记录|手动发送/);
+  assert.match(mobile.suggestedAction, /监控模式|不会自动循环/);
+  assert.doesNotMatch(mobile.suggestedAction, /开始下一轮|自动循环/);
+});
+
 test("savePendingGuidance appends multiple user notes instead of replacing earlier guidance", async () => {
   const configRoot = await createWorkspace();
   await ensureLoopArtifacts(configRoot);
