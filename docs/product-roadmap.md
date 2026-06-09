@@ -58,6 +58,7 @@ Current implementation progress:
 - loop renaming support is being added
 - monitor-mode manual guidance sending is in place: a stopped bound task can send the queued guidance once without starting automatic looping.
 - paired mobile guidance now uses the same monitor-mode one-shot path when it is safe to send; if Codex is still working or the local supervisor is reviewing, the guidance stays queued and the mobile UI shows the wait reason.
+- queued mobile guidance can be recalled before it is merged, so remote guidance remains reversible when the user mistypes or changes direction.
 
 ## Near-term roadmap
 
@@ -132,7 +133,7 @@ Current mobile boundary:
 
 - 扫码长期绑定基础已接入：桌面控制台可以生成配对会话，后端可以确认配对并校验长期设备令牌。
 - 受保护移动端任务视图已接入：已绑定设备携带长期设备令牌才能读取任务状态和历史对话，令牌失效或设备未绑定时必须重新扫码。
-- `/mobile` 轻量移动端任务界面已接入：手机可以查看当前任务、历史对话，并发送引导；安全可发送时会复用监控模式手动派发链路推进一次，Codex 正在处理或本地模型复盘时只排队等待。
+- `/mobile` 轻量移动端任务界面已接入：手机可以查看当前任务、历史对话，并发送引导；安全可发送时会复用监控模式手动派发链路推进一次，Codex 正在处理或本地模型复盘时只排队等待。待合并引导在真正合并前可从手机端撤回。
 - 监控模式手动发送引导已接入：桌面端可以先保存补充，再从待发送气泡手动派发一次；移动端已绑定设备也可触发同一条一次性派发链路，二者都不会启动自动循环。
 - 自动窗口绑定基础已接入：绑定时可优先填写项目路径和 Codex 窗口名，系统会从本机 Codex 历史里自动匹配线程；匹配不唯一或失败时再手动填写线程 ID。
 - 原生 App 和独立 `app/mobile` 工程仍是下一批：后续复用 `/mobile` 的任务详情数据和交互，只替换成更完整的扫码与系统级壳。

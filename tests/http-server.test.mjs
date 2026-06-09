@@ -620,6 +620,110 @@ test("handler rejects mobile guidance when device credentials are invalid", asyn
   assert.match(chunks.join(""), /设备未绑定|重新扫码/);
 });
 
+test("handler lets paired mobile devices clear queued guidance", async () => {
+  let cleared = false;
+  let verificationPayload = null;
+  const handler = buildHandler({
+    operations: {
+      clearPendingGuidance: async () => {
+        cleared = true;
+        return { thread: { pendingUserGuidance: "" } };
+      },
+      verifyPairedDevice: async (_cwd, body) => {
+        verificationPayload = body;
+        return {
+          valid: true,
+          device: {
+            id: body.deviceId,
+            name: "iPhone",
+          },
+        };
+      },
+    },
+  });
+
+  const chunks = [];
+  const response = {
+    writeHead(statusCode, headers) {
+      this.statusCode = statusCode;
+      this.headers = headers;
+    },
+    end(text) {
+      chunks.push(text);
+    },
+  };
+
+  await handler(
+    {
+      method: "DELETE",
+      url: "/api/mobile/guidance",
+      [Symbol.asyncIterator]: async function* iterator() {
+        yield Buffer.from(
+          JSON.stringify({
+            deviceId: "device-1",
+            deviceToken: "stored-token",
+          }),
+          "utf8",
+        );
+      },
+    },
+    response,
+  );
+
+  assert.equal(response.statusCode, 200);
+  assert.equal(verificationPayload.deviceToken, "stored-token");
+  assert.equal(cleared, true);
+  assert.match(chunks.join(""), /"cleared":true/);
+});
+
+test("handler rejects mobile guidance clearing when device credentials are invalid", async () => {
+  let cleared = false;
+  const handler = buildHandler({
+    operations: {
+      clearPendingGuidance: async () => {
+        cleared = true;
+        return {};
+      },
+      verifyPairedDevice: async () => ({
+        valid: false,
+        reason: "设备未绑定或令牌已失效，请重新扫码。",
+      }),
+    },
+  });
+
+  const chunks = [];
+  const response = {
+    writeHead(statusCode, headers) {
+      this.statusCode = statusCode;
+      this.headers = headers;
+    },
+    end(text) {
+      chunks.push(text);
+    },
+  };
+
+  await handler(
+    {
+      method: "DELETE",
+      url: "/api/mobile/guidance",
+      [Symbol.asyncIterator]: async function* iterator() {
+        yield Buffer.from(
+          JSON.stringify({
+            deviceId: "device-1",
+            deviceToken: "bad-token",
+          }),
+          "utf8",
+        );
+      },
+    },
+    response,
+  );
+
+  assert.equal(response.statusCode, 401);
+  assert.equal(cleared, false);
+  assert.match(chunks.join(""), /设备未绑定|重新扫码/);
+});
+
 test("handler dispatches launcher status route", async () => {
   const handler = buildHandler({
     operations: {

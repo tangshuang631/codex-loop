@@ -338,6 +338,18 @@ test("create task entry resets stale completed assistant state before opening", 
   assert.match(appSource, /onClick=\{\(\) => void openCreatePane\("project"\)\}/);
 });
 
+test("create task back and reset actions replace stale assistant state", async () => {
+  const appSource = await fs.readFile("app/web/src/App.jsx", "utf8");
+  const createViewStart = appSource.indexOf("<CreateWorkspaceView");
+  const createViewEnd = appSource.indexOf("{activeSidebarPane === \"help\"", createViewStart);
+  const createViewSource = appSource.slice(createViewStart, createViewEnd);
+
+  assert.notEqual(createViewStart, -1);
+  assert.match(createViewSource, /const nextAssistantState = await requestJson\("\/loop-creation-assistant\/back"/);
+  assert.match(createViewSource, /const nextAssistantState = await requestJson\("\/loop-creation-assistant\/reset"/);
+  assert.match(createViewSource, /setAssistantState\(nextAssistantState\)/);
+});
+
 test("create task view does not show previously created tasks as the creation entry", async () => {
   const appSource = await fs.readFile("app/web/src/App.jsx", "utf8");
   const paneStart = appSource.indexOf("function LoopCreationAssistantPane");
@@ -420,4 +432,20 @@ test("mobile guidance uses server dispatch result instead of a fixed saved messa
   assert.match(mobileSource, /guidanceResult\?\.message/);
   assert.match(mobileSource, /guidanceResult\?\.dispatch === "sent"/);
   assert.doesNotMatch(mobileSource, /setStatusText\("已保存补充引导，会等 Codex 完成后合并。"\)/);
+});
+
+test("mobile guidance can be recalled before it is merged", async () => {
+  const appSource = await fs.readFile("app/web/src/App.jsx", "utf8");
+  const stylesSource = await fs.readFile("app/web/src/styles.css", "utf8");
+  const mobileStart = appSource.indexOf("function MobileTaskApp");
+  const mobileEnd = appSource.indexOf("function DesktopConsoleApp", mobileStart);
+  const mobileSource = appSource.slice(mobileStart, mobileEnd);
+
+  assert.notEqual(mobileStart, -1);
+  assert.match(mobileSource, /async function clearMobileGuidance/);
+  assert.match(mobileSource, /requestJson\("\/mobile\/guidance",\s*\{\s*method:\s*"DELETE"/);
+  assert.match(mobileSource, /撤回/);
+  assert.match(mobileSource, /mobileView\?\.pendingGuidance\?\.hasPending/);
+  assert.match(mobileSource, /clearMobileGuidance/);
+  assert.match(stylesSource, /\.mobile-task-pending-actions/);
 });

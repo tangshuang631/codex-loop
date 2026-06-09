@@ -2072,6 +2072,20 @@ select {
   word-break: break-word;
 }
 
+.mobile-task-pending-actions {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.mobile-task-pending-actions .ghost-button {
+  min-height: 30px;
+  padding: 0 10px;
+  border-radius: 999px;
+  font-size: 12px;
+}
+
 .mobile-task-conversation {
   margin-top: 8px;
 }

@@ -1275,6 +1275,30 @@ function MobileTaskApp() {
     }
   }
 
+  async function clearMobileGuidance() {
+    if (!mobileDevice?.deviceId || !mobileDevice?.deviceToken) {
+      return;
+    }
+
+    setSubmitting(true);
+    setErrorText("");
+    try {
+      const result = await requestJson("/mobile/guidance", {
+        method: "DELETE",
+        body: JSON.stringify({
+          deviceId: mobileDevice?.deviceId,
+          deviceToken: mobileDevice?.deviceToken,
+        }),
+      });
+      setStatusText(result?.message || "已撤回待合并引导。");
+      await loadProtectedMobileView({ silent: true });
+    } catch (error) {
+      setErrorText(error?.message || "撤回失败，请稍后重试。");
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
   const loopName = mobileView?.loop?.name || "移动端任务";
   const processStatus = mobileView?.processStatus || {};
   const headline = processStatus.headline || mobileView?.suggestedAction || statusText;
@@ -1339,7 +1363,17 @@ function MobileTaskApp() {
             {mobileView?.pendingGuidance?.hasPending ? (
               <div className="mobile-task-panel-row">
                 <span>待合并</span>
-                <strong>{mobileView.pendingGuidance.preview || mobileView.pendingGuidance.text}</strong>
+                <div className="mobile-task-pending-actions">
+                  <strong>{mobileView.pendingGuidance.preview || mobileView.pendingGuidance.text}</strong>
+                  <button
+                    type="button"
+                    className="ghost-button"
+                    disabled={submitting}
+                    onClick={() => void clearMobileGuidance()}
+                  >
+                    撤回
+                  </button>
+                </div>
               </div>
             ) : null}
           </section>
@@ -1932,7 +1966,7 @@ function LoopCreationAssistantPane({
       {!currentQuestion ? (
         <div className="assistant-empty-state">
           <strong>开始新建任务</strong>
-          <p>创建页只填写新任务；已经创建的任务请从左侧项目列表打开。</p>
+          <p>这里不会展示历史任务。点击下面按钮，从空白流程创建一个新任务。</p>
           <button
             type="button"
             className="primary-button"
@@ -3750,17 +3784,19 @@ function DesktopConsoleApp() {
             }
             onBack={() =>
               withSubmit(async () => {
-                await requestJson("/loop-creation-assistant/back", {
+                const nextAssistantState = await requestJson("/loop-creation-assistant/back", {
                   method: "POST",
                 });
+                setAssistantState(nextAssistantState);
                 setAssistantAnswer("");
               })
             }
             onReset={() =>
               withSubmit(async () => {
-                await requestJson("/loop-creation-assistant/reset", {
+                const nextAssistantState = await requestJson("/loop-creation-assistant/reset", {
                   method: "POST",
                 });
+                setAssistantState(nextAssistantState);
                 setAssistantAnswer("");
               })
             }

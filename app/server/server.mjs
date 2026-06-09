@@ -288,6 +288,28 @@ export function buildHandler({
         return;
       }
 
+      if (request.method === "DELETE" && request.url === "/api/mobile/guidance") {
+        const body = await readBody(request);
+        const verification = await operations.verifyPairedDevice(process.cwd(), body);
+        if (!verification.valid) {
+          sendJson(response, 401, {
+            valid: false,
+            kind: "device_not_paired",
+            error: verification.reason || "设备未绑定或令牌已失效，请重新扫码。",
+          });
+          return;
+        }
+
+        sendJson(response, 200, {
+          valid: true,
+          cleared: true,
+          device: verification.device,
+          message: "已撤回待合并引导。",
+          result: await operations.clearPendingGuidance(process.cwd()),
+        });
+        return;
+      }
+
       if (request.method === "GET" && request.url === "/api/launcher-status") {
         sendJson(response, 200, await operations.readLauncherStatus());
         return;
