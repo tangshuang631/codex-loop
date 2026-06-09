@@ -29,6 +29,11 @@ import {
   requestLauncherShutdown,
 } from "./lib/launcher-status.mjs";
 import { readRemoteAccessStatus } from "./lib/remote-access.mjs";
+import {
+  confirmDevicePairing,
+  createDevicePairingSession,
+  readDevicePairingStatus,
+} from "./lib/runtime-governance/device-pairing.mjs";
 import { listOllamaModels as defaultListOllamaModels } from "./lib/ollama-model-store.mjs";
 import {
   readAutomationStatusForThread,
@@ -75,8 +80,14 @@ export function buildHandler({
       },
       readRemoteAccessStatus: async () => {
         const launcherStatus = await readLauncherStatus();
-        return readRemoteAccessStatus({ launcherStatus });
+        return readRemoteAccessStatus({
+          launcherStatus,
+          readPairingStatus: () => readDevicePairingStatus(process.cwd()),
+        });
       },
+      readDevicePairingStatus,
+      createDevicePairingSession,
+      confirmDevicePairing,
       readAutomationStatus: async (startDir = process.cwd()) => {
         const snapshot = await readLoopSnapshot(startDir);
         return readAutomationStatusForThread(snapshot.thread);
@@ -186,6 +197,41 @@ export function buildHandler({
 
       if (request.method === "GET" && request.url === "/api/remote-access") {
         sendJson(response, 200, await operations.readRemoteAccessStatus());
+        return;
+      }
+
+      if (request.method === "GET" && request.url === "/api/device-pairing") {
+        sendJson(
+          response,
+          200,
+          await operations.readDevicePairingStatus(process.cwd()),
+        );
+        return;
+      }
+
+      if (
+        request.method === "POST" &&
+        request.url === "/api/device-pairing/session"
+      ) {
+        const body = await readBody(request);
+        sendJson(
+          response,
+          200,
+          await operations.createDevicePairingSession(process.cwd(), body),
+        );
+        return;
+      }
+
+      if (
+        request.method === "POST" &&
+        request.url === "/api/device-pairing/confirm"
+      ) {
+        const body = await readBody(request);
+        sendJson(
+          response,
+          200,
+          await operations.confirmDevicePairing(process.cwd(), body),
+        );
         return;
       }
 

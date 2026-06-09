@@ -312,6 +312,138 @@ test("handler dispatches remote access status route", async () => {
   assert.match(chunks.join(""), /"recommendedTransport":"tailscale"/);
 });
 
+test("handler dispatches device pairing status and scan session routes", async () => {
+  const handler = buildHandler({
+    operations: {
+      readLoopSnapshot: async () => ({}),
+      exportLoopSummary: async () => ({}),
+      exportMobileView: async () => ({}),
+      readLauncherStatus: async () => ({}),
+      readRemoteAccessStatus: async () => ({}),
+      readAutomationStatus: async () => ({}),
+      readDevicePairingStatus: async () => ({
+        hasReusablePairing: true,
+        pairedDeviceCount: 1,
+      }),
+      createDevicePairingSession: async (_cwd, body) => ({
+        sessionId: "pair-session-1",
+        pairingCode: "ABCD-1234",
+        mobileBaseUrl: body.mobileBaseUrl,
+      }),
+      startRun: async () => ({}),
+      renameLoop: async () => ({}),
+      requestGracefulStop: async () => ({}),
+      updateBudgets: async () => ({}),
+      saveThreadBinding: async () => ({}),
+      syncCodexThreadMirror: async () => ({}),
+      recordHeartbeat: async () => ({}),
+      recordError: async () => ({}),
+      saveUserOverrides: async () => ({}),
+    },
+  });
+
+  async function request(method, url, body) {
+    const chunks = [];
+    const response = {
+      writeHead(statusCode) {
+        this.statusCode = statusCode;
+      },
+      end(text) {
+        chunks.push(text);
+      },
+    };
+
+    await handler(
+      {
+        method,
+        url,
+        [Symbol.asyncIterator]: async function* iterator() {
+          if (body) {
+            yield Buffer.from(JSON.stringify(body), "utf8");
+          }
+        },
+      },
+      response,
+    );
+
+    return { statusCode: response.statusCode, text: chunks.join("") };
+  }
+
+  const status = await request("GET", "/api/device-pairing");
+  const session = await request("POST", "/api/device-pairing/session", {
+    mobileBaseUrl: "http://100.64.0.10:3001",
+  });
+
+  assert.equal(status.statusCode, 200);
+  assert.match(status.text, /"pairedDeviceCount":1/);
+  assert.equal(session.statusCode, 200);
+  assert.match(session.text, /"pairingCode":"ABCD-1234"/);
+  assert.match(session.text, /100\.64\.0\.10/);
+});
+
+test("handler dispatches device pairing confirmation route", async () => {
+  let confirmationPayload = null;
+  const handler = buildHandler({
+    operations: {
+      readLoopSnapshot: async () => ({}),
+      exportLoopSummary: async () => ({}),
+      exportMobileView: async () => ({}),
+      readLauncherStatus: async () => ({}),
+      readRemoteAccessStatus: async () => ({}),
+      readAutomationStatus: async () => ({}),
+      confirmDevicePairing: async (_cwd, body) => {
+        confirmationPayload = body;
+        return {
+          status: "paired",
+          device: { id: "device-1", name: body.deviceName },
+          deviceToken: "device-token-visible-once",
+        };
+      },
+      startRun: async () => ({}),
+      renameLoop: async () => ({}),
+      requestGracefulStop: async () => ({}),
+      updateBudgets: async () => ({}),
+      saveThreadBinding: async () => ({}),
+      syncCodexThreadMirror: async () => ({}),
+      recordHeartbeat: async () => ({}),
+      recordError: async () => ({}),
+      saveUserOverrides: async () => ({}),
+    },
+  });
+
+  const chunks = [];
+  const response = {
+    writeHead(statusCode) {
+      this.statusCode = statusCode;
+    },
+    end(text) {
+      chunks.push(text);
+    },
+  };
+
+  await handler(
+    {
+      method: "POST",
+      url: "/api/device-pairing/confirm",
+      [Symbol.asyncIterator]: async function* iterator() {
+        yield Buffer.from(
+          JSON.stringify({
+            sessionId: "pair-session-1",
+            pairingCode: "ABCD-1234",
+            deviceName: "iPhone",
+          }),
+          "utf8",
+        );
+      },
+    },
+    response,
+  );
+
+  assert.equal(response.statusCode, 200);
+  assert.equal(confirmationPayload.deviceName, "iPhone");
+  assert.match(chunks.join(""), /device-token-visible-once/);
+});
+
 test("handler dispatches ollama model list route", async () => {
   const handler = buildHandler({
     operations: {

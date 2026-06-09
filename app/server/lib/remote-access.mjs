@@ -94,13 +94,24 @@ async function commandExists(command, args = ["--version"]) {
   });
 }
 
+function createDefaultPairingStatus() {
+  return {
+    hasReusablePairing: false,
+    pairedDeviceCount: 0,
+    summary: "还没有绑定手机。请在控制台生成扫码绑定后，用移动端 App 扫码连接。",
+    nextAction: "先在桌面控制台生成扫码绑定，再用手机扫码。",
+  };
+}
+
 export async function readRemoteAccessStatus({
   launcherStatus = {},
   existsCommand = commandExists,
   networkInterfaces = os.networkInterfaces,
+  readPairingStatus = async () => createDefaultPairingStatus(),
 } = {}) {
   const tailscaleInstalled = await existsCommand("tailscale", ["version"]);
   const cloudflaredInstalled = await existsCommand("cloudflared", ["--version"]);
+  const devicePairing = await readPairingStatus();
   const publicBaseUrl = safeText(launcherStatus.webUrl, "");
   const isLocalOnly = isLocalOnlyUrl(publicBaseUrl);
   const mobileReachable = Boolean(publicBaseUrl && !isLocalOnly);
@@ -154,6 +165,9 @@ export async function readRemoteAccessStatus({
     : primaryMobileUrl
       ? "优先用推荐的 Tailscale 地址在手机浏览器打开；不通时再试局域网地址。"
       : "请先使用 Tailscale 地址或局域网 IP，再用手机打开。";
+  const pairingAction = devicePairing.hasReusablePairing
+    ? devicePairing.nextAction || "已绑定手机。如需新手机访问，请重新扫码。"
+    : "用桌面控制台生成扫码绑定，移动端 App 扫码后可长期访问这台电脑。";
 
   return {
     headline,
@@ -173,5 +187,7 @@ export async function readRemoteAccessStatus({
     url: publicBaseUrl,
     publicBaseUrl,
     recommendedSteps,
+    devicePairing,
+    pairingAction,
   };
 }

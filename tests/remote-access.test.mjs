@@ -22,6 +22,27 @@ test("remote access status exposes a copyable mobile entry and plain Chinese gui
   assert.ok(status.recommendedSteps.every((step) => !/[{}_]/.test(step)));
 });
 
+test("remote access status exposes durable mobile pairing guidance", async () => {
+  const status = await readRemoteAccessStatus({
+    launcherStatus: {
+      webUrl: "http://100.64.0.10:3001",
+      webPort: 3001,
+    },
+    existsCommand: async (command) => command === "tailscale",
+    readPairingStatus: async () => ({
+      hasReusablePairing: true,
+      pairedDeviceCount: 1,
+      summary: "已绑定 1 台手机，codex-loop 重启后可以自动重连。",
+      nextAction: "如需新手机访问，请在设置里重新扫码。",
+    }),
+  });
+
+  assert.equal(status.devicePairing.hasReusablePairing, true);
+  assert.equal(status.devicePairing.pairedDeviceCount, 1);
+  assert.match(status.devicePairing.summary, /已绑定.*手机|自动重连/);
+  assert.match(status.pairingAction, /已绑定|重新扫码|新手机/);
+});
+
 test("remote access status explains when the copied url is computer-only", async () => {
   const status = await readRemoteAccessStatus({
     launcherStatus: {
