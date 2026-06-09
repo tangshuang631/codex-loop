@@ -17,6 +17,7 @@ import {
   generatePromptWithOllama,
 } from "./ollama-prompt-generator.mjs";
 import { resolveProjectLayout } from "./paths.mjs";
+import { classifyContinuationFailure } from "./runtime-governance/failure-classifier.mjs";
 import {
   defaultRunSupervisorVerificationCommand,
   injectVerificationIntoInstruction,
@@ -1835,12 +1836,21 @@ function buildProcessStatus(snapshot) {
       : "当前 loop 已进入收尾状态。";
     nextAction = "等待当前轮结束后查看最后记录；确认无误后再重新开始。";
   } else if (continuationStatus === "error") {
+    const failureCategory = safeText(snapshot.thread.lastContinuationFailureCategory, "");
+    const failureLabel = safeText(snapshot.thread.lastContinuationFailureLabel, "");
+    const failureMessage = safeText(snapshot.thread.lastContinuationFailureMessage, "");
+    const failureAction = safeText(snapshot.thread.lastContinuationFailureAction, "");
     state = "error";
-    headline = "续跑失败";
-    detail = snapshot.thread.lastContinuationError || "上一轮没有成功发送或确认，请查看最近记录后再继续。";
+    headline = failureLabel || "续跑失败";
+    detail =
+      failureMessage ||
+      snapshot.thread.lastContinuationError ||
+      "上一轮没有成功发送或确认，请查看最近记录后再继续。";
     canSendNextTurn = false;
     holdReason = detail;
-    nextAction = "先检查线程绑定和 Codex 桌面端连接；必要时重新绑定后再开始循环。";
+    nextAction =
+      failureAction ||
+      "先检查线程绑定和 Codex 桌面端连接；必要时重新绑定后再开始循环。";
   } else if (mode === "stopped") {
     state = "stopped";
     headline = "已停止";
@@ -1904,6 +1914,9 @@ function buildProcessStatus(snapshot) {
     supervisorVerificationAt: snapshot.thread.lastSupervisorVerificationAt || "",
     supervisorReviewWarning,
     promptGenerationWarning,
+    failureCategory: snapshot.thread.lastContinuationFailureCategory || "",
+    failureLabel: snapshot.thread.lastContinuationFailureLabel || "",
+    failureSeverity: snapshot.thread.lastContinuationFailureSeverity || "",
     stopLimit: formatLoopStopLimit(snapshot.state.budgets || snapshot.config.budgets || {}),
     lastDispatchAt: snapshot.thread.lastDispatchAt || "",
     lastCompletionAt: snapshot.thread.lastCompletionAt || "",
@@ -2134,6 +2147,34 @@ function buildThreadMirror(thread, state, overrides = {}) {
     continuationStatus === "error"
       ? overrides.lastContinuationError ?? thread.lastContinuationError ?? ""
       : overrides.lastContinuationError ?? "";
+  const lastContinuationFailureCategory =
+    continuationStatus === "error"
+      ? overrides.lastContinuationFailureCategory ??
+        thread.lastContinuationFailureCategory ??
+        ""
+      : overrides.lastContinuationFailureCategory ?? "";
+  const lastContinuationFailureLabel =
+    continuationStatus === "error"
+      ? overrides.lastContinuationFailureLabel ?? thread.lastContinuationFailureLabel ?? ""
+      : overrides.lastContinuationFailureLabel ?? "";
+  const lastContinuationFailureSeverity =
+    continuationStatus === "error"
+      ? overrides.lastContinuationFailureSeverity ??
+        thread.lastContinuationFailureSeverity ??
+        ""
+      : overrides.lastContinuationFailureSeverity ?? "";
+  const lastContinuationFailureMessage =
+    continuationStatus === "error"
+      ? overrides.lastContinuationFailureMessage ??
+        thread.lastContinuationFailureMessage ??
+        ""
+      : overrides.lastContinuationFailureMessage ?? "";
+  const lastContinuationFailureAction =
+    continuationStatus === "error"
+      ? overrides.lastContinuationFailureAction ??
+        thread.lastContinuationFailureAction ??
+        ""
+      : overrides.lastContinuationFailureAction ?? "";
 
   return {
     ...thread,
@@ -2173,6 +2214,11 @@ function buildThreadMirror(thread, state, overrides = {}) {
     pendingUserGuidanceAt:
       overrides.pendingUserGuidanceAt ?? thread.pendingUserGuidanceAt ?? "",
     lastContinuationError,
+    lastContinuationFailureCategory,
+    lastContinuationFailureLabel,
+    lastContinuationFailureSeverity,
+    lastContinuationFailureMessage,
+    lastContinuationFailureAction,
     lastSupervisorReview:
       overrides.lastSupervisorReview ?? thread.lastSupervisorReview ?? "",
     lastSupervisorReviewAt:
@@ -2604,6 +2650,12 @@ export async function markContinuationFailed(
     latestSummary,
     "向 Codex 桌面线程发送下一轮指令失败，请检查线程绑定和桌面原生连接。",
   );
+  const failure = classifyContinuationFailure({
+    message: failureMessage,
+    latestSummary: summary,
+    promptGenerationError,
+    promptGenerator,
+  });
   const nextState = {
     ...snapshot.state,
     mode: "stopped",
@@ -2618,6 +2670,10 @@ export async function markContinuationFailed(
         at: failedAt,
         threadId: snapshot.thread.threadId,
         message: failureMessage,
+        failureCategory: failure.category,
+        failureLabel: failure.label,
+        failureSeverity: failure.severity,
+        failureAction: failure.nextAction,
         promptGenerationError,
         promptGenerator,
         mode: "stopped",
@@ -2634,6 +2690,11 @@ export async function markContinuationFailed(
       continuationEnabled: true,
       continuationStatus: "error",
       lastContinuationError: failureMessage,
+      lastContinuationFailureCategory: failure.category,
+      lastContinuationFailureLabel: failure.label,
+      lastContinuationFailureSeverity: failure.severity,
+      lastContinuationFailureMessage: failure.userMessage,
+      lastContinuationFailureAction: failure.nextAction,
       latestSummary: summary,
       latestEventType: "codex_followup_failed",
       lastUpdatedAt: failedAt,

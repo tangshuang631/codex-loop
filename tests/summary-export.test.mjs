@@ -356,8 +356,10 @@ test("exportMobileView explains the recovery action after continuation failure",
   assert.equal(mobile.processStatus.monitorLevel, "error");
   assert.equal(mobile.processStatus.monitorLabel, "失败");
   assert.equal(mobile.processStatus.monitorTone, "danger");
+  assert.equal(mobile.processStatus.failureCategory, "codex_dispatch");
+  assert.equal(mobile.processStatus.headline, "Codex 发送失败");
   assert.match(mobile.processStatus.holdReason, /失败|未确认送达/);
-  assert.match(mobile.processStatus.nextAction, /检查.*线程|重新开始|绑定/);
+  assert.match(mobile.processStatus.nextAction, /线程绑定|桌面端|重新开始/);
 });
 
 test("exportMobileView exposes supervisor review and next instruction for monitoring", async () => {

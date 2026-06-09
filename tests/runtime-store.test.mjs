@@ -2255,6 +2255,9 @@ test("runLoopTurn falls back to template prompt when ollama generation fails", a
   const snapshot = await readLoopSnapshot(configRoot);
   assert.match(snapshot.thread.lastContinuationError, /ollama unavailable/);
   assert.equal(snapshot.thread.continuationStatus, "error");
+  assert.equal(snapshot.thread.lastContinuationFailureCategory, "ollama_generation");
+  assert.equal(snapshot.thread.lastContinuationFailureLabel, "本地模型生成失败");
+  assert.match(snapshot.thread.lastContinuationFailureAction, /Ollama|模型|设置/);
 });
 
 test("runLoopTurn stops the visible run when desktop dispatch fails", async () => {
@@ -2287,6 +2290,9 @@ test("runLoopTurn stops the visible run when desktop dispatch fails", async () =
   assert.equal(snapshot.state.stopRequested, false);
   assert.equal(snapshot.state.finalizeRequested, false);
   assert.equal(snapshot.thread.continuationStatus, "error");
+  assert.equal(snapshot.thread.lastContinuationFailureCategory, "codex_dispatch");
+  assert.equal(snapshot.thread.lastContinuationFailureLabel, "Codex 发送失败");
+  assert.match(snapshot.thread.lastContinuationFailureAction, /线程绑定|桌面端|重新开始/);
   assert.match(snapshot.thread.latestSummary, /发送下一轮指令失败/);
 });
 

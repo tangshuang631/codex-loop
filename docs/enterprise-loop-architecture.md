@@ -25,6 +25,7 @@
 - `app/server/lib/ollama-prompt-generator.mjs`：当前承载本地模型生成、Codex 摘要和里程碑复盘。后续应归入 NPC 决策层。
 - `app/server/lib/ollama-loop-planner.mjs`：当前承载创建 loop 时的规划增强。后续应与 NPC 决策层共享项目记忆和用户规则。
 - `app/server/lib/verification/supervisor-verification.mjs`：监督独立验收已经迁入验证层，负责安全命令过滤、验收冷却、结果摘要和失败/跳过证据注入下一轮指令。
+- `app/server/lib/runtime-governance/failure-classifier.mjs`：续跑失败分类已经迁入运行治理层，负责把 Codex 发送、本地模型、文档规则、工作区、重复发送、预算停止等异常转成中文原因和恢复动作。
 - `app/server/lib/launcher-status.mjs`、`remote-access.mjs`、`paths.mjs`：当前承载启动、远程访问、路径解析等治理能力。后续应归入运行治理层。
 - `app/web/src/App.jsx`、`app/web/src/runtime-events.mjs`、`app/web/src/styles.css`：当前承载产品界面层。这里应该只展示用户需要的状态、对话和操作，不暴露内部模块名。
 
@@ -34,6 +35,7 @@
 - 每次只迁移一条已测试的能力边界。例如先抽出停止条件判断，再抽出验证命令执行，不把 runtime-store 一次性拆空。
 - 新模块必须有明确输入输出。调用方不应该需要阅读模块内部才能知道它做什么。
 - 迁移后 UI 不得展示工程模块名。结构优化服务于稳定性，不服务于开发者味信息展示。
+- 失败治理必须先产出用户能理解的原因和下一步动作，再把原始错误留给日志排查，不能把英文调试信息直接当成产品状态。
 - 任何调度、发送、验证、停止相关迁移，都必须跑 `npm test`，并在涉及前端显示时跑 `npm run build:web`。
 
 ## 近期拆分优先级
@@ -42,7 +44,7 @@
 2. 继续扩展 `app/server/lib/verification/supervisor-verification.mjs`，把更多测试、构建、日志、截图验收能力收束进验证层。
 3. 把 NPC 复盘、用户补充合并、项目规则读取收束到 NPC 决策层。
 4. 把 Codex 发送、历史读取、可见性校验收束为 Codex 联动层统一接口。
-5. 把启动残留状态、日志可读化、关闭服务、远程访问收束为运行治理层。
+5. 继续把启动残留状态、日志可读化、关闭服务、远程访问收束为运行治理层，并复用失败分类字段输出一致的状态提示。
 
 ## 完成判断
 

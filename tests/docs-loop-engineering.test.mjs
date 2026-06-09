@@ -91,6 +91,8 @@ test("architecture map documents current files and target enterprise boundaries"
   assert.match(architectureSource, /ollama-prompt-generator\.mjs/);
   assert.match(architectureSource, /supervisor-verification\.mjs/);
   assert.match(architectureSource, /监督独立验收已经迁入验证层/);
+  assert.match(architectureSource, /runtime-governance\/failure-classifier\.mjs/);
+  assert.match(architectureSource, /续跑失败分类已经迁入运行治理层/);
   assert.match(architectureSource, /每次只迁移一条已测试的能力边界/);
   assert.match(architectureSource, /不得为了目录好看而搬家/);
 });
