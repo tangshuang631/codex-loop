@@ -1802,7 +1802,6 @@ function LoopCreationAssistantPane({
   const currentQuestion = assistantState?.currentQuestion;
   const draft = assistantState?.draft || {};
   const plan = draft.plan || {};
-  const createdLoop = assistantState?.createdLoop?.loop;
   const messages = assistantState?.messages || [];
   const projectMode = creationMode === "project";
 
@@ -1814,20 +1813,6 @@ function LoopCreationAssistantPane({
           ? "先确认项目路径和项目名，再把任务收纳到这个项目下。"
           : "先确认项目、任务名和分支，再开始循环。"}
       </p>
-
-      {assistantState?.status === "completed" && createdLoop ? (
-        <div className="assistant-result">
-          <DetailCard
-            meta="创建完成"
-            title={createdLoop.name}
-            body={[
-              "已归入项目：" + createdLoop.projectName,
-              "分支：" + formatValue(createdLoop.branch),
-              "工作区：" + formatValue(createdLoop.workspaceRoot),
-            ].join("\n")}
-          />
-        </div>
-      ) : null}
 
       {currentQuestion ? (
         <>
@@ -1937,6 +1922,21 @@ function LoopCreationAssistantPane({
             </div>
           </form>
         </>
+      ) : null}
+
+      {!currentQuestion ? (
+        <div className="assistant-empty-state">
+          <strong>开始新建任务</strong>
+          <p>创建页只填写新任务；已经创建的任务请从左侧项目列表打开。</p>
+          <button
+            type="button"
+            className="primary-button"
+            disabled={submitting}
+            onClick={() => void onReset()}
+          >
+            开始新建任务
+          </button>
+        </div>
       ) : null}
 
       {draft.docs?.ruleDocs?.length || draft.docs?.devDocs?.length ? (
@@ -2984,6 +2984,8 @@ function DesktopConsoleApp() {
   const [activeManageSection, setActiveManageSection] = useState("automation");
   const [selectedLoopId, setSelectedLoopId] = useState("");
   const [loopMenuOpenId, setLoopMenuOpenId] = useState("");
+  const activeSidebarPaneRef = useRef(activeSidebarPane);
+  const creationModeRef = useRef(creationMode);
   const [threadForm, setThreadForm] = useState({
     workspaceName: "",
     threadTitle: "",
@@ -3076,7 +3078,15 @@ function DesktopConsoleApp() {
       setRemoteAccessStatus(nextRemoteAccessStatus);
       setControllerStatus(nextControllerStatus);
       setOllamaModels(nextOllamaModels.models || []);
-      setAssistantState(nextAssistantState);
+      if (
+        !(
+          activeSidebarPaneRef.current === "create" &&
+          creationModeRef.current === "task" &&
+          nextAssistantState?.status === "completed"
+        )
+      ) {
+        setAssistantState(nextAssistantState);
+      }
       setSelectedLoopId((current) => {
         const selected = pickVisibleLoop(nextLoops.loops || [], current || nextLoops.currentLoopId);
         return selected?.id || nextLoops.currentLoopId || "";
@@ -3166,6 +3176,14 @@ function DesktopConsoleApp() {
   useEffect(() => {
     void loadSnapshot();
   }, []);
+
+  useEffect(() => {
+    activeSidebarPaneRef.current = activeSidebarPane;
+  }, [activeSidebarPane]);
+
+  useEffect(() => {
+    creationModeRef.current = creationMode;
+  }, [creationMode]);
 
   useEffect(() => {
     function startPolling() {
@@ -3378,6 +3396,7 @@ function DesktopConsoleApp() {
     mobileView,
     pollStatus,
   });
+  const showingTaskCreation = activeSidebarPane === "create" && creationMode === "task";
 
   async function openCreatePane(nextCreationMode = "task") {
     setCreationMode(nextCreationMode);
@@ -3468,131 +3487,138 @@ function DesktopConsoleApp() {
               </button>
             </div>
 
-            <div className="sidebar-projects" aria-label="项目任务导航">
-              <div className="sidebar-projects-head">
-                <span>项目</span>
-                <span>{visibleLoops.length} 个任务</span>
-              </div>
-              <div className="sidebar-loop-groups">
-                {loopGroups.map((project) => {
-                  const projectName = project.name;
-                  const loops = project.loops || [];
-                  const collapsed = collapsedProjects[projectName];
-                  return (
-                    <div key={projectName} className="sidebar-group">
-                      <button
-                        type="button"
-                        className="sidebar-group-toggle"
-                        aria-expanded={!collapsed}
-                        onClick={() =>
-                          setCollapsedProjects((current) => ({
-                            ...current,
-                            [projectName]: !current[projectName],
-                          }))
-                        }
-                      >
-                        <span className="sidebar-project-title">{projectName}</span>
-                        <span className="sidebar-project-count">{loops.length}</span>
-                        <span className="sidebar-project-chevron" aria-hidden="true">
-                          {collapsed ? "+" : "-"}
-                        </span>
-                      </button>
+            {!showingTaskCreation ? (
+              <div className="sidebar-projects" aria-label="项目任务导航">
+                <div className="sidebar-projects-head">
+                  <span>项目</span>
+                  <span>{visibleLoops.length} 个任务</span>
+                </div>
+                <div className="sidebar-loop-groups">
+                  {loopGroups.map((project) => {
+                    const projectName = project.name;
+                    const loops = project.loops || [];
+                    const collapsed = collapsedProjects[projectName];
+                    return (
+                      <div key={projectName} className="sidebar-group">
+                        <button
+                          type="button"
+                          className="sidebar-group-toggle"
+                          aria-expanded={!collapsed}
+                          onClick={() =>
+                            setCollapsedProjects((current) => ({
+                              ...current,
+                              [projectName]: !current[projectName],
+                            }))
+                          }
+                        >
+                          <span className="sidebar-project-title">{projectName}</span>
+                          <span className="sidebar-project-count">{loops.length}</span>
+                          <span className="sidebar-project-chevron" aria-hidden="true">
+                            {collapsed ? "+" : "-"}
+                          </span>
+                        </button>
 
-                      {!collapsed ? (
-                        <div className="sidebar-loop-list">
-                          {project.isEmpty ? (
-                            <div className="sidebar-empty-project">还没有任务</div>
-                          ) : null}
-                          {loops.map((loop) => {
-                            const isActive = loop.id === (currentLoop?.id || loopRegistry.currentLoopId);
-                            return (
-                              <div key={loop.id} className={`sidebar-loop-item ${isActive ? "is-active" : ""}`}>
-                                <button
-                                  type="button"
-                                  className="sidebar-loop-main"
-                                  onClick={() =>
-                                    withSubmit(async () => {
-                                      setSelectedLoopId(loop.id);
-                                      setActiveSidebarPane("loops");
-                                      setLoopMenuOpenId("");
-                                      await requestJson("/loops/select", {
-                                        method: "POST",
-                                        body: JSON.stringify({ loopId: loop.id }),
-                                      });
-                                    })
-                                  }
-                                >
-                                  <span className="sidebar-loop-name">{loop.name}</span>
-                                </button>
-
-                                <div className="sidebar-loop-tools">
+                        {!collapsed ? (
+                          <div className="sidebar-loop-list">
+                            {project.isEmpty ? (
+                              <div className="sidebar-empty-project">还没有任务</div>
+                            ) : null}
+                            {loops.map((loop) => {
+                              const isActive = loop.id === (currentLoop?.id || loopRegistry.currentLoopId);
+                              return (
+                                <div key={loop.id} className={`sidebar-loop-item ${isActive ? "is-active" : ""}`}>
                                   <button
                                     type="button"
-                                    className="loop-tool-button"
-                                    aria-label={`管理任务 ${loop.name}`}
-                                    title="更多"
+                                    className="sidebar-loop-main"
                                     onClick={() =>
-                                      setLoopMenuOpenId((current) => (current === loop.id ? "" : loop.id))
+                                      withSubmit(async () => {
+                                        setSelectedLoopId(loop.id);
+                                        setActiveSidebarPane("loops");
+                                        setLoopMenuOpenId("");
+                                        await requestJson("/loops/select", {
+                                          method: "POST",
+                                          body: JSON.stringify({ loopId: loop.id }),
+                                        });
+                                      })
                                     }
                                   >
-                                    <span aria-hidden="true">...</span>
+                                    <span className="sidebar-loop-name">{loop.name}</span>
                                   </button>
-                                  {loopMenuOpenId === loop.id ? (
-                                    <div className="loop-context-menu">
-                                      <button
-                                        type="button"
-                                        onClick={() => {
-                                          setActiveSidebarPane("manage");
-                                          setLoopMenuOpenId("");
-                                        }}
-                                      >
-                                        打开设置
-                                      </button>
-                                      <button
-                                        type="button"
-                                        onClick={() =>
-                                          withSubmit(async () => {
-                                            const nextName = window.prompt("输入新的任务名称", loop.name);
-                                            if (!nextName || nextName === loop.name) return;
-                                            await requestJson("/rename-loop", {
-                                              method: "POST",
-                                              body: JSON.stringify({ loopName: nextName }),
-                                            });
+
+                                  <div className="sidebar-loop-tools">
+                                    <button
+                                      type="button"
+                                      className="loop-tool-button"
+                                      aria-label={`管理任务 ${loop.name}`}
+                                      title="更多"
+                                      onClick={() =>
+                                        setLoopMenuOpenId((current) => (current === loop.id ? "" : loop.id))
+                                      }
+                                    >
+                                      <span aria-hidden="true">...</span>
+                                    </button>
+                                    {loopMenuOpenId === loop.id ? (
+                                      <div className="loop-context-menu">
+                                        <button
+                                          type="button"
+                                          onClick={() => {
+                                            setActiveSidebarPane("manage");
                                             setLoopMenuOpenId("");
-                                          })
-                                        }
-                                      >
-                                        重命名任务
-                                      </button>
-                                      {!loop.isCurrent ? (
+                                          }}
+                                        >
+                                          打开设置
+                                        </button>
                                         <button
                                           type="button"
                                           onClick={() =>
                                             withSubmit(async () => {
-                                              await requestJson("/loops/delete", {
+                                              const nextName = window.prompt("输入新的任务名称", loop.name);
+                                              if (!nextName || nextName === loop.name) return;
+                                              await requestJson("/rename-loop", {
                                                 method: "POST",
-                                                body: JSON.stringify({ loopId: loop.id }),
+                                                body: JSON.stringify({ loopName: nextName }),
                                               });
                                               setLoopMenuOpenId("");
                                             })
                                           }
                                         >
-                                          删除这个任务
+                                          重命名任务
                                         </button>
-                                      ) : null}
-                                    </div>
-                                  ) : null}
+                                        {!loop.isCurrent ? (
+                                          <button
+                                            type="button"
+                                            onClick={() =>
+                                              withSubmit(async () => {
+                                                await requestJson("/loops/delete", {
+                                                  method: "POST",
+                                                  body: JSON.stringify({ loopId: loop.id }),
+                                                });
+                                                setLoopMenuOpenId("");
+                                              })
+                                            }
+                                          >
+                                            删除这个任务
+                                          </button>
+                                        ) : null}
+                                      </div>
+                                    ) : null}
+                                  </div>
                                 </div>
-                              </div>
-                            );
-                          })}
-                        </div>
-                      ) : null}
-                    </div>
-                  );
-                })}
+                              );
+                            })}
+                          </div>
+                        ) : null}
+                      </div>
+                    );
+                  })}
+                </div>
               </div>
-            </div>
+            ) : (
+              <div className="sidebar-create-focus">
+                <strong>创建新任务</strong>
+                <p>这里不会展示已经创建的任务。历史任务在创建完成后回到项目列表查看。</p>
+              </div>
+            )}
 
             <div className="sidebar-footer">
               <button
@@ -3622,6 +3648,28 @@ function DesktopConsoleApp() {
           </>
         ) : (
           <div className="sidebar-collapsed-list">
+            <button
+              type="button"
+              className={`collapsed-loop-pill ${
+                activeSidebarPane === "create" && creationMode === "project" ? "is-active" : ""
+              }`}
+              onClick={() => void openCreatePane("project")}
+              title="创建项目"
+            >
+              <span>项</span>
+              <span className="mobile-only-label">创建项目</span>
+            </button>
+            <button
+              type="button"
+              className={`collapsed-loop-pill ${
+                activeSidebarPane === "create" && creationMode === "task" ? "is-active" : ""
+              }`}
+              onClick={() => void openCreatePane("task")}
+              title="创建任务"
+            >
+              <span>新</span>
+              <span className="mobile-only-label">创建任务</span>
+            </button>
             {visibleLoops.map((loop) => (
               <button
                 key={loop.id}
@@ -3679,11 +3727,16 @@ function DesktopConsoleApp() {
             onCreateProject={createProjectFromForm}
             onSubmit={() =>
               withSubmit(async () => {
-                await requestJson("/loop-creation-assistant/reply", {
+                const nextAssistantState = await requestJson("/loop-creation-assistant/reply", {
                   method: "POST",
                   body: JSON.stringify({ answer: assistantAnswer }),
                 });
+                setAssistantState(nextAssistantState);
                 setAssistantAnswer("");
+                if (nextAssistantState?.status === "completed") {
+                  setActiveSidebarPane("loops");
+                  setLoopMenuOpenId("");
+                }
               })
             }
             onBack={() =>

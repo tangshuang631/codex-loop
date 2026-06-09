@@ -413,10 +413,27 @@ select {
   gap: 16px;
 }
 
-.assistant-thread,
-.assistant-result {
+.assistant-thread {
   display: grid;
   gap: 12px;
+}
+
+.assistant-empty-state,
+.sidebar-create-focus {
+  display: grid;
+  gap: 8px;
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  background: #f8f8f3;
+}
+
+.assistant-empty-state p,
+.sidebar-create-focus p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.7;
 }
 
 .assistant-disclosure {

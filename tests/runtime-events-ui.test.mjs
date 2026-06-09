@@ -338,6 +338,41 @@ test("create task entry resets stale completed assistant state before opening", 
   assert.match(appSource, /onClick=\{\(\) => void openCreatePane\("project"\)\}/);
 });
 
+test("create task view does not show previously created tasks as the creation entry", async () => {
+  const appSource = await fs.readFile("app/web/src/App.jsx", "utf8");
+  const paneStart = appSource.indexOf("function LoopCreationAssistantPane");
+  const paneEnd = appSource.indexOf("function ManagePane", paneStart);
+  const paneSource = appSource.slice(paneStart, paneEnd);
+  const workspaceStart = appSource.indexOf("<CreateWorkspaceView");
+  const workspaceEnd = appSource.indexOf("{activeSidebarPane === \"help\"", workspaceStart);
+  const workspaceSource = appSource.slice(workspaceStart, workspaceEnd);
+
+  assert.notEqual(paneStart, -1);
+  assert.notEqual(workspaceStart, -1);
+  assert.doesNotMatch(paneSource, /assistant-result/);
+  assert.doesNotMatch(paneSource, /createdLoop\.name/);
+  assert.match(paneSource, /开始新建任务/);
+  assert.match(workspaceSource, /nextAssistantState\?\.status === "completed"/);
+  assert.match(workspaceSource, /setActiveSidebarPane\("loops"\)/);
+});
+
+test("create task mode hides historical task navigation and keeps creation entry available", async () => {
+  const appSource = await fs.readFile("app/web/src/App.jsx", "utf8");
+  const sidebarStart = appSource.indexOf("<aside className={`workspace-sidebar");
+  const sidebarEnd = appSource.indexOf("</aside>", sidebarStart);
+  const sidebarSource = appSource.slice(sidebarStart, sidebarEnd);
+  const collapsedStart = sidebarSource.indexOf("<div className=\"sidebar-collapsed-list\">");
+  const collapsedSource = sidebarSource.slice(collapsedStart);
+
+  assert.notEqual(sidebarStart, -1);
+  assert.notEqual(collapsedStart, -1);
+  assert.match(appSource, /const showingTaskCreation/);
+  assert.match(sidebarSource, /\{!showingTaskCreation \? \(/);
+  assert.match(sidebarSource, /创建新任务/);
+  assert.match(collapsedSource, /openCreatePane\("project"\)/);
+  assert.match(collapsedSource, /openCreatePane\("task"\)/);
+});
+
 test("dashboard avoids long thread ids stretching the mobile home header", async () => {
   const appSource = await fs.readFile("app/web/src/App.jsx", "utf8");
   const stylesSource = await fs.readFile("app/web/src/styles.css", "utf8");
