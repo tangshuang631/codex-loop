@@ -17,6 +17,11 @@ import {
   generatePromptWithOllama,
 } from "./ollama-prompt-generator.mjs";
 import { resolveProjectLayout } from "./paths.mjs";
+import {
+  defaultRunSupervisorVerificationCommand,
+  injectVerificationIntoInstruction,
+  runSupervisorIndependentVerification,
+} from "./verification/supervisor-verification.mjs";
 
 function nowIso() {
   return new Date().toISOString();
@@ -30,6 +35,7 @@ const TRANSCRIPT_STALE_MS = 15 * 60 * 1000;
 const AUTO_FAIL_STALLED_CONTINUATION = false;
 const activeContinuationKeys = new Set();
 const activeRecoveryKeys = new Set();
+const activeSnapshotRefreshes = new Map();
 
 async function readJson(filePath, fallbackValue = null) {
   try {
@@ -126,6 +132,71 @@ function normalizeTextList(value, maxItems = 5, maxLength = 120) {
     .slice(0, maxItems);
 }
 
+function normalizeSupervisorSettings(value = {}) {
+  const source = value && typeof value === "object" ? value : {};
+  return {
+    roleTraits: summarizeForFollowup(source.roleTraits, 600),
+    testingRules: summarizeForFollowup(source.testingRules, 600),
+    acceptanceCriteria: summarizeForFollowup(source.acceptanceCriteria, 600),
+  };
+}
+
+function hasSupervisorSettings(value = {}) {
+  const supervisor = normalizeSupervisorSettings(value);
+  return Boolean(
+    supervisor.roleTraits ||
+      supervisor.testingRules ||
+      supervisor.acceptanceCriteria,
+  );
+}
+
+function mergeLoopSupervisorField(globalValue, loopValue) {
+  const globalText = safeText(globalValue, "");
+  const loopText = safeText(loopValue, "");
+  if (globalText && loopText) {
+    return `${globalText}\n当前 loop：${loopText}`;
+  }
+  if (loopText) {
+    return `当前 loop：${loopText}`;
+  }
+  return globalText;
+}
+
+function applyLoopSupervisorToProfile(profile = {}, loopSupervisor = {}) {
+  const supervisor = normalizeSupervisorSettings(loopSupervisor);
+  if (!hasSupervisorSettings(supervisor)) {
+    return profile;
+  }
+
+  const resolved = profile.resolved || {};
+  const conversation = resolved.conversation || {};
+  const globalSupervisor = conversation.supervisor || {};
+  return {
+    ...profile,
+    resolved: {
+      ...resolved,
+      conversation: {
+        ...conversation,
+        supervisor: {
+          ...globalSupervisor,
+          roleTraits: mergeLoopSupervisorField(
+            globalSupervisor.roleTraits,
+            supervisor.roleTraits,
+          ),
+          testingRules: mergeLoopSupervisorField(
+            globalSupervisor.testingRules,
+            supervisor.testingRules,
+          ),
+          acceptanceCriteria: mergeLoopSupervisorField(
+            globalSupervisor.acceptanceCriteria,
+            supervisor.acceptanceCriteria,
+          ),
+        },
+      },
+    },
+  };
+}
+
 function normalizePositiveNumber(value, fallback, { min = 1 } = {}) {
   const nextValue = Number(value);
   if (!Number.isFinite(nextValue) || nextValue < min) {
@@ -182,12 +253,16 @@ function readableRuntimeEventTitle(type) {
     run_started_from_console: "已开始循环",
     heartbeat: "已同步进展",
     pending_guidance_saved: "已记录下一轮补充",
+    pending_guidance_cleared: "已清空补充引导",
     codex_followup_dispatching: "正在发送下一轮指令",
     codex_followup_dispatched: "正在等待 Codex 回复",
     codex_followup_sent_waiting: "指令已送达，等待 Codex",
     codex_followup_completed: "Codex 已完成一轮",
+    supervisor_review_started: "监督复盘中",
     supervisor_review_completed: "已完成监督复盘",
     supervisor_review_skipped: "已跳过监督复盘",
+    supervisor_verification_completed: "已完成独立验收",
+    loop_supervisor_updated: "已更新当前任务 NPC",
     codex_thread_mirror_synced: "已同步 Codex 记录",
     codex_conversation_mirror_synced: "已同步 Codex 对话",
     codex_followup_failed: "续跑失败",
@@ -203,6 +278,24 @@ function readableRuntimeEventTitle(type) {
 }
 
 function readableRuntimeEventDetail(event = {}) {
+  const type = safeText(event.type, "");
+  if (type === "codex_followup_completed") {
+    return firstNonEmpty(
+      event.latestAssistantPreview,
+      event.summary,
+      "已收到 Codex 新回复，等待下一次指令。",
+    );
+  }
+  if (type === "graceful_stop_completed") {
+    return firstNonEmpty(
+      event.summary,
+      event.note,
+      /graceful stop completed/i.test(safeText(event.reason, ""))
+        ? "循环已停止。"
+        : event.reason,
+      "循环已停止。",
+    );
+  }
   return firstNonEmpty(
     event.preview,
     event.progressSummary,
@@ -211,6 +304,8 @@ function readableRuntimeEventDetail(event = {}) {
     event.reason,
     event.message,
     event.error,
+    event.promptPreview,
+    event.nextInstructionPreview,
     event.latestAssistantPreview,
     event.threadTitle,
     event.loopName,
@@ -218,10 +313,103 @@ function readableRuntimeEventDetail(event = {}) {
   );
 }
 
+function normalizeRuntimeEventDetail(text) {
+  return summarizeForFollowup(text, 180).replace(/\s+/g, " ").trim();
+}
+
+function readableRuntimeEventDedupeKey(event = {}) {
+  const type = safeText(event.type, "");
+  if (type === "codex_conversation_mirror_synced") {
+    return [
+      type,
+      safeText(event.threadId, ""),
+      safeText(event.latestAssistantAt, ""),
+      normalizeRuntimeEventDetail(readableRuntimeEventDetail(event)),
+    ].join("|");
+  }
+
+  if (type === "codex_thread_mirror_synced") {
+    return [
+      type,
+      safeText(event.threadId, ""),
+      normalizeRuntimeEventDetail(readableRuntimeEventDetail(event)),
+    ].join("|");
+  }
+
+  if (type === "codex_followup_completed") {
+    return [
+      type,
+      safeText(event.threadId, ""),
+      normalizeRuntimeEventDetail(readableRuntimeEventDetail(event)),
+    ].join("|");
+  }
+
+  if (
+    type === "codex_followup_dispatching" ||
+    type === "codex_followup_sent_waiting" ||
+    type === "codex_followup_dispatched"
+  ) {
+    return [
+      type,
+      safeText(event.threadId, ""),
+      normalizeRuntimeEventDetail(readableRuntimeEventDetail(event)),
+    ].join("|");
+  }
+
+  if (type === "graceful_stop_completed") {
+    return [
+      type,
+      normalizeRuntimeEventDetail(readableRuntimeEventDetail(event)),
+    ].join("|");
+  }
+
+  return "";
+}
+
+function isLowSignalRuntimeEvent(event = {}) {
+  const type = safeText(event.type, "");
+  if (type !== "codex_thread_mirror_synced") {
+    return false;
+  }
+
+  return !firstNonEmpty(
+    event.preview,
+    event.progressSummary,
+    event.summary,
+    event.note,
+    event.reason,
+    event.message,
+    event.error,
+    event.latestAssistantPreview,
+  );
+}
+
 async function readReadableRuntimeEvents(logPath, limit = 12) {
-  const events = await readJsonLines(logPath, Math.max(limit * 3, 30));
+  const events = await readJsonLines(logPath, Math.max(limit * 20, 120));
+  const seen = new Set();
+  const latestOnlySeen = new Set();
+  const seenVisibleDetails = new Set();
   return events
     .reverse()
+    .filter((event) => !isLowSignalRuntimeEvent(event))
+    .filter((event) => {
+      const type = safeText(event.type, "");
+      if (type === "codex_conversation_mirror_synced") {
+        if (latestOnlySeen.has(type)) {
+          return false;
+        }
+        latestOnlySeen.add(type);
+      }
+      const key = readableRuntimeEventDedupeKey(event);
+      if (!key) {
+        return true;
+      }
+      if (seen.has(key)) {
+        return false;
+      }
+      seen.add(key);
+      return true;
+    })
     .map((event) => {
       const type = safeText(event.type, "");
       return {
@@ -233,6 +421,17 @@ async function readReadableRuntimeEvents(logPath, limit = 12) {
       };
     })
     .filter((event) => event.at || event.type)
+    .filter((event) => {
+      const detailKey = normalizeRuntimeEventDetail(event.detail);
+      if (!detailKey) {
+        return true;
+      }
+      if (seenVisibleDetails.has(detailKey)) {
+        return false;
+      }
+      seenVisibleDetails.add(detailKey);
+      return true;
+    })
     .slice(0, limit);
 }
 
@@ -241,6 +440,31 @@ function markErrorAlreadyRecorded(error) {
     error.codexLoopRecorded = true;
   }
   return error;
+}
+
+function pendingGuidanceAfterDispatch(thread = {}, dispatchedGuidance = "") {
+  const currentGuidance = safeText(thread.pendingUserGuidance, "");
+  const consumedGuidance = safeText(dispatchedGuidance, "");
+  if (!currentGuidance || !consumedGuidance) {
+    return {
+      pendingUserGuidance: currentGuidance,
+      pendingUserGuidanceAt: currentGuidance
+        ? safeText(thread.pendingUserGuidanceAt, "")
+        : "",
+    };
+  }
+
+  let nextGuidance = currentGuidance;
+  if (currentGuidance === consumedGuidance) {
+    nextGuidance = "";
+  } else if (currentGuidance.startsWith(consumedGuidance + "\n")) {
+    nextGuidance = currentGuidance.slice(consumedGuidance.length).replace(/^\n+/u, "");
+  }
+
+  return {
+    pendingUserGuidance: nextGuidance,
+    pendingUserGuidanceAt: nextGuidance ? safeText(thread.pendingUserGuidanceAt, "") : "",
+  };
 }
 
 async function markDispatchWaiting(
@@ -302,6 +526,7 @@ async function markDispatchWaiting(
 async function markDispatchSentWithoutCompletion(
   startDir,
   {
+    consumedPendingGuidance = "",
     promptGenerator = "template",
     promptGenerationError = "",
     promptGenerationWarning = "",
@@ -309,6 +534,10 @@ async function markDispatchSentWithoutCompletion(
 ) {
   const sentAt = nowIso();
   const refreshed = await ensureLoopArtifacts(startDir);
+  const nextPendingGuidance = pendingGuidanceAfterDispatch(
+    refreshed.thread,
+    consumedPendingGuidance,
+  );
   const sentThread = await persistThreadMirror(
     refreshed.paths.threadPath,
     refreshed.thread,
@@ -316,8 +545,7 @@ async function markDispatchSentWithoutCompletion(
     {
       continuationEnabled: true,
       continuationStatus: "dispatching",
-      pendingUserGuidance: "",
-      pendingUserGuidanceAt: "",
+      ...nextPendingGuidance,
       lastContinuationError: promptGenerationError,
       promptGenerationWarning,
       latestSummary: "消息已送达绑定线程，正在等待 Codex 完成这一轮回复。",
@@ -347,6 +575,34 @@ async function markDispatchSentWithoutCompletion(
     mode: refreshed.state.mode,
   });
   return readLoopSnapshot(startDir);
+}
+
+async function markSupervisorReviewStarted(snapshot, { at = nowIso() } = {}) {
+  const reviewingThread = await persistThreadMirror(
+    snapshot.paths.threadPath,
+    snapshot.thread,
+    snapshot.state,
+    {
+      continuationStatus: "reviewing",
+      latestSummary: "Codex 已完成当前轮，本地模型 NPC 正在复盘回复并决定下一步。",
+      latestEventType: "supervisor_review_started",
+      lastContinuationError: "",
+      lastUpdatedAt: at,
+    },
+  );
+  await updateRegistryLoopBinding(
+    snapshot.paths.codexLoopRoot,
+    snapshot.config.currentRunId,
+    (loop) => ({ threadBinding: { ...(loop.threadBinding || {}), ...reviewingThread } }),
+  );
+  await appendJsonLine(snapshot.paths.logPath, {
+    type: "supervisor_review_started",
+    at,
+    threadId: reviewingThread.threadId,
+    threadTitle: reviewingThread.threadTitle,
+    latestCodexSummary: snapshot.thread.latestCodexSummary,
+  });
+  return reviewingThread;
 }
 
 function pickPreferredThreadMirror(boundThread, savedThread) {
@@ -417,6 +673,10 @@ function createThreadDefaults(config) {
     supervisorNeedsIndependentVerification: false,
     lastSupervisorVerificationCommands: [],
     lastSupervisorAcceptanceFocus: [],
+    lastSupervisorVerificationStatus: "",
+    lastSupervisorVerificationSummary: "",
+    lastSupervisorVerificationResults: [],
+    lastSupervisorVerificationAt: "",
     supervisorReviewWarning: "",
     lastUpdatedAt: nowIso(),
   };
@@ -485,8 +745,10 @@ function buildLoopEntry({
   docs = null,
   git = null,
   creation = null,
+  supervisor = null,
   threadBinding,
 }) {
+  const normalizedSupervisor = normalizeSupervisorSettings(supervisor || {});
   return {
     id,
     runId: id,
@@ -501,6 +763,9 @@ function buildLoopEntry({
     docs,
     git,
     creation,
+    supervisor: hasSupervisorSettings(normalizedSupervisor)
+      ? normalizedSupervisor
+      : null,
     threadBinding: threadBinding || createLoopThreadBinding({
       projectName,
       threadTitle,
@@ -510,6 +775,17 @@ function buildLoopEntry({
     createdAt: nowIso(),
     updatedAt: nowIso(),
   };
+}
+
+function normalizeLoopContextPaths(startContextPaths = [], docs = null) {
+  return [
+    ...(Array.isArray(startContextPaths) ? startContextPaths : []),
+    ...(Array.isArray(docs?.ruleDocs) ? docs.ruleDocs : []),
+    ...(Array.isArray(docs?.devDocs) ? docs.devDocs : []),
+  ]
+    .map((item) => safeText(item, ""))
+    .filter(Boolean)
+    .filter((item, index, list) => list.indexOf(item) === index);
 }
 
 function buildDefaultRegistry(config, workspaceRoot) {
@@ -526,7 +802,13 @@ function buildDefaultRegistry(config, workspaceRoot) {
         projectAdapter: config.projectAdapter || config.projectName || "generic",
         workspaceRoot: config.workspaceRoot || workspaceRoot,
         budgets: { ...config.budgets },
-        startContextPaths: [],
+        startContextPaths: normalizeLoopContextPaths(
+          config.startContextPaths || [],
+          config.docs || null,
+        ),
+        docs: config.docs || null,
+        git: config.git || null,
+        supervisor: normalizeSupervisorSettings(config.supervisor || {}),
         threadBinding: createLoopThreadBinding(config),
       }),
     ],
@@ -585,10 +867,28 @@ function applyLoopToConfig(config, loop) {
     currentRunId: loop.runId || loop.id,
     loopName: loop.name,
     threadTitle: loop.threadTitle || loop.name,
+    startContextPaths: normalizeLoopContextPaths(
+      loop.startContextPaths || [],
+      loop.docs || config.docs || null,
+    ),
+    docs: loop.docs ?? config.docs ?? null,
+    git: loop.git ?? config.git ?? null,
     budgets: {
       ...config.budgets,
       ...loop.budgets,
     },
+  };
+}
+
+function applySelectedLoopToLayout(layout, loop) {
+  const loopWorkspaceRoot = safeText(loop?.workspaceRoot, "");
+  if (!loopWorkspaceRoot) {
+    return layout;
+  }
+
+  return {
+    ...layout,
+    workspaceRoot: path.resolve(loopWorkspaceRoot),
   };
 }
 
@@ -706,6 +1006,113 @@ function normalizeAssistantFieldAnswer(answer) {
   return text
     .replace(/^(改成|改为)\s*/u, "")
     .trim();
+}
+
+function buildLoopSnapshot(loop) {
+  if (!loop) {
+    return {
+      id: "",
+      name: "",
+      projectName: "",
+      branch: "",
+      creation: null,
+      supervisor: normalizeSupervisorSettings(),
+    };
+  }
+
+  return {
+    id: loop.id,
+    runId: loop.runId || loop.id,
+    name: loop.name || "",
+    projectName: loop.projectName || "",
+    branch: loop.branch || "",
+    workspaceRoot: loop.workspaceRoot || "",
+    creation: normalizeLoopCreation(loop.creation),
+    supervisor: normalizeSupervisorSettings(loop.supervisor || {}),
+  };
+}
+
+function normalizeCreationPlanning(plan = {}) {
+  const source = plan && typeof plan === "object" ? plan : {};
+  const riskNotes = normalizeTextList(source.riskNotes || [], 8, 160);
+  return {
+    source: safeText(source.source, ""),
+    objectiveSummary: safeText(source.objectiveSummary, ""),
+    checklist: normalizeTextList(source.checklist || [], 12, 160),
+    riskNotes,
+    riskSummary: riskNotes.join("；"),
+    nextQuestion: safeText(source.nextQuestion, ""),
+    confirmedAt: safeText(source.confirmedAt, ""),
+  };
+}
+
+function normalizeCreationEvidence({ git = {}, docs = {}, projectProfile = {} } = {}) {
+  const ruleDocs = Array.isArray(docs.ruleDocs) ? docs.ruleDocs : [];
+  const devDocs = Array.isArray(docs.devDocs) ? docs.devDocs : [];
+  const detectedCommands = normalizeTextList(projectProfile.commands || [], 12, 180);
+  const gitStatus = safeText(git.gitStatus || git.status, git.hasGit ? "ready" : "missing");
+  return {
+    gitStatus,
+    hasGit: Boolean(git.hasGit),
+    branch: safeText(git.branch || git.recommendedBranch, ""),
+    docsCount: ruleDocs.length + devDocs.length,
+    ruleDocs,
+    devDocs,
+    detectedCommands,
+    projectType: safeText(projectProfile.projectType, "generic"),
+    strictness: safeText(projectProfile.strictness, "medium"),
+    summary: `git ${gitStatus} · 文档 ${ruleDocs.length + devDocs.length} 个 · 命令 ${detectedCommands.length} 个`,
+  };
+}
+
+function normalizeLoopCreation(creation = null) {
+  if (!creation || typeof creation !== "object") {
+    return null;
+  }
+  const planning = normalizeCreationPlanning(creation.planning || {});
+  const sourceEvidence = creation.evidence || {};
+  const evidence = normalizeCreationEvidence({
+    git: sourceEvidence,
+    docs: sourceEvidence,
+    projectProfile: {
+      ...(creation.projectProfile || {}),
+      commands: sourceEvidence.detectedCommands || creation.projectProfile?.commands || [],
+      projectType: sourceEvidence.projectType || creation.projectProfile?.projectType,
+      strictness: sourceEvidence.strictness || creation.projectProfile?.strictness,
+    },
+  });
+  return {
+    source: safeText(creation.source, ""),
+    createdAt: safeText(creation.createdAt, ""),
+    planning,
+    evidence,
+    projectProfile: creation.projectProfile || null,
+    safety: creation.safety || null,
+  };
+}
+
+function buildLoopCreationMetadata({ draft, docs, confirmedAt = nowIso() }) {
+  const planning = normalizeCreationPlanning({
+    ...(draft.plan || {}),
+    confirmedAt,
+  });
+  const evidence = normalizeCreationEvidence({
+    git: draft.git || {},
+    docs,
+    projectProfile: draft.projectProfile || {},
+  });
+  return {
+    source: "assistant",
+    createdAt: confirmedAt,
+    planning,
+    evidence,
+    projectProfile: draft.projectProfile || null,
+    safety: {
+      requireGitPushReminder: true,
+      pauseOnPermissionIssue: true,
+      requireBranchConfirmation: true,
+    },
+  };
 }
 
 function applyPlanReviewAnswer(draft, answer) {
@@ -1182,6 +1589,7 @@ async function readConfig(layout) {
 
 function summarizeSnapshot({
   config,
+  loop,
   state,
   thread,
   profile,
@@ -1193,6 +1601,7 @@ function summarizeSnapshot({
 }) {
   return {
     config,
+    loop: buildLoopSnapshot(loop),
     state: {
       ...state,
       modeLabel: modeLabel(state.mode),
@@ -1292,16 +1701,98 @@ function formatLoopStopLimit(budgets = {}) {
   return parts.length ? parts.join(" · ") : "未设置停止条件";
 }
 
+function blockingHealthIssue(health = {}) {
+  const issues = Array.isArray(health.issues) ? health.issues : [];
+  if (issues.some((issue) => String(issue).startsWith("workspace:"))) {
+    return {
+      type: "workspace",
+      message: "项目路径不可用，codex-loop 已停止继续发送。请恢复项目目录或重新配置工作区。",
+    };
+  }
+  if (issues.some((issue) => String(issue).startsWith("context:"))) {
+    return {
+      type: "context",
+      message: "项目规则或开发文档不可用，codex-loop 已停止继续发送。请恢复文件或重新配置文档。",
+    };
+  }
+  return null;
+}
+
+function deriveMonitorStatus(processState) {
+  const map = {
+    waiting_next_turn: {
+      monitorLevel: "ready",
+      monitorLabel: "可继续",
+      monitorTone: "ready",
+    },
+    health_blocked: {
+      monitorLevel: "blocked",
+      monitorLabel: "需处理",
+      monitorTone: "warning",
+    },
+    codex_working: {
+      monitorLevel: "busy",
+      monitorLabel: "处理中",
+      monitorTone: "active",
+    },
+    supervisor_reviewing: {
+      monitorLevel: "busy",
+      monitorLabel: "复盘中",
+      monitorTone: "active",
+    },
+    finalizing: {
+      monitorLevel: "busy",
+      monitorLabel: "收尾中",
+      monitorTone: "warning",
+    },
+    error: {
+      monitorLevel: "error",
+      monitorLabel: "失败",
+      monitorTone: "danger",
+    },
+    unbound: {
+      monitorLevel: "blocked",
+      monitorLabel: "未绑定",
+      monitorTone: "warning",
+    },
+    stopped: {
+      monitorLevel: "idle",
+      monitorLabel: "已停止",
+      monitorTone: "soft",
+    },
+  };
+  return map[processState] || {
+    monitorLevel: "idle",
+    monitorLabel: "待确认",
+    monitorTone: "soft",
+  };
+}
+
 function buildProcessStatus(snapshot) {
   const mode = snapshot.state.mode || "stopped";
   const continuationStatus = snapshot.thread.continuationStatus || "idle";
   const hasThread = Boolean(snapshot.thread.threadId);
   const waitingForCodex = continuationStatus === "dispatching";
+  const reviewingSupervisor = continuationStatus === "reviewing";
+  const healthBlocker = blockingHealthIssue(snapshot.health);
   const hasPendingGuidance = Boolean(snapshot.thread.pendingUserGuidance);
   const promptGenerationWarning = safeText(snapshot.thread.promptGenerationWarning, "");
   const supervisorReview = safeText(snapshot.thread.lastSupervisorReview, "");
   const supervisorInstruction = safeText(snapshot.thread.lastSupervisorInstruction, "");
   const supervisorReviewWarning = safeText(snapshot.thread.supervisorReviewWarning, "");
+  const supervisorVerificationStatus = safeText(
+    snapshot.thread.lastSupervisorVerificationStatus,
+    "",
+  );
+  const supervisorVerificationSummary = safeText(
+    snapshot.thread.lastSupervisorVerificationSummary,
+    "",
+  );
+  const supervisorVerificationResults = Array.isArray(
+    snapshot.thread.lastSupervisorVerificationResults,
+  )
+    ? snapshot.thread.lastSupervisorVerificationResults
+    : [];
   const verificationCommands = normalizeTextList(
     snapshot.thread.lastSupervisorVerificationCommands || [],
     5,
@@ -1322,12 +1813,16 @@ function buildProcessStatus(snapshot) {
     promptGenerationWarning ||
     "当前可以发送下一轮指令；如果开启了本地模型，会先合并 Codex 回复和你的补充引导。";
   let canSendNextTurn = hasThread && mode === "running" && continuationStatus === "idle";
+  let holdReason = "当前没有阻塞，可以发送下一轮指令。";
+  let nextAction = "需要继续时点击开始循环；如果自动循环已开启，可以等待下一次调度。";
 
   if (!hasThread) {
     state = "unbound";
     headline = "尚未绑定线程";
     detail = "先绑定要接入的 Codex 窗口，再开始循环。";
     canSendNextTurn = false;
+    holdReason = "还没有绑定可见的 Codex 线程。";
+    nextAction = "先在创建或管理里填写目标窗口 threadId，再开始循环。";
   } else if (isFinalizing) {
     state = "finalizing";
     headline = "正在收尾";
@@ -1335,28 +1830,57 @@ function buildProcessStatus(snapshot) {
       ? "Codex 正在处理当前轮，完成后 codex-loop 会停止，不会再发送下一条。"
       : "已进入收尾状态，不会再发送下一条指令。";
     canSendNextTurn = false;
-  } else if (mode === "stopped") {
-    state = "stopped";
-    headline = "已停止";
-    detail = "当前不会自动发送指令；需要继续时可以手动开始循环。";
-    canSendNextTurn = false;
+    holdReason = waitingForCodex
+      ? "已收到停止指令，但 Codex 仍在处理当前轮。"
+      : "当前 loop 已进入收尾状态。";
+    nextAction = "等待当前轮结束后查看最后记录；确认无误后再重新开始。";
   } else if (continuationStatus === "error") {
     state = "error";
     headline = "续跑失败";
     detail = snapshot.thread.lastContinuationError || "上一轮没有成功发送或确认，请查看最近记录后再继续。";
     canSendNextTurn = false;
+    holdReason = detail;
+    nextAction = "先检查线程绑定和 Codex 桌面端连接；必要时重新绑定后再开始循环。";
+  } else if (mode === "stopped") {
+    state = "stopped";
+    headline = "已停止";
+    detail = "当前不会自动发送指令；需要继续时可以手动开始循环。";
+    canSendNextTurn = false;
+    holdReason = "当前 loop 没有在运行。";
+    nextAction = "先看对话记录确认结果；需要继续时点击开始循环。";
+  } else if (healthBlocker) {
+    state = "health_blocked";
+    headline = "需要处理配置";
+    detail = healthBlocker.message;
+    canSendNextTurn = false;
+    holdReason = healthBlocker.message;
+    nextAction = "先恢复或重新配置后再开始循环。";
+  } else if (reviewingSupervisor) {
+    state = "supervisor_reviewing";
+    headline = "监督复盘中";
+    detail = "本地模型 NPC 正在以产品经理、测试人员和真实用户视角复盘 Codex 回复，完成前不会发送下一条指令。";
+    canSendNextTurn = false;
+    holdReason = "Codex 已完成当前轮，本地模型 NPC 正在复盘并决定下一步。";
+    nextAction = "等待复盘结束；如有新要求，可以先写入补充引导。";
   } else if (waitingForCodex) {
     state = "codex_working";
     headline = "Codex 正在处理";
     detail = "当前轮还没有完成，codex-loop 不会追加发送，避免打断 Codex。";
     canSendNextTurn = false;
+    holdReason = "Codex 正在执行当前轮，完成前不能追加发送。";
+    nextAction = "等待 Codex 完成；如果要补充方向，先写入下一轮引导。";
   }
 
+  const monitorStatus = deriveMonitorStatus(state);
   return {
     state,
+    ...monitorStatus,
     headline,
     detail,
+    holdReason,
+    nextAction,
     waitingForCodex,
+    reviewingSupervisor,
     canSendNextTurn,
     hasPendingGuidance,
     pendingGuidancePreview: buildPromptPreview(snapshot.thread.pendingUserGuidance || ""),
@@ -1372,6 +1896,12 @@ function buildProcessStatus(snapshot) {
     verificationCommands,
     verificationCommandPreview: verificationCommands.join(" · "),
     acceptanceFocusPreview: acceptanceFocus.join(" · "),
+    supervisorVerificationStatus,
+    supervisorVerificationSummary: supervisorVerificationSummary
+      ? summarizeForFollowup(supervisorVerificationSummary, 180)
+      : "",
+    supervisorVerificationCommandCount: supervisorVerificationResults.length,
+    supervisorVerificationAt: snapshot.thread.lastSupervisorVerificationAt || "",
     supervisorReviewWarning,
     promptGenerationWarning,
     stopLimit: formatLoopStopLimit(snapshot.state.budgets || snapshot.config.budgets || {}),
@@ -1513,9 +2043,13 @@ export async function exportMobileView(startDir = process.cwd()) {
       ? "当前已停止，可以查看最近记录后重新开始。"
       : "当前已停止，请先绑定线程。";
   } else if (snapshot.thread.threadId) {
-    suggestedAction = snapshot.thread.continuationStatus === "dispatching"
-      ? "Codex 正在处理当前轮，请等待完成后再继续。"
-      : "线程已绑定，可以观察进展或开始下一轮。";
+    if (snapshot.thread.continuationStatus === "dispatching") {
+      suggestedAction = "Codex 正在处理当前轮，请等待完成后再继续。";
+    } else if (snapshot.thread.continuationStatus === "reviewing") {
+      suggestedAction = "监督复盘中，请等待本地模型决定下一步。";
+    } else {
+      suggestedAction = "线程已绑定，可以观察进展或开始下一轮。";
+    }
   }
   return {
     loop: {
@@ -1523,6 +2057,12 @@ export async function exportMobileView(startDir = process.cwd()) {
       name: snapshot.config.loopName,
       mode: snapshot.state.mode,
       modeLabel: snapshot.state.modeLabel,
+      creation: snapshot.loop.creation
+        ? {
+            ...snapshot.loop.creation,
+            evidenceSummary: snapshot.loop.creation.evidence?.summary || "",
+          }
+        : null,
     },
     thread: {
       title: snapshot.thread.threadTitle,
@@ -1653,6 +2193,22 @@ function buildThreadMirror(thread, state, overrides = {}) {
       overrides.lastSupervisorAcceptanceFocus ??
       thread.lastSupervisorAcceptanceFocus ??
       [],
+    lastSupervisorVerificationStatus:
+      overrides.lastSupervisorVerificationStatus ??
+      thread.lastSupervisorVerificationStatus ??
+      "",
+    lastSupervisorVerificationSummary:
+      overrides.lastSupervisorVerificationSummary ??
+      thread.lastSupervisorVerificationSummary ??
+      "",
+    lastSupervisorVerificationResults:
+      overrides.lastSupervisorVerificationResults ??
+      thread.lastSupervisorVerificationResults ??
+      [],
+    lastSupervisorVerificationAt:
+      overrides.lastSupervisorVerificationAt ??
+      thread.lastSupervisorVerificationAt ??
+      "",
     supervisorReviewWarning:
       overrides.supervisorReviewWarning ?? thread.supervisorReviewWarning ?? "",
     promptGenerationWarning:
@@ -1734,6 +2290,7 @@ function buildVisibleThreadPrompt(snapshot) {
     snapshot.profile?.overrides?.conversation?.language || "zh-CN",
   ).toLowerCase();
   const englishPreferred = language.startsWith("en");
+  const pendingGuidance = summarizeForFollowup(snapshot.thread.pendingUserGuidance, 180);
   const focus = firstNonEmpty(
     summarizeForFollowup(snapshot.thread.lastSupervisorInstruction),
     summarizeForFollowup(snapshot.thread.latestCodexSummary),
@@ -1750,20 +2307,33 @@ function buildVisibleThreadPrompt(snapshot) {
     return [
       "Continue in this same Codex thread.",
       "Next: " + (conciseFocus || "Continue the highest-priority verified task."),
+      pendingGuidance ? "User added guidance: " + pendingGuidance : "",
       "Follow project docs and rules first. Do one small verifiable batch, then report progress, verification, and next step.",
-    ].join("\n");
+    ].filter(Boolean).join("\n");
   }
 
   return [
     "继续在同一个 Codex 线程中推进。",
     "下一步：" + (conciseFocus || "继续当前最高优先级、可验证的小任务。"),
+    pendingGuidance ? "用户临时补充：" + pendingGuidance : "",
     "优先遵守项目文档和开发规则。完成一小批可验证任务后，再回复进展、验证结果和下一步。",
-  ].join("\n");
+  ].filter(Boolean).join("\n");
 }
 
 async function fileHealth(filePath, label) {
   try {
     const stat = await fs.stat(filePath);
+    if (!stat.isFile()) {
+      return {
+        key: label,
+        path: filePath,
+        ok: false,
+        exists: true,
+        size: stat.size,
+        updatedAt: stat.mtime.toISOString(),
+        issue: "not-file",
+      };
+    }
     return {
       key: label,
       path: filePath,
@@ -1784,7 +2354,63 @@ async function fileHealth(filePath, label) {
         issue: "missing",
       };
     }
-    throw error;
+    return {
+      key: label,
+      path: filePath,
+      ok: false,
+      exists: false,
+      size: 0,
+      updatedAt: "",
+      issue: "unreadable",
+      error: safeText(error?.message, "文件不可读取"),
+    };
+  }
+}
+
+async function directoryHealth(dirPath, label) {
+  try {
+    const stat = await fs.stat(dirPath);
+    if (!stat.isDirectory()) {
+      return {
+        key: label,
+        path: dirPath,
+        ok: false,
+        exists: true,
+        size: stat.size,
+        updatedAt: stat.mtime.toISOString(),
+        issue: "not-directory",
+      };
+    }
+    return {
+      key: label,
+      path: dirPath,
+      ok: true,
+      exists: true,
+      size: stat.size,
+      updatedAt: stat.mtime.toISOString(),
+    };
+  } catch (error) {
+    if (error && error.code === "ENOENT") {
+      return {
+        key: label,
+        path: dirPath,
+        ok: false,
+        exists: false,
+        size: 0,
+        updatedAt: "",
+        issue: "missing",
+      };
+    }
+    return {
+      key: label,
+      path: dirPath,
+      ok: false,
+      exists: false,
+      size: 0,
+      updatedAt: "",
+      issue: "unreadable",
+      error: safeText(error?.message, "目录不可读取"),
+    };
   }
 }
 
@@ -1836,14 +2462,56 @@ function buildHealthSummary(checks, state, thread, errorState) {
 }
 
 async function inspectLoopHealth(paths, state, thread, errorState) {
+  const contextPaths = Array.isArray(paths.startContextPaths)
+    ? paths.startContextPaths
+    : [];
   const checks = await Promise.all([
+    directoryHealth(paths.workspaceRoot, "workspace"),
     fileHealth(paths.statePath, "state"),
     fileHealth(paths.threadPath, "thread"),
     fileHealth(paths.transcriptPath, "transcript"),
     fileHealth(paths.errorPath, "error"),
     fileHealth(paths.logPath, "events"),
+    ...contextPaths.map((filePath) => fileHealth(filePath, "context")),
   ]);
   return buildHealthSummary(checks, state, thread, errorState);
+}
+
+function missingContextMessage(health = {}) {
+  const invalidContexts = (health.checks || [])
+    .filter((check) => check.key === "context" && check.ok === false);
+  if (!invalidContexts.length) {
+    return "";
+  }
+  const readableIssue = {
+    missing: "缺失",
+    "not-file": "不是文件",
+    unreadable: "不可读取",
+  };
+  const details = invalidContexts
+    .map((check) => {
+      const issue = readableIssue[check.issue] || "不可用";
+      return `${check.path}（${issue}）`;
+    })
+    .join("；");
+  return "已配置的项目规则/开发文档不可用，codex-loop 已停止自动续发。请先恢复或重新配置文档：" +
+    details;
+}
+
+function invalidWorkspaceMessage(health = {}) {
+  const invalidWorkspace = (health.checks || [])
+    .find((check) => check.key === "workspace" && check.ok === false);
+  if (!invalidWorkspace) {
+    return "";
+  }
+  const readableIssue = {
+    missing: "不存在",
+    "not-directory": "不是目录",
+    unreadable: "不可读取",
+  };
+  const issue = readableIssue[invalidWorkspace.issue] || "不可用";
+  return "已配置的项目工作区不可用，codex-loop 已停止自动续发。请先恢复或重新配置项目路径：" +
+    `${invalidWorkspace.path}（${issue}）`;
 }
 
 function isContinuationStalled(thread, now = Date.now()) {
@@ -1987,13 +2655,14 @@ export async function markContinuationFailed(
   return readLoopSnapshot(startDir);
 }
 
-export async function ensureLoopArtifacts(startDir = process.cwd()) {
-  const layout = await resolveProjectLayout(startDir);
+async function ensureLoopArtifactsUnlocked(startDir = process.cwd(), preResolvedLayout = null) {
+  let layout = preResolvedLayout || await resolveProjectLayout(startDir);
   const initialConfig = await readConfig(layout);
   const { registry } = await loadLoopRegistry(layout, initialConfig);
   const config = await readConfig(layout);
   const currentLoop =
     registry.loops.find((loop) => loop.id === config.currentRunId) || registry.loops[0];
+  layout = applySelectedLoopToLayout(layout, currentLoop);
 
   const runId = config.currentRunId || DEFAULT_LOOP_ID;
   const runtimeDir = path.join(layout.runtimeRoot, runId);
@@ -2096,7 +2765,10 @@ export async function ensureLoopArtifacts(startDir = process.cwd()) {
   }
 
   const errorState = (await readJson(errorPath)) || createEmptyErrorState();
-  const profile = await readResolvedLoopProfile(startDir);
+  const profile = applyLoopSupervisorToProfile(
+    await readResolvedLoopProfile(startDir),
+    currentLoop?.supervisor,
+  );
   const paths = {
     runtimeDir,
     statePath,
@@ -2104,6 +2776,10 @@ export async function ensureLoopArtifacts(startDir = process.cwd()) {
     transcriptPath,
     threadPath,
     errorPath,
+    startContextPaths: normalizeLoopContextPaths(
+      config.startContextPaths || [],
+      config.docs || null,
+    ),
     workspaceRoot: layout.workspaceRoot,
     codexLoopRoot: layout.codexLoopRoot,
   };
@@ -2219,6 +2895,7 @@ export async function ensureLoopArtifacts(startDir = process.cwd()) {
 
   return summarizeSnapshot({
     config,
+    loop: currentLoop,
     state,
     thread,
     profile,
@@ -2228,6 +2905,24 @@ export async function ensureLoopArtifacts(startDir = process.cwd()) {
     codexConversation: refreshedCodexConversation,
     runtimeEvents,
   });
+}
+
+export async function ensureLoopArtifacts(startDir = process.cwd()) {
+  const layout = await resolveProjectLayout(startDir);
+  const refreshKey = layout.codexLoopRoot;
+  const previousRefresh = activeSnapshotRefreshes.get(refreshKey) || Promise.resolve();
+  const currentRefresh = previousRefresh
+    .catch(() => {})
+    .then(() => ensureLoopArtifactsUnlocked(startDir, layout));
+
+  activeSnapshotRefreshes.set(refreshKey, currentRefresh);
+  try {
+    return await currentRefresh;
+  } finally {
+    if (activeSnapshotRefreshes.get(refreshKey) === currentRefresh) {
+      activeSnapshotRefreshes.delete(refreshKey);
+    }
+  }
 }
 
 export async function readLoopSnapshot(startDir = process.cwd()) {
@@ -2289,12 +2984,14 @@ export async function savePendingGuidance(startDir = process.cwd(), payload = {}
   }
 
   const at = nowIso();
+  const previousGuidance = safeText(snapshot.thread.pendingUserGuidance, "");
+  const nextGuidance = previousGuidance ? `${previousGuidance}\n${text}` : text;
   const nextThread = await persistThreadMirror(
     snapshot.paths.threadPath,
     snapshot.thread,
     snapshot.state,
     {
-      pendingUserGuidance: text,
+      pendingUserGuidance: nextGuidance,
       pendingUserGuidanceAt: at,
       latestSummary: "已记录补充引导，会在 Codex 当前轮完成后交给本地模型合并到下一条指令。",
       latestEventType: "pending_guidance_saved",
@@ -2318,6 +3015,42 @@ export async function savePendingGuidance(startDir = process.cwd(), payload = {}
     activeTask: snapshot.state.activeTask,
     note: "pending_guidance_saved",
     summary: "已记录补充引导：" + buildPromptPreview(text),
+    mode: snapshot.state.mode,
+  });
+  return readLoopSnapshot(startDir);
+}
+
+export async function clearPendingGuidance(startDir = process.cwd()) {
+  const snapshot = await ensureLoopArtifacts(startDir);
+  const at = nowIso();
+  const nextThread = await persistThreadMirror(
+    snapshot.paths.threadPath,
+    snapshot.thread,
+    snapshot.state,
+    {
+      pendingUserGuidance: "",
+      pendingUserGuidanceAt: "",
+      latestSummary: "已清空未发送的补充引导。",
+      latestEventType: "pending_guidance_cleared",
+      lastUpdatedAt: at,
+    },
+  );
+
+  await updateRegistryLoopBinding(
+    snapshot.paths.codexLoopRoot,
+    snapshot.config.currentRunId,
+    (loop) => ({ threadBinding: { ...(loop.threadBinding || {}), ...nextThread } }),
+  );
+  await appendJsonLine(snapshot.paths.logPath, {
+    type: "pending_guidance_cleared",
+    at,
+    threadId: nextThread.threadId,
+  });
+  await appendTranscriptEntry(snapshot.paths.transcriptPath, {
+    at,
+    activeTask: snapshot.state.activeTask,
+    note: "pending_guidance_cleared",
+    summary: "已清空未发送的补充引导。",
     mode: snapshot.state.mode,
   });
   return readLoopSnapshot(startDir);
@@ -2427,6 +3160,26 @@ export async function updateBudgets(startDir = process.cwd(), payload) {
   return readLoopSnapshot(startDir);
 }
 
+export async function updateLoopSupervisor(startDir = process.cwd(), payload = {}) {
+  const snapshot = await ensureLoopArtifacts(startDir);
+  const supervisor = normalizeSupervisorSettings(payload);
+  const savedSupervisor = hasSupervisorSettings(supervisor) ? supervisor : null;
+  await updateRegistryLoopBinding(
+    snapshot.paths.codexLoopRoot,
+    snapshot.config.currentRunId,
+    () => ({
+      supervisor: savedSupervisor,
+    }),
+  );
+  await appendJsonLine(snapshot.paths.logPath, {
+    type: "loop_supervisor_updated",
+    at: nowIso(),
+    loopId: snapshot.config.currentRunId,
+    hasSupervisor: Boolean(savedSupervisor),
+  });
+  return readLoopSnapshot(startDir);
+}
+
 export async function startRun(startDir = process.cwd()) {
   const snapshot = await ensureLoopArtifacts(startDir);
   const at = nowIso();
@@ -2499,6 +3252,8 @@ async function runLoopTurnLegacy(
     if (safeText(dispatchResult?.lastMessage, "")) {
       return syncCodexThreadMirror(startDir, {
         latestCodexSummary: dispatchResult.lastMessage,
+      }, {
+        consumedPendingGuidance: snapshot.thread.pendingUserGuidance,
       });
     }
     if (!dispatchResult?.deliveryObserved) {
@@ -2507,6 +3262,7 @@ async function runLoopTurnLegacy(
       );
     }
     return markDispatchSentWithoutCompletion(startDir, {
+      consumedPendingGuidance: snapshot.thread.pendingUserGuidance,
       promptGenerator: "template",
     });
   } catch (error) {
@@ -2543,8 +3299,35 @@ export async function runLoopTurn(
   if (!snapshot.thread.threadId) {
     throw new Error("Cannot continue loop because no Codex thread is bound.");
   }
+  const workspaceErrorMessage = invalidWorkspaceMessage(snapshot.health);
+  if (workspaceErrorMessage) {
+    const failedAt = nowIso();
+    await markContinuationFailed(startDir, snapshot, {
+      failedAt,
+      message: workspaceErrorMessage,
+      latestSummary: workspaceErrorMessage,
+      promptGenerator: "workspace-check",
+    });
+    const error = markErrorAlreadyRecorded(new Error(workspaceErrorMessage));
+    throw error;
+  }
+  const contextErrorMessage = missingContextMessage(snapshot.health);
+  if (contextErrorMessage) {
+    const failedAt = nowIso();
+    await markContinuationFailed(startDir, snapshot, {
+      failedAt,
+      message: contextErrorMessage,
+      latestSummary: contextErrorMessage,
+      promptGenerator: "context-check",
+    });
+    const error = markErrorAlreadyRecorded(new Error(contextErrorMessage));
+    throw error;
+  }
   if (snapshot.thread.continuationStatus === "dispatching") {
     throw new Error("Loop continuation is already dispatching for the bound Codex thread.");
+  }
+  if (snapshot.thread.continuationStatus === "reviewing") {
+    throw new Error("本地模型监督复盘正在进行，请等待复盘完成后再发送下一轮指令。");
   }
   if (
     snapshot.thread.continuationStatus === "error" &&
@@ -2626,6 +3409,8 @@ export async function runLoopTurn(
     if (safeText(dispatchResult?.lastMessage, "")) {
       return syncCodexThreadMirror(startDir, {
         latestCodexSummary: dispatchResult.lastMessage,
+      }, {
+        consumedPendingGuidance: snapshot.thread.pendingUserGuidance,
       });
     }
     if (!dispatchResult?.deliveryObserved) {
@@ -2634,6 +3419,7 @@ export async function runLoopTurn(
       );
     }
     return markDispatchSentWithoutCompletion(startDir, {
+      consumedPendingGuidance: snapshot.thread.pendingUserGuidance,
       promptGenerator: promptGenerationWarning ? "template" : "ollama",
       promptGenerationError,
       promptGenerationWarning,
@@ -2732,7 +3518,10 @@ export async function createLoop(startDir = process.cwd(), payload = {}) {
       payload.projectAdapter || config.projectAdapter || config.projectName || "generic",
     workspaceRoot: payload.workspaceRoot || config.workspaceRoot || layout.workspaceRoot,
     budgets: { ...config.budgets, ...(payload.budgets || {}) },
-    startContextPaths: payload.startContextPaths || [],
+    startContextPaths: normalizeLoopContextPaths(
+      payload.startContextPaths || [],
+      payload.docs || null,
+    ),
     docs: payload.docs || null,
     git: payload.git || null,
     creation: payload.creation || null,
@@ -3069,6 +3858,12 @@ export async function replyLoopCreationAssistant(startDir = process.cwd(), paylo
     docs.devDocs = [...new Set([...docs.devDocs, path.resolve(answer)])];
   }
 
+  const createdAt = nowIso();
+  const creationMetadata = buildLoopCreationMetadata({
+    draft,
+    docs,
+    confirmedAt: createdAt,
+  });
   const loopRegistry = await createLoop(startDir, {
     loopName: draft.loopName,
     runId: buildSafeLoopId(draft.loopName, draft.projectName, "assistant-loop"),
@@ -3080,16 +3875,7 @@ export async function replyLoopCreationAssistant(startDir = process.cwd(), paylo
     docs,
     git: draft.git,
     startContextPaths: [...docs.ruleDocs, ...docs.devDocs],
-    creation: {
-      source: "assistant",
-      createdAt: nowIso(),
-      projectProfile: draft.projectProfile,
-      safety: {
-        requireGitPushReminder: true,
-        pauseOnPermissionIssue: true,
-        requireBranchConfirmation: true,
-      },
-    },
+    creation: creationMetadata,
   });
   const createdLoopId = buildSafeLoopId(draft.loopName, draft.projectName, "assistant-loop");
   const createdLoop =
@@ -3299,10 +4085,12 @@ export async function reviewCodexMilestone(
   startDir = process.cwd(),
   {
     generateMilestoneReview = generateMilestoneReviewWithOllama,
+    runVerificationCommand = defaultRunSupervisorVerificationCommand,
   } = {},
 ) {
   const snapshot = await ensureLoopArtifacts(startDir);
   const at = nowIso();
+  await markSupervisorReviewStarted(snapshot, { at });
   const fallbackReview = buildFallbackMilestoneReview(snapshot);
   const generator = snapshot.profile?.resolved?.conversation?.promptGenerator || {};
   const useOllamaReview =
@@ -3337,6 +4125,14 @@ export async function reviewCodexMilestone(
     }
   }
 
+  const verification = await runSupervisorIndependentVerification(snapshot, review, {
+    runVerificationCommand,
+  });
+  const nextInstruction = injectVerificationIntoInstruction(
+    review.nextInstruction,
+    verification,
+  );
+
   const nextThread = await persistThreadMirror(
     snapshot.paths.threadPath,
     snapshot.thread,
@@ -3344,11 +4140,15 @@ export async function reviewCodexMilestone(
     {
       lastSupervisorReview: review.summary,
       lastSupervisorReviewAt: at,
-      lastSupervisorInstruction: review.nextInstruction,
+      lastSupervisorInstruction: nextInstruction,
       lastSupervisorSource: source,
       supervisorNeedsIndependentVerification: Boolean(review.needsIndependentVerification),
       lastSupervisorVerificationCommands: review.verificationCommands,
       lastSupervisorAcceptanceFocus: review.acceptanceFocus,
+      lastSupervisorVerificationStatus: verification.status,
+      lastSupervisorVerificationSummary: verification.summary,
+      lastSupervisorVerificationResults: verification.results,
+      lastSupervisorVerificationAt: verification.ranAt,
       supervisorReviewWarning: warning,
       latestSummary: review.summary,
       latestEventType: review.shouldContinue
@@ -3373,17 +4173,34 @@ export async function reviewCodexMilestone(
     source,
     warning,
     summary: review.summary,
-    nextInstructionPreview: buildPromptPreview(review.nextInstruction),
+    nextInstructionPreview: buildPromptPreview(nextInstruction),
     needsIndependentVerification: Boolean(review.needsIndependentVerification),
     verificationCommands: review.verificationCommands,
+    verificationStatus: verification.status,
+    verificationSummary: verification.summary,
+    verificationResults: verification.results,
     acceptanceFocus: review.acceptanceFocus,
     risks: review.risks,
   });
+  if (verification.status && verification.status !== "not_requested") {
+    await appendJsonLine(snapshot.paths.logPath, {
+      type: "supervisor_verification_completed",
+      at: verification.ranAt || at,
+      threadId: nextThread.threadId,
+      status: verification.status,
+      summary: verification.summary,
+      results: verification.results,
+    });
+  }
   await appendTranscriptEntry(snapshot.paths.transcriptPath, {
     at,
     activeTask: snapshot.state.activeTask,
     note: "supervisor_review_completed",
-    summary: review.summary + " 下一步：" + buildPromptPreview(review.nextInstruction),
+    summary:
+      review.summary +
+      (verification.summary ? " " + verification.summary : "") +
+      " 下一步：" +
+      buildPromptPreview(nextInstruction),
     mode: snapshot.state.mode,
   });
 
@@ -3395,6 +4212,7 @@ export async function syncCodexThreadMirror(
   payload = {},
   {
     generateCodexSummary = generateCodexSummaryWithOllama,
+    consumedPendingGuidance = "",
   } = {},
 ) {
   const snapshot = await ensureLoopArtifacts(startDir);
@@ -3412,6 +4230,12 @@ export async function syncCodexThreadMirror(
     nextCodexSummary && nextCodexSummary !== safeText(snapshot.thread.latestCodexSummary, "");
   const completedCurrentDispatch =
     snapshot.thread.continuationStatus === "dispatching" && codexSummaryChanged;
+  const nextPendingGuidance = completedCurrentDispatch
+    ? pendingGuidanceAfterDispatch(snapshot.thread, consumedPendingGuidance)
+    : {
+        pendingUserGuidance: snapshot.thread.pendingUserGuidance,
+        pendingUserGuidanceAt: snapshot.thread.pendingUserGuidanceAt,
+      };
   const nextThread = {
     ...snapshot.thread,
     lastUserInstructionSummary:
@@ -3438,12 +4262,7 @@ export async function syncCodexThreadMirror(
     lastContinuationError: completedCurrentDispatch
       ? ""
       : snapshot.thread.lastContinuationError,
-    pendingUserGuidance: completedCurrentDispatch
-      ? ""
-      : snapshot.thread.pendingUserGuidance,
-    pendingUserGuidanceAt: completedCurrentDispatch
-      ? ""
-      : snapshot.thread.pendingUserGuidanceAt,
+    ...nextPendingGuidance,
     latestEventType:
       completedCurrentDispatch
         ? "codex_followup_completed"

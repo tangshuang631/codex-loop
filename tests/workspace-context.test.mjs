@@ -28,7 +28,7 @@ test("resolveWorkspaceAndLoopRoot detects workspace cwd correctly", async () => 
   assert.equal(resolved.codexLoopRoot, loopRoot);
 });
 
-test("resolveWorkspaceAndLoopRoot supports standalone codex-loop with explicit workspaceRoot", async () => {
+test("resolveWorkspaceAndLoopRoot treats standalone codex-loop root as the console workspace", async () => {
   const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), "codex-loop-root-"));
   const loopRoot = path.join(tempRoot, "codex-loop");
   const workspaceRoot = path.join(tempRoot, "demo-workspace");
@@ -41,6 +41,29 @@ test("resolveWorkspaceAndLoopRoot supports standalone codex-loop with explicit w
   );
 
   const resolved = await resolveWorkspaceAndLoopRoot(loopRoot);
-  assert.equal(resolved.workspaceRoot, workspaceRoot);
+  assert.equal(resolved.workspaceRoot, loopRoot);
   assert.equal(resolved.codexLoopRoot, loopRoot);
+});
+
+test("resolveWorkspaceAndLoopRoot still supports explicit environment workspace override", async () => {
+  const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), "codex-loop-root-"));
+  const loopRoot = path.join(tempRoot, "codex-loop");
+  const workspaceRoot = path.join(tempRoot, "demo-workspace");
+  await fs.mkdir(loopRoot, { recursive: true });
+  await fs.mkdir(workspaceRoot, { recursive: true });
+  await fs.writeFile(path.join(loopRoot, "config.json"), "{}\n", "utf8");
+
+  const previous = process.env.CODEX_LOOP_WORKSPACE_ROOT;
+  process.env.CODEX_LOOP_WORKSPACE_ROOT = workspaceRoot;
+  try {
+    const resolved = await resolveWorkspaceAndLoopRoot(loopRoot);
+    assert.equal(resolved.workspaceRoot, path.resolve(workspaceRoot));
+    assert.equal(resolved.codexLoopRoot, loopRoot);
+  } finally {
+    if (previous === undefined) {
+      delete process.env.CODEX_LOOP_WORKSPACE_ROOT;
+    } else {
+      process.env.CODEX_LOOP_WORKSPACE_ROOT = previous;
+    }
+  }
 });

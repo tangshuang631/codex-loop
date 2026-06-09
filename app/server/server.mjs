@@ -15,11 +15,13 @@ import {
   renameLoop,
   requestGracefulStop,
   runLoopTurn,
+  clearPendingGuidance,
   savePendingGuidance,
   saveThreadBinding,
   startRun,
   syncCodexThreadMirror,
   updateBudgets,
+  updateLoopSupervisor,
 } from "./lib/runtime-store.mjs";
 import { createLoopController } from "./lib/loop-controller.mjs";
 import {
@@ -38,7 +40,7 @@ function sendJson(response, statusCode, value) {
   response.writeHead(statusCode, {
     "Content-Type": "application/json; charset=utf-8",
     "Access-Control-Allow-Origin": "*",
-    "Access-Control-Allow-Methods": "GET,POST,OPTIONS",
+    "Access-Control-Allow-Methods": "GET,POST,DELETE,OPTIONS",
     "Access-Control-Allow-Headers": "Content-Type",
   });
   response.end(`${JSON.stringify(value)}\n`);
@@ -128,8 +130,10 @@ export function buildHandler({
       replyLoopCreationAssistant,
       requestGracefulStop,
       runLoopTurn,
+      clearPendingGuidance,
       savePendingGuidance,
       updateBudgets,
+      updateLoopSupervisor,
       saveThreadBinding,
       syncCodexThreadMirror,
       recordHeartbeat,
@@ -192,6 +196,11 @@ export function buildHandler({
 
       if (request.method === "GET" && request.url === "/api/automation") {
         sendJson(response, 200, await operations.readAutomationStatus(process.cwd()));
+        return;
+      }
+
+      if (request.method === "GET" && request.url === "/api/controller-status") {
+        sendJson(response, 200, loopController.getStatus(process.cwd()));
         return;
       }
 
@@ -365,6 +374,25 @@ export function buildHandler({
           response,
           200,
           await operations.savePendingGuidance(process.cwd(), body),
+        );
+        return;
+      }
+
+      if (request.method === "DELETE" && request.url === "/api/pending-guidance") {
+        sendJson(
+          response,
+          200,
+          await operations.clearPendingGuidance(process.cwd()),
+        );
+        return;
+      }
+
+      if (request.method === "POST" && request.url === "/api/loop-supervisor") {
+        const body = await readBody(request);
+        sendJson(
+          response,
+          200,
+          await operations.updateLoopSupervisor(process.cwd(), body),
         );
         return;
       }

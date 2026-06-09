@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 
 import { deriveDashboardGuide } from "./dashboard-guide.mjs";
+import { dedupeRuntimeEventsForDisplay } from "./runtime-events.mjs";
 
 function resolveApiBase() {
   if (import.meta.env.VITE_CODEX_LOOP_API_BASE) {
@@ -25,6 +26,14 @@ const API_BASE = resolveApiBase();
 const REQUEST_TIMEOUT_MS = 8000;
 const ACTIVE_POLL_MS = 5000;
 const IDLE_POLL_MS = 12000;
+const DEFAULT_SUPERVISOR_FORM = {
+  roleTraits:
+    "同时扮演产品经理、测试人员和真实用户：控制范围，关注可用性，主动发现偏离用户目标的问题。",
+  testingRules:
+    "Codex 完成一个清晰里程碑后再做独立验收；优先检查用户能否看懂状态、历史记录和下一步。",
+  acceptanceCriteria:
+    "每轮只推进一小批可验证改动；完成后必须能说明改了什么、如何验证、还有什么风险。",
+};
 
 const modeTextMap = {
   running: "运行中",
@@ -35,6 +44,7 @@ const modeTextMap = {
 const continuationTextMap = {
   idle: "等待下一轮",
   dispatching: "已发送，等待 Codex",
+  reviewing: "监督复盘中",
   error: "续跑失败",
 };
 
@@ -65,6 +75,14 @@ function formatTime(value, fallback = "暂无") {
     hour: "2-digit",
     minute: "2-digit",
   });
+}
+
+function shortThreadId(threadId = "") {
+  const value = formatValue(threadId, "");
+  if (value.length <= 18) {
+    return value;
+  }
+  return `${value.slice(0, 8)}...${value.slice(-6)}`;
 }
 
 function groupLoopsByProject(loops = []) {
@@ -98,6 +116,28 @@ function pickVisibleLoop(loops = [], preferredId = "") {
     visibleLoops[0] ||
     null
   );
+}
+
+function getInitialSidebarOpen() {
+  if (typeof window === "undefined") {
+    return true;
+  }
+  return !window.matchMedia("(max-width: 720px)").matches;
+}
+
+function resolveLauncherPhaseText(launcherStatus, snapshot, pollState) {
+  const phase = launcherStatus?.phase || "";
+  const dashboardIsLive = Boolean(snapshot) && (Boolean(pollState?.lastSuccessAt) || Boolean(snapshot?.health));
+
+  if (launcherStatus?.serverReady && launcherStatus?.webReady) {
+    return "前后端已就绪";
+  }
+
+  if (phase === "starting" && dashboardIsLive) {
+    return "控制台可用";
+  }
+
+  return launcherPhaseTextMap[phase] || formatValue(phase, "未知");
 }
 
 async function requestJsonLegacyUnused(targetPath, options = {}) {
@@ -480,6 +520,24 @@ function translateHealthIssue(issue) {
   if (value === "continuation:error") {
     return "续跑失败，请查看最近记录里的错误信息。";
   }
+  if (value === "context:missing") {
+    return "已配置的项目规则或开发文档缺失，请先恢复文件或重新配置后再继续。";
+  }
+  if (value === "context:not-file") {
+    return "已配置的项目规则或开发文档不是有效文件，请重新选择正确的文档文件。";
+  }
+  if (value === "context:unreadable") {
+    return "已配置的项目规则或开发文档无法读取，请检查文件权限或重新配置后再继续。";
+  }
+  if (value === "workspace:missing") {
+    return "项目路径不存在，请先恢复项目目录或重新选择工作区。";
+  }
+  if (value === "workspace:not-directory") {
+    return "项目路径不是目录，请重新选择正确的项目工作区。";
+  }
+  if (value === "workspace:unreadable") {
+    return "项目路径无法读取，请检查权限或重新选择工作区。";
+  }
   return value || "暂无";
 }
 
@@ -506,6 +564,9 @@ function deriveActionHint(snapshot, suggestedAction) {
   }
   if (snapshot?.thread?.continuationStatus === "dispatching") {
     return "先等待这一轮完成，再决定是否继续。";
+  }
+  if (snapshot?.thread?.continuationStatus === "reviewing") {
+    return "正在监督复盘，等待本地模型决定下一步。";
   }
   if (snapshot?.state?.stopRequested || snapshot?.state?.finalizeRequested) {
     return "当前正在收尾，先等待结束。";
@@ -537,7 +598,10 @@ function StatusPill({ text, tone = "default", active = false }) {
       className={[
         "status-pill",
         tone === "danger" ? "is-danger" : "",
+        tone === "warning" ? "is-warning" : "",
+        tone === "ready" ? "is-ready" : "",
         tone === "soft" ? "is-soft" : "",
+        tone === "active" ? "is-active" : "",
         active ? "is-live" : "",
       ]
         .filter(Boolean)
@@ -576,7 +640,7 @@ function buildLoopProgressItems({ processStatus, runtimeEvents = [], healthSumma
       state:
         processStatus?.state === "error"
           ? "error"
-          : processStatus?.waitingForCodex
+          : processStatus?.waitingForCodex || processStatus?.reviewingSupervisor
             ? "current"
             : processStatus?.canSendNextTurn
               ? "done"
@@ -585,10 +649,12 @@ function buildLoopProgressItems({ processStatus, runtimeEvents = [], healthSumma
     {
       key: "supervisor",
       label: "监督复盘",
-      detail: hasSupervisorReview
+      detail: processStatus?.reviewingSupervisor
+        ? "本地模型正在监督复盘，完成前不发送下一条"
+        : hasSupervisorReview
         ? processStatus?.supervisorInstructionPreview || processStatus?.supervisorReview
         : "等待 Codex 完成后再由本地模型复盘",
-      state: hasSupervisorReview ? "done" : "pending",
+      state: processStatus?.reviewingSupervisor ? "current" : hasSupervisorReview ? "done" : "pending",
     },
     {
       key: "guidance",
@@ -618,7 +684,7 @@ function LoopProgressPanel({ processStatus, runtimeEvents, healthSummary }) {
   const currentItem = items.find((item) => item.state === "current") || items.find((item) => item.state === "error") || items[0];
 
   return (
-    <details className="loop-progress-panel" open>
+    <details className="loop-progress-panel">
       <summary>
         <span>进度</span>
         <strong>{currentItem?.label || "当前轮"}</strong>
@@ -641,9 +707,141 @@ function LoopProgressPanel({ processStatus, runtimeEvents, healthSummary }) {
   );
 }
 
+function MobileAccessFold({ remoteAccessStatus, launcherWebUrl }) {
+  const mobileUrl = remoteAccessStatus?.url || remoteAccessStatus?.publicBaseUrl || launcherWebUrl || "";
+  const candidateUrls = remoteAccessStatus?.candidateUrls || [];
+  const steps = remoteAccessStatus?.recommendedSteps || [];
+  const summary =
+    remoteAccessStatus?.summary ||
+    "手机和这台电脑在同一网络后，可以用控制台地址查看当前 loop。";
+  const warning = remoteAccessStatus?.warning || "";
+  const statusText =
+    remoteAccessStatus?.statusText ||
+    (remoteAccessStatus?.isLocalOnly ? "手机暂时不能直接打开当前地址。" : "手机可以打开这个地址。");
+  const nextAction =
+    remoteAccessStatus?.nextAction ||
+    (remoteAccessStatus?.isLocalOnly
+      ? "请换成这台电脑的 Tailscale 地址或局域网 IP。"
+      : "用手机浏览器打开上面的地址。");
+  const mobileUrlHint = remoteAccessStatus?.mobileUrlHint || "";
+
+  return (
+    <details className="mobile-access-fold">
+      <summary>
+        <span>手机查看</span>
+        <strong>{remoteAccessStatus?.mobileReachable ? "手机可打开" : "需要换地址"}</strong>
+      </summary>
+      <p className="mobile-access-status">{statusText}</p>
+      {mobileUrl ? (
+        <div className="mobile-access-url">
+          <code>{mobileUrl}</code>
+          <button type="button" onClick={() => copyTextToClipboard(mobileUrl)}>
+            复制地址
+          </button>
+        </div>
+      ) : null}
+      {mobileUrlHint && mobileUrlHint !== mobileUrl ? (
+        <p className="mobile-access-hint">手机上请改用：{mobileUrlHint}</p>
+      ) : null}
+      {candidateUrls.length ? (
+        <div className="mobile-access-candidates">
+          <strong>推荐手机地址</strong>
+          {candidateUrls.map((candidate) => (
+            <div className="mobile-access-candidate" key={candidate.url}>
+              <span>{candidate.label || "手机地址"}</span>
+              <code>{candidate.url}</code>
+              <button type="button" onClick={() => copyTextToClipboard(candidate.url)}>
+                复制
+              </button>
+            </div>
+          ))}
+        </div>
+      ) : null}
+      <p>{nextAction}</p>
+      <p>{summary}</p>
+      {warning ? <p className="mobile-access-warning">{warning}</p> : null}
+      {steps.length ? (
+        <div className="mobile-access-steps">
+          {steps.map((step, index) => (
+            <p key={`${index}-${step}`}>{index + 1}. {step}</p>
+          ))}
+        </div>
+      ) : null}
+    </details>
+  );
+}
+
+function PencilIcon() {
+  return (
+    <svg viewBox="0 0 20 20" aria-hidden="true" focusable="false">
+      <path d="M13.8 2.8a1.9 1.9 0 0 1 2.7 2.7L6.9 15.1 3 16l.9-3.9 9.9-9.3Z" />
+      <path d="m12.3 4.3 3.4 3.4" />
+    </svg>
+  );
+}
+
+function TrashIcon() {
+  return (
+    <svg viewBox="0 0 20 20" aria-hidden="true" focusable="false">
+      <path d="M4.5 6.2h11" />
+      <path d="M8.2 3.8h3.6l.8 1.6H7.4l.8-1.6Z" />
+      <path d="M6.2 6.2 7 16h6l.8-9.8" />
+      <path d="M8.8 8.6v4.8M11.2 8.6v4.8" />
+    </svg>
+  );
+}
+
+function IconButton({ label, children, disabled = false, tone = "default", onClick }) {
+  return (
+    <button
+      type="button"
+      className={`icon-button ${tone === "danger" ? "is-danger" : ""}`}
+      aria-label={label}
+      title={label}
+      disabled={disabled}
+      onClick={onClick}
+    >
+      {children}
+    </button>
+  );
+}
+
+function PendingGuidanceComposer({
+  pendingGuidanceText,
+  setPendingGuidanceText,
+  submitting,
+  onSavePendingGuidance,
+}) {
+  return (
+    <form
+      className="conversation-composer"
+      onSubmit={(event) => {
+        event.preventDefault();
+        void onSavePendingGuidance(pendingGuidanceText);
+      }}
+    >
+      <textarea
+        rows={2}
+        aria-label="补充下一轮给 Codex 的话"
+        value={pendingGuidanceText}
+        placeholder="补充你要说的话 ,等 Codex 完成后合并，会等 Codex 当前任务完成再发送"
+        onChange={(event) => setPendingGuidanceText(event.target.value)}
+      />
+      <button
+        type="submit"
+        className="primary-button"
+        disabled={submitting || !pendingGuidanceText.trim()}
+      >
+        发送
+      </button>
+    </form>
+  );
+}
+
 function StatusSummaryPanel({
   modeText,
   continuationStatus,
+  controllerStatus,
   codexWorkStatus,
   processStatus,
   currentLoopName,
@@ -654,9 +852,33 @@ function StatusSummaryPanel({
   runtimeEvents,
 }) {
   const processDetail = processStatus?.detail || codexWorkStatus;
+  const monitorText = processStatus?.monitorLabel || processStatus?.headline || continuationStatus;
+  const verificationStatus = processStatus?.supervisorVerificationStatus || "";
+  const verificationText =
+    verificationStatus && verificationStatus !== "not_requested"
+      ? `${verificationStatus === "failed" ? "未通过" : verificationStatus === "passed" ? "已通过" : "已跳过"}${
+          processStatus?.supervisorVerificationSummary
+            ? "：" + processStatus.supervisorVerificationSummary
+            : ""
+        }`
+      : "";
   const rows = [
-    ["当前", `${modeText} · ${processStatus?.headline || continuationStatus}`],
+    ["当前", `${modeText} · ${monitorText}`],
+    controllerStatus?.label
+      ? [
+          "自动循环",
+          controllerStatus?.detail
+            ? `${controllerStatus.label}：${controllerStatus.detail}`
+            : controllerStatus.label,
+        ]
+      : null,
     ["说明", processDetail],
+    verificationText ? ["独立验收", verificationText] : null,
+    processStatus?.holdReason ? ["判断", processStatus.holdReason] : null,
+    processStatus?.nextAction ? ["下一步", processStatus.nextAction] : null,
+    processStatus?.hasPendingGuidance
+      ? ["待合并补充", processStatus?.pendingGuidancePreview || "已记录"]
+      : null,
     processStatus?.hasSupervisorReview
       ? ["监督复盘", processStatus?.supervisorReview || "已完成监督复盘"]
       : null,
@@ -673,28 +895,42 @@ function StatusSummaryPanel({
             processStatus.verificationCommands.join(" · "),
         ]
       : null,
+  ].filter(Boolean);
+  const detailRows = [
     ["停止条件", processStatus?.stopLimit || "未设置停止条件"],
-    processStatus?.hasPendingGuidance
-      ? ["待合并补充", processStatus?.pendingGuidancePreview || "已记录"]
-      : null,
     ["线程", threadLabel],
     ["模型", modelStatus],
+    ["健康提示", healthSummary || "当前没有明显异常。"],
+    ["刷新状态", pollStatus],
   ].filter(Boolean);
+  const primaryRows = rows.slice(0, 6);
 
   return (
     <div className="status-summary-panel">
-      <LoopProgressPanel
-        processStatus={processStatus}
-        runtimeEvents={runtimeEvents}
-        healthSummary={healthSummary}
-      />
-      {rows.map(([label, value]) => (
+      {primaryRows.map(([label, value]) => (
         <div className="status-summary-row" key={label}>
           <span>{label}</span>
           <strong>{value}</strong>
         </div>
       ))}
-      <RuntimeEventList events={runtimeEvents} />
+      <details className="status-detail-fold">
+        <summary>
+          <span>更多状态</span>
+          <strong>线程、模型、停止条件、运行记录</strong>
+        </summary>
+        <LoopProgressPanel
+          processStatus={processStatus}
+          runtimeEvents={runtimeEvents}
+          healthSummary={healthSummary}
+        />
+        {detailRows.map(([label, value]) => (
+          <div className="status-summary-row" key={label}>
+            <span>{label}</span>
+            <strong>{value}</strong>
+          </div>
+        ))}
+        <RuntimeEventList events={runtimeEvents} />
+      </details>
     </div>
   );
 }
@@ -702,7 +938,7 @@ function StatusSummaryPanel({
 const StatusSummaryPanelV2 = StatusSummaryPanel;
 
 function RuntimeEventList({ events = [] }) {
-  const visibleEvents = events.slice(0, 4);
+  const visibleEvents = dedupeRuntimeEventsForDisplay(events, 4);
   if (!visibleEvents.length) {
     return null;
   }
@@ -730,9 +966,17 @@ function ConversationTimeline({
   latestCodexAssistant,
   latestPrompt,
   latestPromptAt,
+  pendingGuidance,
+  pendingGuidanceAt,
+  pendingGuidanceText,
+  setPendingGuidanceText,
+  submitting,
+  onSavePendingGuidance,
+  onClearPendingGuidance,
+  onEditPendingGuidance,
   fallbackEntries,
 }) {
-  const conversationEntries = (entries.length
+  const baseConversationEntries = entries.length
     ? entries
     : [
         latestCodexAssistant
@@ -741,7 +985,8 @@ function ConversationTimeline({
         latestCodexUser
           ? { ...latestCodexUser, label: "codex-loop 指令", role: "user" }
           : null,
-      ].filter(Boolean)).filter(Boolean);
+      ].filter(Boolean);
+  const conversationEntries = dedupeConversationEntries(baseConversationEntries.filter(Boolean));
 
   const latestPromptText = formatValue(latestPrompt, "");
   const latestPromptAlreadyVisible =
@@ -758,7 +1003,20 @@ function ConversationTimeline({
     });
   }
 
-  conversationEntries.sort((a, b) => {
+  const savedPendingGuidanceText = formatValue(pendingGuidance, "");
+  if (savedPendingGuidanceText) {
+    conversationEntries.push({
+      at: pendingGuidanceAt,
+      role: "guidance",
+      text: savedPendingGuidanceText,
+      preview: savedPendingGuidanceText,
+      label: "你的补充",
+    });
+  }
+
+  const uniqueConversationEntries = dedupeConversationEntries(conversationEntries);
+
+  uniqueConversationEntries.sort((a, b) => {
     const left = Date.parse(a.at || "");
     const right = Date.parse(b.at || "");
     if (!Number.isFinite(left) && !Number.isFinite(right)) return 0;
@@ -767,7 +1025,7 @@ function ConversationTimeline({
     return left - right;
   });
 
-  const fallbackConversation = !conversationEntries.length && fallbackEntries.length
+  const fallbackConversation = !uniqueConversationEntries.length && fallbackEntries.length
     ? fallbackEntries.map((entry) => ({
         at: entry.at,
         role: "assistant",
@@ -776,36 +1034,54 @@ function ConversationTimeline({
         label: "本地记录",
       }))
     : [];
-  const visibleEntries = conversationEntries.length ? conversationEntries : fallbackConversation;
+  const visibleEntries = uniqueConversationEntries.length ? uniqueConversationEntries : fallbackConversation;
+  const latestEntry = visibleEntries.at(-1) || {};
+  const conversationBottomRef = useRef(null);
 
-  if (!visibleEntries.length) {
-    return (
-      <div className="conversation-empty">
-        绑定线程并开始循环后，这里会像 Codex 对话一样展示 codex-loop 发出的指令和 Codex 的回复。
-      </div>
-    );
-  }
+  useEffect(() => {
+    conversationBottomRef.current?.scrollIntoView({ block: "end", behavior: "auto" });
+  }, [visibleEntries.length, latestEntry.at, latestEntry.role, pendingGuidanceText, pendingGuidance]);
 
   return (
     <div className="conversation-timeline">
-      {visibleEntries.map((entry, index) => {
-        const isLoopMessage = entry.role === "user";
+      {visibleEntries.length ? visibleEntries.map((entry, index) => {
+        const isGuidance = entry.role === "guidance";
+        const isLoopMessage = entry.role === "user" || isGuidance;
+        const rowClassName = isGuidance
+          ? "conversation-row is-guidance"
+          : isLoopMessage
+            ? "conversation-row is-loop"
+            : "conversation-row is-codex";
         const fullText = formatValue(entry.text, isLoopMessage ? latestPrompt : "");
         const previewText = formatValue(entry.preview, fullText);
         const summary = summarizeVisibleText(previewText || fullText, "暂无内容", isLoopMessage ? 180 : 320);
-        return (
-          <article
-            className={`conversation-row ${isLoopMessage ? "is-loop" : "is-codex"}`}
-            key={`${entry.at || index}-${entry.role}-${index}`}
+        const bubble = (
+          <details
+            className="conversation-bubble"
+            open={shouldOpenConversationEntry({
+              entry,
+              fullText,
+              isLoopMessage,
+              isGuidance,
+              index,
+              total: visibleEntries.length,
+            })}
           >
-            <details className="conversation-bubble" open={!isLoopMessage}>
               <summary>
                 <span className="conversation-meta">
-                  {formatTime(entry.at, "未知时间")} · {isLoopMessage ? "codex-loop 指令" : "Codex 回复"}
+                  {formatTime(entry.at, "未知时间")} · {isGuidance ? "你的补充" : isLoopMessage ? "codex-loop 指令" : "Codex 回复"}
                 </span>
                 <strong>{summary}</strong>
                 <span className="conversation-actions">
-                  <em>{fullText ? (isLoopMessage ? "点击展开完整指令" : "点击收起完整回复") : "等待完整内容同步"}</em>
+                  <em>
+                    {fullText
+                      ? isGuidance
+                        ? "待下一轮合并"
+                        : isLoopMessage
+                          ? "查看完整指令"
+                          : "查看完整回复"
+                      : "等待完整内容同步"}
+                  </em>
                   {fullText ? (
                     <button
                       type="button"
@@ -820,13 +1096,97 @@ function ConversationTimeline({
                 </span>
               </summary>
               {fullText ? <MarkdownMessage text={fullText} /> : null}
-            </details>
+          </details>
+        );
+        return (
+          <article
+            className={rowClassName}
+            key={`${entry.at || index}-${entry.role}-${index}`}
+          >
+            {isGuidance ? (
+              <div className="pending-guidance-queued">
+                {bubble}
+                <div className="pending-guidance-tools" aria-label="待发送补充操作">
+                  <IconButton
+                    label="编辑补充"
+                    disabled={submitting}
+                    onClick={() => onEditPendingGuidance?.(fullText)}
+                  >
+                    <PencilIcon />
+                  </IconButton>
+                  <IconButton
+                    label="删除补充"
+                    tone="danger"
+                    disabled={submitting}
+                    onClick={() => void onClearPendingGuidance?.()}
+                  >
+                    <TrashIcon />
+                  </IconButton>
+                </div>
+              </div>
+            ) : (
+              bubble
+            )}
           </article>
         );
-      })}
+      }) : (
+        <div className="conversation-empty">
+          绑定线程并开始循环后，这里会像 Codex 对话一样展示 codex-loop 发出的指令和 Codex 的回复。
+        </div>
+      )}
+      <PendingGuidanceComposer
+        pendingGuidanceText={pendingGuidanceText}
+        setPendingGuidanceText={setPendingGuidanceText}
+        submitting={submitting}
+        onSavePendingGuidance={onSavePendingGuidance}
+      />
+      <div className="conversation-bottom-anchor" ref={conversationBottomRef} aria-hidden="true" />
     </div>
   );
 }
+
+function normalizeConversationText(entry) {
+  return formatValue(entry?.text || entry?.preview || entry?.summary || "", "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function dedupeConversationEntries(entries = []) {
+  const byContent = new Map();
+
+  entries.filter(Boolean).forEach((entry, index) => {
+    const role = entry.role === "guidance" ? "guidance" : entry.role === "user" ? "user" : "assistant";
+    const text = normalizeConversationText(entry);
+    const key = text ? `${role}:${text}` : `${role}:empty:${index}`;
+    const existing = byContent.get(key);
+    const currentTime = Date.parse(entry.at || "");
+    const existingTime = Date.parse(existing?.at || "");
+
+    if (
+      !existing ||
+      (Number.isFinite(currentTime) && (!Number.isFinite(existingTime) || currentTime >= existingTime))
+    ) {
+      byContent.set(key, entry);
+    }
+  });
+
+  return [...byContent.values()];
+}
+
+function shouldOpenConversationEntry({ fullText, isLoopMessage, isGuidance, index, total }) {
+  if (isLoopMessage || isGuidance) {
+    return false;
+  }
+
+  const text = formatValue(fullText, "");
+  if (!text) {
+    return false;
+  }
+
+  const isLatest = index === total - 1;
+  return isLatest && text.length <= 700;
+}
+
 function QuickActionButton({ action, onAction, variant = "secondary", disabled = false }) {
   if (!action?.id || !action?.label) {
     return null;
@@ -853,6 +1213,9 @@ function deriveVisibleWaitingText(snapshot, fallbackText) {
     return summary.includes("Codex")
       ? "这一轮已发出，正在等待 Codex 完成。"
       : "这一轮处理中，正在等待结果同步。";
+  }
+  if (snapshot?.thread?.continuationStatus === "reviewing") {
+    return "Codex 已完成，正在等待本地监督复盘。";
   }
   return summary;
 }
@@ -1060,6 +1423,8 @@ function ManagePane({
   setThreadForm,
   settingsForm,
   setSettingsForm,
+  loopSupervisorForm,
+  setLoopSupervisorForm,
   automationStatus,
   launcherPhase,
   launcherWebUrl,
@@ -1077,25 +1442,30 @@ function ManagePane({
   setActiveManageSection,
 }) {
   const isDispatching = snapshot?.thread?.continuationStatus === "dispatching";
+  const isReviewing = snapshot?.thread?.continuationStatus === "reviewing";
   const isFinalizing = snapshot?.state?.stopRequested || snapshot?.state?.finalizeRequested;
   const isRunning = snapshot?.state?.mode === "running";
   const runningHeadline = isFinalizing
     ? "正在收尾"
     : isDispatching
       ? "已发送，等待 Codex 完成"
-      : isRunning
+      : isReviewing
+        ? "监督复盘中"
+        : isRunning
         ? "循环运行中"
         : "当前 loop 已停止";
   const runningDescription = isFinalizing
     ? "不会再发送新指令，等待当前轮结束后停止。"
     : isDispatching
       ? "Codex 正在处理当前轮，完成前不会继续追发。"
-      : isRunning
+      : isReviewing
+        ? "本地模型正在监督复盘，完成前不发送下一条。"
+        : isRunning
         ? "系统会等待 Codex 完整结束一轮，再决定是否继续发送。"
         : "需要继续时点击开始循环；如需本地模型参与，请先开启全局 Ollama。";
   const thinkingStateClass = isFinalizing
     ? "is-finalizing"
-    : isDispatching || isRunning
+    : isDispatching || isReviewing || isRunning
       ? "is-active"
       : "is-idle";
 
@@ -1511,6 +1881,79 @@ function ManagePane({
 
       <details
         className="sidebar-disclosure"
+        open={activeManageSection === "loop-npc"}
+        onToggle={(event) => {
+          if (event.currentTarget.open) setActiveManageSection("loop-npc");
+        }}
+      >
+        <summary>当前任务 NPC</summary>
+        <form
+          className="sidebar-form"
+          onSubmit={(event) => {
+            event.preventDefault();
+            void withSubmit(async () => {
+              await requestJson("/loop-supervisor", {
+                method: "POST",
+                body: JSON.stringify(loopSupervisorForm),
+              });
+            });
+          }}
+        >
+          <p className="sidebar-help">
+            当前 loop 专用：补充这个项目自己的测试要求、验收规则和监督风格，不会改掉全局默认。
+          </p>
+          <div className="settings-grid">
+            <label>
+              <span>项目角色特性</span>
+              <textarea
+                rows={3}
+                value={loopSupervisorForm.roleTraits}
+                placeholder="例如：像挑剔真实用户一样验收移动端体验，不允许状态含糊。"
+                onChange={(event) =>
+                  setLoopSupervisorForm((current) => ({
+                    ...current,
+                    roleTraits: event.target.value,
+                  }))
+                }
+              />
+            </label>
+            <label>
+              <span>项目测试规则</span>
+              <textarea
+                rows={3}
+                value={loopSupervisorForm.testingRules}
+                placeholder="例如：每轮完成后先看移动端、历史记录和下一步引导是否清楚。"
+                onChange={(event) =>
+                  setLoopSupervisorForm((current) => ({
+                    ...current,
+                    testingRules: event.target.value,
+                  }))
+                }
+              />
+            </label>
+            <label>
+              <span>项目验收标准</span>
+              <textarea
+                rows={3}
+                value={loopSupervisorForm.acceptanceCriteria}
+                placeholder="例如：手机上 10 秒内能判断 Codex 是否正在处理、是否需要用户介入。"
+                onChange={(event) =>
+                  setLoopSupervisorForm((current) => ({
+                    ...current,
+                    acceptanceCriteria: event.target.value,
+                  }))
+                }
+              />
+            </label>
+          </div>
+          <button type="submit" className="primary-button" disabled={submitting}>
+            保存当前任务 NPC
+          </button>
+        </form>
+      </details>
+
+      <details
+        className="sidebar-disclosure"
         open={activeManageSection === "safety"}
         onToggle={(event) => {
           if (event.currentTarget.open) setActiveManageSection("safety");
@@ -1599,11 +2042,60 @@ function ManageWorkspaceView(props) {
   );
 }
 
+function HelpWorkspaceView() {
+  const guides = [
+    {
+      title: "loop 是什么",
+      body: "loop 会把一个 Codex 线程变成可持续推进的开发任务：等待 Codex 完成当前轮，再结合项目规则、本地模型和你的补充生成下一条指令。",
+    },
+    {
+      title: "如何创建任务",
+      body: "进入创建页，按提示填写项目、目标、工作区和绑定线程。填错时可以返回上一步，也可以从头重写。",
+    },
+    {
+      title: "如何绑定线程",
+      body: "在目标 Codex 窗口询问 threadId，把返回的编号保存到任务里。绑定后，首页会显示当前任务和已绑定线程。",
+    },
+    {
+      title: "如何开启本地模型增强",
+      body: "进入设置，打开 Ollama 接入并选择模型。开启后，所有 loop 默认会把 Codex 回复交给本地模型整理，再生成下一轮指令。",
+    },
+    {
+      title: "如何安全停止与关闭服务",
+      body: "停止会先让当前轮收尾，不再发送新指令。关闭控制台会结束本地服务；如果任务仍在运行，系统会先提醒。",
+    },
+    {
+      title: "遇到异常时先看哪里",
+      body: "先看首页状态和对话记录底部：那里会显示最新 Codex 回复、codex-loop 发出的指令，以及等待合并的用户补充。",
+    },
+  ];
+
+  return (
+    <section className="workspace-focus">
+      <div className="workspace-focus-head">
+        <span className="workspace-focus-eyebrow">帮助</span>
+        <h1>使用 codex-loop</h1>
+        <p>这里保留上手说明，首页只显示当前任务、状态、对话记录和常用操作。</p>
+      </div>
+
+      <div className="help-guide-list">
+        {guides.map((guide) => (
+          <article className="help-guide-item" key={guide.title}>
+            <strong>{guide.title}</strong>
+            <p>{guide.body}</p>
+          </article>
+        ))}
+      </div>
+    </section>
+  );
+}
+
 function DashboardHome({
   currentLoop,
   snapshot,
   modeText,
   continuationStatus,
+  controllerStatus,
   launcherPhase,
   pollStatus,
   pollState,
@@ -1613,6 +2105,7 @@ function DashboardHome({
   setActiveManageSection,
   onRequestShutdown,
   threadLabel,
+  heroThreadLabel,
   latestSummary,
   transcriptEntries,
   latestPrompt,
@@ -1623,6 +2116,9 @@ function DashboardHome({
   pendingGuidanceText,
   setPendingGuidanceText,
   onSavePendingGuidance,
+  onClearPendingGuidance,
+  remoteAccessStatus,
+  launcherWebUrl,
 }) {
   const projectTitle = formatValue(
     currentLoop?.projectName || snapshot?.config?.projectName,
@@ -1638,6 +2134,7 @@ function DashboardHome({
   const codexConversationEntries = [...(codexConversation.entries || []).slice(0, 10)].reverse();
   const visibleTranscriptEntries = transcriptEntries.filter(isUsefulTranscriptEntry).slice(0, 4);
   const isDispatching = snapshot?.thread?.continuationStatus === "dispatching";
+  const isReviewing = snapshot?.thread?.continuationStatus === "reviewing";
   const isFinalizing = snapshot?.state?.stopRequested || snapshot?.state?.finalizeRequested;
   const isRunning = snapshot?.state?.mode === "running";
   const healthSummary = healthIssues.length ? healthIssues.join("\n") : "当前没有明显异常。";
@@ -1650,35 +2147,45 @@ function DashboardHome({
     ? "正在收尾"
     : isDispatching
       ? "已发送，等待 Codex 完成"
-      : isRunning
+      : isReviewing
+        ? "监督复盘中"
+        : isRunning
         ? "循环运行中"
         : "已停止");
   const runningDescription = processStatus?.detail || (isFinalizing
     ? "不会再发送新指令，等待当前轮结束后停止。"
     : isDispatching
       ? "Codex 正在处理当前轮，完成前不会继续追发。"
-      : isRunning
+      : isReviewing
+        ? "本地模型正在监督复盘，完成前不发送下一条。"
+        : isRunning
         ? "系统会等待 Codex 完整完成一轮，再决定是否继续。"
         : "需要继续时点击开始循环；如需本地模型参与，请先打开设置。");
   const thinkingStateClass = isFinalizing
     ? "is-finalizing"
-    : isDispatching || isRunning
+    : isDispatching || isReviewing || isRunning
       ? "is-active"
       : "is-idle";
   const codexWorkStatus = isFinalizing
     ? "正在收尾，当前轮结束后停止"
     : isDispatching
       ? "Codex 正在处理，暂不发送下一条"
-      : isRunning
+      : isReviewing
+        ? "本地模型正在监督复盘，完成前不发送下一条"
+        : isRunning
         ? "等待下一轮循环指令"
         : "已停止";
   const latestVisibleSummary = summarizeVisibleText(
     snapshot?.thread?.latestCodexSummary || latestSummary,
     "等待第一轮可见进展",
   );
-  const statusLine = `${runningHeadline} · ${threadLabel}`;
+  const statusLine = `${runningHeadline} · ${heroThreadLabel}`;
   const savedPendingGuidance = snapshot?.thread?.pendingUserGuidance || "";
   const runtimeEvents = snapshot?.runtimeEvents || [];
+  async function handleEditPendingGuidance(text) {
+    await onClearPendingGuidance();
+    setPendingGuidanceText(formatValue(text, ""));
+  }
 
   return (
     <>
@@ -1687,11 +2194,15 @@ function DashboardHome({
           <span className="workspace-hero-project">{projectTitle}</span>
           <h1>{loopTitle}</h1>
           <div className="workspace-status-row">
-            <StatusPill text={modeText} active={snapshot?.state?.mode === "running"} />
             <StatusPill
-              text={continuationStatus}
+              text={processStatus?.monitorLabel || modeText}
+              tone={processStatus?.monitorTone || "soft"}
+              active={processStatus?.monitorTone === "active"}
+            />
+            <StatusPill
+              text={processStatus?.headline || continuationStatus}
               tone={snapshot?.thread?.continuationStatus === "error" ? "danger" : "soft"}
-              active={isDispatching}
+              active={isDispatching || isReviewing}
             />
             <StatusPill text={launcherPhase} tone="soft" />
             <StatusPill text={pollStatus} tone="soft" active={pollState.syncing} />
@@ -1715,65 +2226,39 @@ function DashboardHome({
               >
                 停止
               </button>
-              <button
-                type="button"
-                className="ghost-button"
-                disabled={submitting}
-                onClick={() => setActiveSidebarPane("create")}
-              >
-                新建 loop
-              </button>
-              <button
-                type="button"
-                className="ghost-button"
-                disabled={submitting}
-                onClick={() => {
-                  setActiveManageSection("ollama");
-                  setActiveSidebarPane("manage");
-                }}
-              >
-                设置
-              </button>
-              <button
-                type="button"
-                className="ghost-button danger-zone-button"
-                disabled={submitting}
-                onClick={() => void onRequestShutdown()}
-              >
-                关闭控制台
-              </button>
             </div>
-            <form
-              className="pending-guidance-form"
-              onSubmit={(event) => {
-                event.preventDefault();
-                void onSavePendingGuidance(pendingGuidanceText);
-              }}
-            >
-              <label>
-                <span>补充下一轮引导</span>
-                <textarea
-                  rows={2}
-                  value={pendingGuidanceText}
-                  placeholder="例如：下一轮先补移动端状态摘要，不要扩大范围。"
-                  onChange={(event) => setPendingGuidanceText(event.target.value)}
-                />
-              </label>
-              <div className="pending-guidance-actions">
-                <small>
-                  {savedPendingGuidance
-                    ? "已记录：" + summarizeVisibleText(savedPendingGuidance, "", 56)
-                    : "会等 Codex 当前轮完成后交给本地模型合并，不会立刻打断 Codex。"}
-                </small>
+            <details className="workspace-more-actions">
+              <summary>更多操作</summary>
+              <div className="workspace-more-action-list">
                 <button
-                  type="submit"
-                  className="secondary-button"
-                  disabled={submitting || !pendingGuidanceText.trim()}
+                  type="button"
+                  className="ghost-button"
+                  disabled={submitting}
+                  onClick={() => setActiveSidebarPane("create")}
                 >
-                  保存补充
+                  新建 loop
+                </button>
+                <button
+                  type="button"
+                  className="ghost-button"
+                  disabled={submitting}
+                  onClick={() => {
+                    setActiveManageSection("ollama");
+                    setActiveSidebarPane("manage");
+                  }}
+                >
+                  设置
+                </button>
+                <button
+                  type="button"
+                  className="ghost-button danger-zone-button"
+                  disabled={submitting}
+                  onClick={() => void onRequestShutdown()}
+                >
+                  关闭控制台
                 </button>
               </div>
-            </form>
+            </details>
           </div>
         </div>
 
@@ -1789,6 +2274,10 @@ function DashboardHome({
               <p>{runningDescription}</p>
             </div>
           </div>
+          <MobileAccessFold
+            remoteAccessStatus={remoteAccessStatus}
+            launcherWebUrl={launcherWebUrl}
+          />
         </div>
       </section>
 
@@ -1803,6 +2292,14 @@ function DashboardHome({
               latestCodexAssistant={latestCodexAssistant}
               latestPrompt={latestPrompt}
               latestPromptAt={snapshot?.thread?.lastDispatchAt}
+              pendingGuidance={savedPendingGuidance}
+              pendingGuidanceAt={snapshot?.thread?.pendingUserGuidanceAt}
+              pendingGuidanceText={pendingGuidanceText}
+              setPendingGuidanceText={setPendingGuidanceText}
+              submitting={submitting}
+              onSavePendingGuidance={onSavePendingGuidance}
+              onClearPendingGuidance={onClearPendingGuidance}
+              onEditPendingGuidance={handleEditPendingGuidance}
               fallbackEntries={visibleTranscriptEntries}
             />
           </Section>
@@ -1813,6 +2310,7 @@ function DashboardHome({
             <StatusSummaryPanelV2
               modeText={modeText}
               continuationStatus={continuationStatus}
+              controllerStatus={controllerStatus}
               codexWorkStatus={codexWorkStatus}
               processStatus={processStatus}
               currentLoopName={loopTitle}
@@ -1834,6 +2332,7 @@ export function App() {
   const [launcherStatus, setLauncherStatus] = useState(null);
   const [remoteAccessStatus, setRemoteAccessStatus] = useState(null);
   const [automationStatus, setAutomationStatus] = useState(null);
+  const [controllerStatus, setControllerStatus] = useState(null);
   const [ollamaModels, setOllamaModels] = useState([]);
   const [assistantState, setAssistantState] = useState(null);
   const [assistantAnswer, setAssistantAnswer] = useState("");
@@ -1843,7 +2342,7 @@ export function App() {
   const [uiError, setUiError] = useState("");
   const [pendingGuidanceText, setPendingGuidanceText] = useState("");
   const [collapsedProjects, setCollapsedProjects] = useState({});
-  const [sidebarOpen, setSidebarOpen] = useState(true);
+  const [sidebarOpen, setSidebarOpen] = useState(getInitialSidebarOpen);
   const [activeSidebarPane, setActiveSidebarPane] = useState("loops");
   const [activeManageSection, setActiveManageSection] = useState("automation");
   const [selectedLoopId, setSelectedLoopId] = useState("");
@@ -1861,16 +2360,18 @@ export function App() {
     promptGeneratorEnabled: "auto",
     promptGeneratorModel: "qwen2.5:7b",
     promptGeneratorBaseUrl: "http://127.0.0.1:11434",
-    supervisorRoleTraits:
-      "同时扮演产品经理、测试人员和真实用户：控制范围，关注可用性，主动发现偏离用户目标的问题。",
-    supervisorTestingRules:
-      "Codex 完成一个清晰里程碑后再做独立验收；优先检查用户能否看懂状态、历史记录和下一步。",
-    supervisorAcceptanceCriteria:
-      "每轮只推进一小批可验证改动；完成后必须能说明改了什么、如何验证、还有什么风险。",
+    supervisorRoleTraits: DEFAULT_SUPERVISOR_FORM.roleTraits,
+    supervisorTestingRules: DEFAULT_SUPERVISOR_FORM.testingRules,
+    supervisorAcceptanceCriteria: DEFAULT_SUPERVISOR_FORM.acceptanceCriteria,
     maxMinutes: "180",
     maxTokens: "120000",
     finalizeLeadMinutes: "20",
     finalizeLeadTokens: "15000",
+  });
+  const [loopSupervisorForm, setLoopSupervisorForm] = useState({
+    roleTraits: "",
+    testingRules: "",
+    acceptanceCriteria: "",
   });
   const [pollState, setPollState] = useState({
     syncing: false,
@@ -1896,23 +2397,36 @@ export function App() {
 
     try {
       const [
-        nextAutomationStatus,
         nextSnapshot,
         nextLoops,
+      ] = await Promise.all([
+        requestJson("/snapshot"),
+        requestJson("/loops"),
+      ]);
+
+      const [
+        nextAutomationStatus,
         nextMobile,
         nextLauncherStatus,
         nextRemoteAccessStatus,
+        nextControllerStatus,
         nextOllamaModels,
         nextAssistantState,
       ] = await Promise.all([
-        requestJson("/automation"),
-        requestJson("/snapshot"),
-        requestJson("/loops"),
-        requestJson("/mobile"),
-        requestJson("/launcher-status"),
-        requestJson("/remote-access"),
+        requestJson("/automation").catch(() => automationStatus || { connected: false }),
+        requestJson("/mobile").catch(() => mobileView || { processStatus: null, transcriptEntries: [] }),
+        requestJson("/launcher-status").catch(() => launcherStatus || { phase: "idle" }),
+        requestJson("/remote-access").catch(() => remoteAccessStatus || {}),
+        requestJson("/controller-status").catch(
+          () =>
+            controllerStatus || {
+              running: false,
+              label: "未运行",
+              detail: "自动循环状态暂不可用。",
+            },
+        ),
         requestJson("/ollama/models").catch(() => ({ models: [] })),
-        requestJson("/loop-creation-assistant"),
+        requestJson("/loop-creation-assistant").catch(() => assistantState || null),
       ]);
 
       setAutomationStatus(nextAutomationStatus);
@@ -1921,6 +2435,7 @@ export function App() {
       setMobileView(nextMobile);
       setLauncherStatus(nextLauncherStatus);
       setRemoteAccessStatus(nextRemoteAccessStatus);
+      setControllerStatus(nextControllerStatus);
       setOllamaModels(nextOllamaModels.models || []);
       setAssistantState(nextAssistantState);
       setSelectedLoopId((current) => {
@@ -1934,29 +2449,43 @@ export function App() {
         note: nextSnapshot.thread.note || "",
         singleThreadMode: Boolean(nextSnapshot.thread.singleThreadMode),
       });
+      const loopSupervisor = nextSnapshot.loop?.supervisor || {};
+      const loopHasSupervisor = Boolean(
+        loopSupervisor.roleTraits ||
+          loopSupervisor.testingRules ||
+          loopSupervisor.acceptanceCriteria,
+      );
+      const resolvedConversation = nextSnapshot.profile?.resolved?.conversation || {};
+      const overrideConversation = nextSnapshot.profile?.overrides?.conversation || {};
+      const globalSupervisor =
+        overrideConversation.supervisor ||
+        (!loopHasSupervisor
+          ? resolvedConversation.supervisor || DEFAULT_SUPERVISOR_FORM
+          : DEFAULT_SUPERVISOR_FORM);
       setSettingsForm({
         conversationLanguage:
-          nextSnapshot.profile?.resolved?.conversation?.language || "zh-CN",
+          resolvedConversation.language || "zh-CN",
         intervalMinutes: String(nextAutomationStatus?.intervalMinutes || 10),
         promptGeneratorEnabled:
-          nextSnapshot.profile?.resolved?.conversation?.promptGenerator?.enabled === "auto"
+          resolvedConversation.promptGenerator?.enabled === "auto"
             ? "auto"
-            : Boolean(nextSnapshot.profile?.resolved?.conversation?.promptGenerator?.enabled),
+            : Boolean(resolvedConversation.promptGenerator?.enabled),
         promptGeneratorModel:
-          nextSnapshot.profile?.resolved?.conversation?.promptGenerator?.model || "qwen2.5:7b",
+          resolvedConversation.promptGenerator?.model || "qwen2.5:7b",
         promptGeneratorBaseUrl:
-          nextSnapshot.profile?.resolved?.conversation?.promptGenerator?.baseUrl ||
-          "http://127.0.0.1:11434",
-        supervisorRoleTraits:
-          nextSnapshot.profile?.resolved?.conversation?.supervisor?.roleTraits || "",
-        supervisorTestingRules:
-          nextSnapshot.profile?.resolved?.conversation?.supervisor?.testingRules || "",
-        supervisorAcceptanceCriteria:
-          nextSnapshot.profile?.resolved?.conversation?.supervisor?.acceptanceCriteria || "",
+          resolvedConversation.promptGenerator?.baseUrl || "http://127.0.0.1:11434",
+        supervisorRoleTraits: globalSupervisor.roleTraits || "",
+        supervisorTestingRules: globalSupervisor.testingRules || "",
+        supervisorAcceptanceCriteria: globalSupervisor.acceptanceCriteria || "",
         maxMinutes: String(nextSnapshot.state?.budgets?.maxMinutes ?? 180),
         maxTokens: String(nextSnapshot.state?.budgets?.maxTokens ?? 120000),
         finalizeLeadMinutes: String(nextSnapshot.state?.budgets?.finalizeLeadMinutes ?? 20),
         finalizeLeadTokens: String(nextSnapshot.state?.budgets?.finalizeLeadTokens ?? 15000),
+      });
+      setLoopSupervisorForm({
+        roleTraits: loopSupervisor.roleTraits || "",
+        testingRules: loopSupervisor.testingRules || "",
+        acceptanceCriteria: loopSupervisor.acceptanceCriteria || "",
       });
       setUiError("");
       setPollState({
@@ -2064,6 +2593,15 @@ export function App() {
     });
   }
 
+  async function clearPendingGuidance() {
+    await withSubmit(async () => {
+      await requestJson("/pending-guidance", {
+        method: "DELETE",
+      });
+      setPendingGuidanceText("");
+    });
+  }
+
   const loopGroups = useMemo(
     () => groupLoopsByProject(filterVisibleLoops(loopRegistry.loops || [])),
     [loopRegistry],
@@ -2098,8 +2636,7 @@ export function App() {
   const healthIssues = (snapshot?.health?.issues || []).map(translateHealthIssue);
   const bindingNote = mobileView?.bindingNote || "尚未生成";
   const suggestedAction = mobileView?.suggestedAction || "等待下一步";
-  const launcherPhase =
-    launcherPhaseTextMap[launcherStatus?.phase] || formatValue(launcherStatus?.phase, "未知");
+  const launcherPhase = resolveLauncherPhaseText(launcherStatus, snapshot, pollState);
   const automationSchedule = automationStatus?.connected
     ? `${automationStatus.intervalMinutes} 分钟`
     : "未连接";
@@ -2121,8 +2658,12 @@ export function App() {
         : "等待首次同步";
   const threadTitle =
     snapshot?.thread?.threadTitle || snapshot?.thread?.workspaceName || "尚未绑定可见窗口";
-  const threadLabel = snapshot?.thread?.threadId
-    ? `${threadTitle}（${snapshot.thread.threadId}）`
+  const boundThreadId = snapshot?.thread?.threadId || "";
+  const threadLabel = boundThreadId
+    ? `${threadTitle}（${boundThreadId}）`
+    : threadTitle;
+  const heroThreadLabel = boundThreadId
+    ? `${threadTitle}（${shortThreadId(boundThreadId)}）`
     : threadTitle;
   const changeSummary =
     snapshot?.thread?.lastAssistantActionSummary ||
@@ -2183,7 +2724,7 @@ export function App() {
           >
             {sidebarOpen ? "收起" : "展开"}
           </button>
-          {sidebarOpen ? <strong>codex-loop</strong> : null}
+          {sidebarOpen ? <strong>codex-loop</strong> : <strong className="mobile-only-label">codex-loop</strong>}
         </div>
 
         {sidebarOpen ? (
@@ -2199,6 +2740,7 @@ export function App() {
               {[
                 ["loops", "任务"],
                 ["create", "创建"],
+                ["help", "帮助"],
               ].map(([id, label]) => (
                 <button
                   key={id}
@@ -2326,11 +2868,19 @@ export function App() {
 
             {activeSidebarPane !== "loops" ? (
               <div className="sidebar-pane-hint">
-                <strong>{activeSidebarPane === "create" ? "正在创建新任务" : "正在调整全局设置"}</strong>
+                <strong>
+                  {activeSidebarPane === "create"
+                    ? "正在创建新任务"
+                    : activeSidebarPane === "help"
+                      ? "正在查看帮助"
+                      : "正在调整全局设置"}
+                </strong>
                 <p>
                   {activeSidebarPane === "create"
                     ? "右侧已经切换到完整创建流程。"
-                    : "右侧已经切换到完整设置面板。"}
+                    : activeSidebarPane === "help"
+                      ? "右侧已经切换到使用说明。"
+                      : "右侧已经切换到完整设置面板。"}
                 </p>
               </div>
             ) : null}
@@ -2344,7 +2894,7 @@ export function App() {
                   setActiveSidebarPane("manage");
                 }}
               >
-                <span className="sidebar-settings-icon" aria-hidden="true">设置</span>
+                <span className="sidebar-settings-icon" aria-hidden="true">⚙</span>
                 <span>设置</span>
               </button>
             </div>
@@ -2365,8 +2915,10 @@ export function App() {
                     });
                   })
                 }
+                title={loop.name}
               >
-                {loop.name.slice(0, 2)}
+                <span>{loop.name.slice(0, 2)}</span>
+                <span className="mobile-only-label">{loop.name}</span>
               </button>
             ))}
             <button
@@ -2378,7 +2930,17 @@ export function App() {
               }}
               title="设置"
             >
-              设置
+              <span>⚙</span>
+              <span className="mobile-only-label">设置</span>
+            </button>
+            <button
+              type="button"
+              className={`collapsed-loop-pill ${activeSidebarPane === "help" ? "is-active" : ""}`}
+              onClick={() => setActiveSidebarPane("help")}
+              title="帮助"
+            >
+              <span>帮</span>
+              <span className="mobile-only-label">帮助</span>
             </button>
           </div>
         )}
@@ -2419,12 +2981,16 @@ export function App() {
           />
         ) : null}
 
+        {activeSidebarPane === "help" ? <HelpWorkspaceView /> : null}
+
         {activeSidebarPane === "manage" ? (
           <ManageWorkspaceView
             threadForm={threadForm}
             setThreadForm={setThreadForm}
             settingsForm={settingsForm}
             setSettingsForm={setSettingsForm}
+            loopSupervisorForm={loopSupervisorForm}
+            setLoopSupervisorForm={setLoopSupervisorForm}
             automationStatus={automationStatus}
             launcherPhase={launcherPhase}
             launcherWebUrl={launcherWebUrl}
@@ -2444,12 +3010,13 @@ export function App() {
         ) : null}
 
         {activeSidebarPane === "loops" ? (
-          <DashboardHome
-            currentLoop={currentLoop}
-            snapshot={snapshot}
-            modeText={modeText}
-            continuationStatus={continuationStatus}
-            launcherPhase={launcherPhase}
+            <DashboardHome
+              currentLoop={currentLoop}
+              snapshot={snapshot}
+              modeText={modeText}
+              continuationStatus={continuationStatus}
+              controllerStatus={controllerStatus}
+              launcherPhase={launcherPhase}
             pollStatus={pollStatus}
             pollState={pollState}
             dashboardGuide={dashboardGuide}
@@ -2461,6 +3028,7 @@ export function App() {
             automationSchedule={automationSchedule}
             automationStatus={automationStatus}
             threadLabel={threadLabel}
+            heroThreadLabel={heroThreadLabel}
             latestSummary={latestSummary}
             changeSummary={changeSummary}
             suggestedAction={suggestedAction}
@@ -2476,6 +3044,9 @@ export function App() {
             pendingGuidanceText={pendingGuidanceText}
             setPendingGuidanceText={setPendingGuidanceText}
             onSavePendingGuidance={savePendingGuidance}
+            onClearPendingGuidance={clearPendingGuidance}
+            remoteAccessStatus={remoteAccessStatus}
+            launcherWebUrl={launcherWebUrl}
           />
         ) : null}
 

@@ -34,19 +34,21 @@ export async function resolveCodexLoopRoot(startDir = process.cwd()) {
 }
 
 export async function resolveWorkspaceRoot(startDir = process.cwd()) {
+  if (process.env.CODEX_LOOP_WORKSPACE_ROOT) {
+    return path.resolve(process.env.CODEX_LOOP_WORKSPACE_ROOT);
+  }
+
   const codexLoopRoot = await resolveCodexLoopRoot(startDir);
-  const { config } = await loadLoopConfig(codexLoopRoot);
-  return config.workspaceRoot
-    ? path.resolve(config.workspaceRoot)
+  const directConfigPath = path.join(startDir, "config.json");
+  return (await exists(directConfigPath))
+    ? path.resolve(codexLoopRoot)
     : path.dirname(codexLoopRoot);
 }
 
 export async function resolveProjectLayout(startDir = process.cwd()) {
   const codexLoopRoot = await resolveCodexLoopRoot(startDir);
   const { config, configPath } = await loadLoopConfig(codexLoopRoot);
-  const workspaceRoot = config.workspaceRoot
-    ? path.resolve(config.workspaceRoot)
-    : path.dirname(codexLoopRoot);
+  const workspaceRoot = await resolveWorkspaceRoot(startDir);
 
   return {
     codexLoopRoot,

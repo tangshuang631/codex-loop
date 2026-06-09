@@ -96,6 +96,112 @@ test("writeLauncherStatus preserves known ports and pids when later patches omit
   assert.equal(written.error, "web exited with code 1");
 });
 
+test("readLauncherStatus recovers stale starting ports when default services are live", async () => {
+  const { tempRoot, loopRoot } = await createWorkspace();
+  await fs.writeFile(
+    path.join(loopRoot, "settings", "launcher-status.json"),
+    `${JSON.stringify(
+      {
+        phase: "starting",
+        host: "127.0.0.1",
+        apiPort: 3002,
+        webPort: 3003,
+        apiBaseUrl: "http://127.0.0.1:3002/api",
+        webUrl: "http://127.0.0.1:3003",
+        serverReady: false,
+        webReady: false,
+        note: "正在启动 codex-loop 控制台。",
+      },
+      null,
+      2,
+    )}\n`,
+    "utf8",
+  );
+
+  const status = await readLauncherStatus(tempRoot, {
+    probeUrl: async (url) =>
+      url === "http://127.0.0.1:3000/api/health" ||
+      url === "http://127.0.0.1:3001/",
+  });
+
+  assert.equal(status.phase, "ready");
+  assert.equal(status.apiPort, 3000);
+  assert.equal(status.webPort, 3001);
+  assert.equal(status.apiBaseUrl, "http://127.0.0.1:3000/api");
+  assert.equal(status.webUrl, "http://127.0.0.1:3001");
+  assert.equal(status.serverReady, true);
+  assert.equal(status.webReady, true);
+});
+
+test("readLauncherStatus persists recovered ready ports over stale launcher status", async () => {
+  const { tempRoot, loopRoot } = await createWorkspace();
+  const statusPath = path.join(loopRoot, "settings", "launcher-status.json");
+  await fs.writeFile(
+    statusPath,
+    `${JSON.stringify(
+      {
+        phase: "starting",
+        host: "127.0.0.1",
+        apiPort: 3002,
+        webPort: 3003,
+        apiBaseUrl: "http://127.0.0.1:3002/api",
+        webUrl: "http://127.0.0.1:3003",
+        serverReady: false,
+        webReady: false,
+        note: "starting old pair",
+      },
+      null,
+      2,
+    )}\n`,
+    "utf8",
+  );
+
+  await readLauncherStatus(tempRoot, {
+    probeUrl: async (url) =>
+      url === "http://127.0.0.1:3000/api/health" ||
+      url === "http://127.0.0.1:3001/",
+  });
+
+  const saved = JSON.parse(await fs.readFile(statusPath, "utf8"));
+  assert.equal(saved.phase, "ready");
+  assert.equal(saved.apiPort, 3000);
+  assert.equal(saved.webPort, 3001);
+  assert.equal(saved.apiBaseUrl, "http://127.0.0.1:3000/api");
+  assert.equal(saved.webUrl, "http://127.0.0.1:3001");
+  assert.equal(saved.serverReady, true);
+  assert.equal(saved.webReady, true);
+});
+
+test("readLauncherStatus repairs historical mojibake launcher notes", async () => {
+  const { tempRoot, loopRoot } = await createWorkspace();
+  const statusPath = path.join(loopRoot, "settings", "launcher-status.json");
+  await fs.writeFile(
+    statusPath,
+    `${JSON.stringify(
+      {
+        phase: "ready",
+        host: "127.0.0.1",
+        apiPort: 3000,
+        webPort: 3001,
+        apiBaseUrl: "http://127.0.0.1:3000/api",
+        webUrl: "http://127.0.0.1:3001",
+        serverReady: true,
+        webReady: true,
+        note: "鍓嶅悗绔凡灏辩华锛屽彲浠ュ紑濮嬫煡鐪嬪拰鎺у埗寰幆銆?",
+      },
+      null,
+      2,
+    )}\n`,
+    "utf8",
+  );
+
+  const status = await readLauncherStatus(tempRoot);
+
+  assert.equal(status.note, "前后端已就绪，可以开始查看和控制循环。");
+  const saved = JSON.parse(await fs.readFile(statusPath, "utf8"));
+  assert.equal(saved.note, "前后端已就绪，可以开始查看和控制循环。");
+});
+
 test("requestLauncherShutdown marks stopping state and schedules launcher termination", async () => {
   const { tempRoot } = await createWorkspace();
   const scheduled = [];

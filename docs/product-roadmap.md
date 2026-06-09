@@ -12,6 +12,29 @@ The current top priority is the core local loop business:
 - concise local console
 - strong error handling without UI lockup
 
+## 企业级 loop 软件目标
+
+`codex_loop` 的目标不是更强模型的包装层，而是把 AI 编程任务变成可执行、可验证、可停止、可追溯的工程闭环。详细原则见 `docs/loop-engineering-principles.md`。
+
+后续路线图按这个顺序判断优先级：
+
+- loop 内核稳定：状态机、等待策略、预算、停止、恢复和错误分类必须可靠。
+- Codex 联动真实：绑定线程、发送指令、聊天镜像和完成状态识别必须可验证。
+- NPC 决策可信：Ollama / 本地模型必须基于项目文档、用户规则和 Codex 最新回复生成下一步。
+- 验证反馈闭环：测试、构建、日志、截图或人工验收结果必须回到 loop 状态。
+- 用户界面减噪：首页只展示状态、对话和必要操作，解释性内容进入帮助页或文档。
+- 长期运行治理：失败要可读、可恢复、可停止，不允许假装发送成功或盲目续跑。
+
+## 企业级成熟度里程碑
+
+后续进度不按“prompt 写得更聪明”判断，而按 loop 是否更可靠判断。优先建设 loop，而不是堆 prompt。
+
+- P0 可运行闭环：用户能创建 loop、绑定线程、开始循环、停止收尾，并在控制台看到 Codex 回复和 codex-loop 指令。
+- P1 可控闭环：系统能识别 Codex 是否仍在工作，用户补充会排队等待当前轮完成，停止条件和预算会阻止下一轮派发。
+- P2 可验证闭环：NPC 会结合项目文档、用户规则和 Codex 最新回复生成下一步；测试、构建、日志或截图验收能写回状态。
+- P3 可长期监控闭环：运行日志可读，失败可恢复，移动端可查看当前状态和历史，用户能远程补充下一轮引导。
+- P4 企业级治理闭环：多项目多 loop 稳定运行，角色规则可定制，权限边界可审计，长期任务有成本、失败率和质量趋势。
+
 Current implementation progress:
 
 - local runtime state is in place

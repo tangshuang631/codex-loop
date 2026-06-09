@@ -27,15 +27,136 @@ function createDefaultStatus() {
   };
 }
 
+const KNOWN_MOJIBAKE_TEXT = new Map([
+  [
+    "鍓嶅悗绔凡灏辩华锛屽彲浠ュ紑濮嬫煡鐪嬪拰鎺у埗寰幆銆?",
+    "前后端已就绪，可以开始查看和控制循环。",
+  ],
+]);
+
+function repairReadableLauncherText(value) {
+  if (typeof value !== "string" || !value) {
+    return value;
+  }
+  return KNOWN_MOJIBAKE_TEXT.get(value) || value;
+}
+
+function normalizeLauncherStatusText(status) {
+  if (!status || typeof status !== "object") {
+    return status;
+  }
+  let changed = false;
+  const nextStatus = { ...status };
+  for (const key of ["note", "error", "shutdownReason"]) {
+    const repaired = repairReadableLauncherText(nextStatus[key]);
+    if (repaired !== nextStatus[key]) {
+      changed = true;
+      nextStatus[key] = repaired;
+    }
+  }
+  return changed ? nextStatus : status;
+}
+
+async function defaultProbeUrl(url) {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 700);
+
+  try {
+    const response = await fetch(url, {
+      method: "GET",
+      signal: controller.signal,
+    });
+    return response.ok;
+  } catch {
+    return false;
+  } finally {
+    clearTimeout(timeoutId);
+  }
+}
+
+async function probeReadyPair({ host, apiPort, webPort, probeUrl }) {
+  const apiBaseUrl = `http://${host}:${apiPort}/api`;
+  const webUrl = `http://${host}:${webPort}`;
+  const [serverReady, webReady] = await Promise.all([
+    probeUrl(`${apiBaseUrl}/health`),
+    probeUrl(`${webUrl}/`),
+  ]);
+
+  if (!serverReady || !webReady) {
+    return null;
+  }
+
+  return {
+    host,
+    apiPort,
+    webPort,
+    apiBaseUrl,
+    webUrl,
+    serverReady: true,
+    webReady: true,
+  };
+}
+
+async function recoverStaleLauncherStatus(status, tools = {}) {
+  if (
+    !status ||
+    status.phase === "ready" ||
+    status.phase === "stopped" ||
+    status.phase === "stopping" ||
+    status.shuttingDown
+  ) {
+    return status;
+  }
+
+  const probeUrl = tools.probeUrl || defaultProbeUrl;
+  const host = status.host || "127.0.0.1";
+  const candidates = [
+    [Number(status.apiPort), Number(status.webPort)],
+    [3000, 3001],
+  ].filter(([apiPort, webPort]) =>
+    Number.isFinite(apiPort) &&
+    Number.isFinite(webPort) &&
+    apiPort > 0 &&
+    webPort > 0
+  );
+
+  const seen = new Set();
+  for (const [apiPort, webPort] of candidates) {
+    const key = `${apiPort}:${webPort}`;
+    if (seen.has(key)) {
+      continue;
+    }
+    seen.add(key);
+    const recovered = await probeReadyPair({ host, apiPort, webPort, probeUrl });
+    if (recovered) {
+      return {
+        ...status,
+        ...recovered,
+        phase: "ready",
+        note: "前后端已就绪，可以开始查看和控制循环。",
+        error: "",
+      };
+    }
+  }
+
+  return status;
+}
+
 async function resolveLauncherStatusPath(startDir = process.cwd()) {
   const { codexLoopRoot } = await resolveProjectLayout(startDir);
   return path.join(codexLoopRoot, "settings", "launcher-status.json");
 }
 
-export async function readLauncherStatus(startDir = process.cwd()) {
+export async function readLauncherStatus(startDir = process.cwd(), tools = {}) {
   const statusPath = await resolveLauncherStatusPath(startDir);
   try {
-    return JSON.parse(await fs.readFile(statusPath, "utf8"));
+    const rawStatus = JSON.parse(await fs.readFile(statusPath, "utf8"));
+    const status = normalizeLauncherStatusText(rawStatus);
+    const recovered = await recoverStaleLauncherStatus(status, tools);
+    if (recovered !== rawStatus) {
+      await writeJson(statusPath, recovered);
+    }
+    return recovered;
   } catch (error) {
     if (error && error.code === "ENOENT") {
       return createDefaultStatus();

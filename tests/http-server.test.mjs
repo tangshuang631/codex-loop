@@ -467,6 +467,62 @@ test("handler dispatches automation update route", async () => {
   assert.match(chunks.join(""), /"intervalMinutes":10/);
 });
 
+test("handler exposes readable loop controller status", async () => {
+  const handler = buildHandler({
+    loopController: {
+      start: async () => true,
+      stop: () => true,
+      getStatus: () => ({
+        running: true,
+        state: "waiting_codex",
+        label: "等待 Codex",
+        detail: "上一条指令已发送，正在等待 Codex 完成当前轮。",
+        nextAction: "等待 Codex 完成；如有新要求，写入下一轮补充引导。",
+      }),
+    },
+    operations: {
+      readLoopSnapshot: async () => ({}),
+      exportLoopSummary: async () => ({}),
+      exportMobileView: async () => ({}),
+      readLauncherStatus: async () => ({}),
+      readAutomationStatus: async () => ({}),
+      startRun: async () => ({}),
+      renameLoop: async () => ({}),
+      requestGracefulStop: async () => ({}),
+      updateBudgets: async () => ({}),
+      saveThreadBinding: async () => ({}),
+      syncCodexThreadMirror: async () => ({}),
+      recordHeartbeat: async () => ({}),
+      recordError: async () => ({}),
+      saveUserOverrides: async () => ({}),
+    },
+  });
+
+  const chunks = [];
+  const response = {
+    writeHead(statusCode) {
+      this.statusCode = statusCode;
+    },
+    end(text) {
+      chunks.push(text);
+    },
+  };
+
+  await handler(
+    {
+      method: "GET",
+      url: "/api/controller-status",
+      [Symbol.asyncIterator]: async function* iterator() {},
+    },
+    response,
+  );
+
+  assert.equal(response.statusCode, 200);
+  assert.match(chunks.join(""), /"state":"waiting_codex"/);
+  assert.match(chunks.join(""), /等待 Codex/);
+  assert.match(chunks.join(""), /补充引导/);
+});
+
 test("handler dispatches start route and reports whether controller was newly started", async () => {
   let startedCount = 0;
   const handler = buildHandler({
@@ -686,6 +742,111 @@ test("handler dispatches pending guidance route", async () => {
   assert.equal(response.statusCode, 200);
   assert.equal(savedPayload.text, "下一轮先补移动端状态摘要。");
   assert.match(chunks.join(""), /移动端状态摘要/);
+});
+
+test("handler dispatches clear pending guidance route", async () => {
+  let cleared = false;
+  const handler = buildHandler({
+    operations: {
+      readLoopSnapshot: async () => ({}),
+      exportLoopSummary: async () => ({}),
+      startRun: async () => ({}),
+      renameLoop: async () => ({}),
+      requestGracefulStop: async () => ({}),
+      updateBudgets: async () => ({}),
+      saveThreadBinding: async () => ({}),
+      syncCodexThreadMirror: async () => ({}),
+      savePendingGuidance: async () => ({}),
+      clearPendingGuidance: async () => {
+        cleared = true;
+        return { thread: { pendingUserGuidance: "" } };
+      },
+      recordHeartbeat: async () => ({}),
+      recordError: async () => ({}),
+      saveUserOverrides: async () => ({}),
+    },
+  });
+
+  const chunks = [];
+  const response = {
+    writeHead(statusCode, headers) {
+      this.statusCode = statusCode;
+      this.headers = headers;
+    },
+    end(text) {
+      chunks.push(text);
+    },
+  };
+
+  await handler(
+    {
+      method: "DELETE",
+      url: "/api/pending-guidance",
+      [Symbol.asyncIterator]: async function* iterator() {},
+    },
+    response,
+  );
+
+  assert.equal(response.statusCode, 200);
+  assert.equal(cleared, true);
+  assert.match(chunks.join(""), /pendingUserGuidance/);
+});
+
+test("handler dispatches current loop supervisor route", async () => {
+  let savedPayload = null;
+  const handler = buildHandler({
+    operations: {
+      readLoopSnapshot: async () => ({}),
+      exportLoopSummary: async () => ({}),
+      startRun: async () => ({}),
+      renameLoop: async () => ({}),
+      requestGracefulStop: async () => ({}),
+      updateBudgets: async () => ({}),
+      updateLoopSupervisor: async (_cwd, body) => {
+        savedPayload = body;
+        return { loop: { supervisor: body } };
+      },
+      saveThreadBinding: async () => ({}),
+      syncCodexThreadMirror: async () => ({}),
+      savePendingGuidance: async () => ({}),
+      recordHeartbeat: async () => ({}),
+      recordError: async () => ({}),
+      saveUserOverrides: async () => ({}),
+    },
+  });
+
+  const chunks = [];
+  const response = {
+    writeHead(statusCode, headers) {
+      this.statusCode = statusCode;
+      this.headers = headers;
+    },
+    end(text) {
+      chunks.push(text);
+    },
+  };
+
+  await handler(
+    {
+      method: "POST",
+      url: "/api/loop-supervisor",
+      [Symbol.asyncIterator]: async function* iterator() {
+        yield Buffer.from(
+          JSON.stringify({
+            roleTraits: "像挑剔真实用户一样验收移动端。",
+            testingRules: "每轮都检查历史记录和下一步引导。",
+            acceptanceCriteria: "手机上 10 秒内看懂当前进程。",
+          }),
+          "utf8",
+        );
+      },
+    },
+    response,
+  );
+
+  assert.equal(response.statusCode, 200);
+  assert.equal(savedPayload.roleTraits, "像挑剔真实用户一样验收移动端。");
+  assert.match(chunks.join(""), /10 秒内看懂当前进程/);
 });
 
 test("handler dispatches run turn route", async () => {

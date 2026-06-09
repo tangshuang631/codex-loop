@@ -3,6 +3,10 @@ import assert from "node:assert/strict";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
+
+const testDir = path.dirname(fileURLToPath(import.meta.url));
+const repoRoot = path.resolve(testDir, "..");
 
 async function createFixture() {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "codex-loop-launcher-fixture-"));
@@ -120,4 +124,15 @@ test("launcher browser target falls back to expected web url before ready", asyn
       : fallbackUrl;
 
   assert.equal(resolvedUrl, fallbackUrl);
+});
+
+test("launcher starts the console instead of inheriting stale local project workspace", async () => {
+  const script = await fs.readFile(
+    path.join(repoRoot, "scripts", "start-codex-loop.ps1"),
+    "utf8",
+  );
+
+  assert.doesNotMatch(script, /\$localConfig\.workspaceRoot/);
+  assert.doesNotMatch(script, /Write-Host\s+"workspace:/);
+  assert.match(script, /Write-Host\s+"console:/);
 });

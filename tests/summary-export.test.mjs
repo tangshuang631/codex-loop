@@ -5,13 +5,16 @@ import path from "node:path";
 import os from "node:os";
 
 import {
+  createLoop,
   ensureLoopArtifacts,
   exportMobileView,
   exportLoopSummary,
+  markContinuationFailed,
   recordHeartbeat,
   reviewCodexMilestone,
   saveThreadBinding,
   savePendingGuidance,
+  selectLoop,
   startRun,
   requestGracefulStop,
 } from "../app/server/lib/runtime-store.mjs";
@@ -146,6 +149,45 @@ test("exportMobileView returns readable runtime events for mobile monitoring", a
   assert.doesNotMatch(mobile.runtimeEvents[0].title, /_/);
 });
 
+test("exportMobileView backfills useful runtime records when recent log lines are duplicate sync noise", async () => {
+  const configRoot = await createWorkspace();
+  const snapshot = await ensureLoopArtifacts(configRoot);
+  await saveThreadBinding(configRoot, {
+    workspaceName: "demo",
+    threadTitle: "重复记录回看",
+    threadId: "thread-runtime-backfill",
+    singleThreadMode: true,
+  });
+
+  const oldUsefulEvent = {
+    type: "heartbeat",
+    at: "2026-06-09T00:00:00.000Z",
+    progressSummary: "早一点的真实进展仍然应该能看到。",
+  };
+  const duplicateEvents = Array.from({ length: 50 }, (_, index) => ({
+    type: "codex_conversation_mirror_synced",
+    at: `2026-06-09T00:01:${String(index).padStart(2, "0")}.000Z`,
+    threadId: "thread-runtime-backfill",
+    latestAssistantAt: "2026-06-09T00:01:00.000Z",
+    latestAssistantPreview: "重复同步内容不应该挤掉更早的唯一记录。",
+  }));
+
+  await fs.appendFile(
+    snapshot.paths.logPath,
+    [oldUsefulEvent, ...duplicateEvents].map((event) => JSON.stringify(event)).join("\n") + "\n",
+    "utf8",
+  );
+
+  const mobile = await exportMobileView(configRoot);
+  const details = mobile.runtimeEvents.map((event) => event.detail).join("\n");
+
+  assert.match(details, /早一点的真实进展/);
+  assert.equal(
+    mobile.runtimeEvents.filter((event) => /重复同步内容/.test(event.detail)).length,
+    1,
+  );
+});
+
 test("exportMobileView returns a direct process status for production monitoring", async () => {
   const configRoot = await createWorkspace();
   await ensureLoopArtifacts(configRoot);
@@ -163,6 +205,9 @@ test("exportMobileView returns a direct process status for production monitoring
   const mobile = await exportMobileView(configRoot);
 
   assert.equal(mobile.processStatus.state, "waiting_next_turn");
+  assert.equal(mobile.processStatus.monitorLevel, "ready");
+  assert.equal(mobile.processStatus.monitorLabel, "可继续");
+  assert.equal(mobile.processStatus.monitorTone, "ready");
   assert.equal(mobile.processStatus.canSendNextTurn, true);
   assert.equal(mobile.processStatus.waitingForCodex, false);
   assert.equal(mobile.processStatus.hasPendingGuidance, true);
@@ -171,6 +216,148 @@ test("exportMobileView returns a direct process status for production monitoring
   assert.match(mobile.processStatus.pendingGuidancePreview, /\u79fb\u52a8\u7aef\u8fdb\u7a0b\u72b6\u6001/);
   assert.match(mobile.processStatus.stopLimit, /\u6700\u957f.*\u5206\u949f/);
   assert.match(mobile.processStatus.stopLimit, /token/);
+});
+
+test("exportMobileView blocks next turn when required rule docs are missing", async () => {
+  const configRoot = await createWorkspace();
+  await ensureLoopArtifacts(configRoot);
+  const missingRuleDoc = path.join(configRoot, "docs", "RULES.md");
+  await fs.mkdir(path.dirname(missingRuleDoc), { recursive: true });
+  await fs.writeFile(
+    path.join(configRoot, "codex_loop", "config.json"),
+    `${JSON.stringify(
+      {
+        projectName: "demo",
+        branch: "dev",
+        currentRunId: "run-summary",
+        workspaceRoot: configRoot,
+        startContextPaths: [missingRuleDoc],
+        budgets: {
+          maxMinutes: 120,
+          maxTokens: 50000,
+          finalizeLeadMinutes: 15,
+          finalizeLeadTokens: 5000,
+        },
+      },
+      null,
+      2,
+    )}\n`,
+    "utf8",
+  );
+  await saveThreadBinding(configRoot, {
+    workspaceName: "demo",
+    threadTitle: "缺失规则文档线程",
+    threadId: "thread-context-health",
+    singleThreadMode: true,
+  });
+  await startRun(configRoot);
+
+  const mobile = await exportMobileView(configRoot);
+
+  assert.match(mobile.health.issues.join(","), /context:missing/);
+  assert.equal(mobile.processStatus.state, "health_blocked");
+  assert.equal(mobile.processStatus.monitorLevel, "blocked");
+  assert.equal(mobile.processStatus.monitorLabel, "需处理");
+  assert.equal(mobile.processStatus.monitorTone, "warning");
+  assert.equal(mobile.processStatus.canSendNextTurn, false);
+  assert.match(mobile.processStatus.headline, /需要处理/);
+  assert.match(mobile.processStatus.holdReason, /规则|文档/);
+  assert.match(mobile.processStatus.nextAction, /恢复|重新配置/);
+});
+
+test("exportMobileView blocks next turn when project workspace is missing", async () => {
+  const configRoot = await createWorkspace();
+  await ensureLoopArtifacts(configRoot);
+  const missingWorkspaceRoot = path.join(configRoot, "missing-project");
+  await createLoop(configRoot, {
+    loopName: "缺失项目路径",
+    runId: "missing-workspace-loop",
+    threadTitle: "缺失项目路径线程",
+    workspaceRoot: missingWorkspaceRoot,
+  });
+  await selectLoop(configRoot, { loopId: "missing-workspace-loop" });
+  await saveThreadBinding(configRoot, {
+    workspaceName: "demo",
+    threadTitle: "缺失项目路径线程",
+    threadId: "thread-workspace-health",
+    singleThreadMode: true,
+  });
+  await startRun(configRoot);
+
+  const mobile = await exportMobileView(configRoot);
+
+  assert.match(mobile.health.issues.join(","), /workspace:missing/);
+  assert.equal(mobile.processStatus.state, "health_blocked");
+  assert.equal(mobile.processStatus.canSendNextTurn, false);
+  assert.match(mobile.processStatus.headline, /需要处理/);
+  assert.match(mobile.processStatus.holdReason, /项目路径|工作区/);
+  assert.match(mobile.processStatus.nextAction, /恢复|重新配置/);
+});
+
+test("exportMobileView explains why the loop is waiting before sending again", async () => {
+  const configRoot = await createWorkspace();
+  const initialSnapshot = await ensureLoopArtifacts(configRoot);
+  await saveThreadBinding(configRoot, {
+    workspaceName: "demo",
+    threadTitle: "等待 Codex 完成线程",
+    threadId: "thread-hold-reason",
+    singleThreadMode: true,
+  });
+  await startRun(configRoot);
+  const runningSnapshot = await ensureLoopArtifacts(configRoot);
+  await fs.writeFile(
+    initialSnapshot.paths.threadPath,
+    `${JSON.stringify(
+      {
+        ...runningSnapshot.thread,
+        threadTitle: "等待 Codex 完成线程",
+        threadId: "thread-hold-reason",
+        continuationStatus: "dispatching",
+        lastDispatchAt: "2026-06-09T08:00:00.000Z",
+        latestEventType: "codex_followup_sent_waiting",
+      },
+      null,
+      2,
+    )}\n`,
+    "utf8",
+  );
+
+  const mobile = await exportMobileView(configRoot);
+
+  assert.equal(mobile.processStatus.state, "codex_working");
+  assert.equal(mobile.processStatus.monitorLevel, "busy");
+  assert.equal(mobile.processStatus.monitorLabel, "处理中");
+  assert.equal(mobile.processStatus.monitorTone, "active");
+  assert.equal(mobile.processStatus.canSendNextTurn, false);
+  assert.match(mobile.processStatus.holdReason, /Codex.*当前轮|当前轮.*Codex/);
+  assert.match(mobile.processStatus.nextAction, /等待.*完成|不要.*发送|查看.*记录/);
+});
+
+test("exportMobileView explains the recovery action after continuation failure", async () => {
+  const configRoot = await createWorkspace();
+  const snapshot = await ensureLoopArtifacts(configRoot);
+  await saveThreadBinding(configRoot, {
+    workspaceName: "demo",
+    threadTitle: "失败恢复线程",
+    threadId: "thread-failure-action",
+    singleThreadMode: true,
+  });
+  await startRun(configRoot);
+  const failedSnapshot = await ensureLoopArtifacts(configRoot);
+  await markContinuationFailed(configRoot, failedSnapshot, {
+    message: "Codex 原生发送未确认送达。",
+    latestSummary: "向 Codex 线程发送下一轮指令失败。",
+  });
+
+  const mobile = await exportMobileView(configRoot);
+
+  assert.equal(snapshot.config.currentRunId, "run-summary");
+  assert.equal(mobile.processStatus.state, "error");
+  assert.equal(mobile.processStatus.monitorLevel, "error");
+  assert.equal(mobile.processStatus.monitorLabel, "失败");
+  assert.equal(mobile.processStatus.monitorTone, "danger");
+  assert.match(mobile.processStatus.holdReason, /失败|未确认送达/);
+  assert.match(mobile.processStatus.nextAction, /检查.*线程|重新开始|绑定/);
 });
 
 test("exportMobileView exposes supervisor review and next instruction for monitoring", async () => {
@@ -207,6 +394,90 @@ test("exportMobileView exposes supervisor review and next instruction for monito
   assert.equal(mobile.processStatus.needsIndependentVerification, true);
   assert.deepEqual(mobile.processStatus.verificationCommands, ["npm run test", "npm run build:web"]);
   assert.match(mobile.processStatus.acceptanceFocusPreview, /\u9996\u9875\u72b6\u6001/);
+});
+
+test("exportMobileView exposes independent supervisor verification result", async () => {
+  const configRoot = await createWorkspace();
+  await ensureLoopArtifacts(configRoot);
+  await saveThreadBinding(configRoot, {
+    workspaceName: "demo",
+    threadTitle: "移动端独立验收",
+    threadId: "thread-mobile-verification",
+    singleThreadMode: true,
+  });
+
+  await reviewCodexMilestone(configRoot, {
+    generateMilestoneReview: async () => ({
+      summary: "监督复盘：需要独立验收移动端对话流。",
+      nextInstruction: "下一轮根据独立验收结果继续修复移动端对话流。",
+      shouldContinue: true,
+      needsIndependentVerification: true,
+      verificationCommands: ["npm run test:mobile-flow"],
+      acceptanceFocus: ["移动端能看到 codex-loop 指令和 Codex 回复"],
+      risks: [],
+    }),
+    runVerificationCommand: async ({ command }) => ({
+      command,
+      ok: false,
+      exitCode: 1,
+      output: "mobile transcript missing loop prompt bubble",
+    }),
+  });
+
+  const mobile = await exportMobileView(configRoot);
+
+  assert.equal(mobile.processStatus.supervisorVerificationStatus, "failed");
+  assert.match(
+    mobile.processStatus.supervisorVerificationSummary,
+    /mobile transcript missing loop prompt bubble/,
+  );
+  assert.equal(mobile.processStatus.supervisorVerificationCommandCount, 1);
+});
+
+test("exportMobileView gives clear mobile guidance while supervisor review is in progress", async () => {
+  const configRoot = await createWorkspace();
+  await ensureLoopArtifacts(configRoot);
+  await saveThreadBinding(configRoot, {
+    workspaceName: "demo",
+    threadTitle: "移动端监督复盘中",
+    threadId: "thread-mobile-reviewing",
+    singleThreadMode: true,
+  });
+
+  let releaseReview;
+  const releaseReviewPromise = new Promise((resolve) => {
+    releaseReview = resolve;
+  });
+  let generatorStarted;
+  const generatorStartedPromise = new Promise((resolve) => {
+    generatorStarted = resolve;
+  });
+
+  const reviewPromise = reviewCodexMilestone(configRoot, {
+    generateMilestoneReview: async () => {
+      generatorStarted();
+      await releaseReviewPromise;
+      return {
+        summary: "监督复盘：移动端状态清楚，可以继续。",
+        nextInstruction: "下一轮继续做最小可验证改动。",
+        shouldContinue: true,
+        needsIndependentVerification: false,
+        verificationCommands: [],
+        acceptanceFocus: ["移动端状态清楚"],
+        risks: [],
+      };
+    },
+  });
+
+  await generatorStartedPromise;
+  const mobile = await exportMobileView(configRoot);
+
+  assert.equal(mobile.thread.continuationStatus, "reviewing");
+  assert.equal(mobile.processStatus.state, "supervisor_reviewing");
+  assert.match(mobile.suggestedAction, /监督复盘中|本地模型|等待.*下一步/);
+
+  releaseReview();
+  await reviewPromise;
 });
 
 test("exportMobileView exposes customized npc rules and pending mobile guidance", async () => {

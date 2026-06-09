@@ -1,6 +1,5 @@
 import fs from "node:fs/promises";
 import path from "node:path";
-import { loadLoopConfig } from "./config-loader.mjs";
 
 async function exists(targetPath) {
   try {
@@ -25,11 +24,8 @@ export async function resolveWorkspaceAndLoopRoot(startDir = process.cwd()) {
 
   const directConfigPath = path.join(startDir, "config.json");
   if (await exists(directConfigPath)) {
-    const { config } = await loadLoopConfig(startDir);
     return {
-      workspaceRoot: config.workspaceRoot
-        ? path.resolve(config.workspaceRoot)
-        : startDir,
+      workspaceRoot: path.resolve(startDir),
       codexLoopRoot: startDir,
     };
   }

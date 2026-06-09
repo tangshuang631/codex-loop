@@ -15,12 +15,14 @@ async function readJsonIfExists(filePath) {
 }
 
 function mergeConfig(baseConfig = {}, overrideConfig = {}) {
+  const { workspaceRoot: _legacyWorkspaceRoot, ...safeOverrideConfig } =
+    overrideConfig || {};
   return {
     ...baseConfig,
-    ...overrideConfig,
+    ...safeOverrideConfig,
     budgets: {
       ...(baseConfig.budgets || {}),
-      ...(overrideConfig.budgets || {}),
+      ...(safeOverrideConfig.budgets || {}),
     },
   };
 }

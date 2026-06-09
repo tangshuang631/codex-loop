@@ -323,30 +323,13 @@ try {
   $mode = if ($args.Count -gt 0 -and $args[0]) { $args[0] } else { "start" }
   $loopRoot = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
   $configPath = Join-Path $loopRoot "config.json"
-  $localConfigPath = Join-Path $loopRoot "config.local.json"
 
   if (-not (Test-Path $configPath)) {
     throw "Missing codex-loop config.json in the tool root."
   }
 
   $config = Get-Content -Raw -Encoding UTF8 $configPath | ConvertFrom-Json
-  $localConfig = if (Test-Path $localConfigPath) {
-    Get-Content -Raw -Encoding UTF8 $localConfigPath | ConvertFrom-Json
-  } else {
-    $null
-  }
-
-  $workspaceRoot = if ($env:CODEX_LOOP_WORKSPACE_ROOT) {
-    $env:CODEX_LOOP_WORKSPACE_ROOT
-  } elseif ($localConfig -and $localConfig.workspaceRoot) {
-    $localConfig.workspaceRoot
-  } elseif ($config.workspaceRoot) {
-    $config.workspaceRoot
-  } else {
-    $loopRoot
-  }
-
-  $workspaceRoot = (Resolve-Path $workspaceRoot).Path
+  $consoleRoot = $loopRoot
   $hostName = if ($env:CODEX_LOOP_HOST) { $env:CODEX_LOOP_HOST } else { "127.0.0.1" }
   $apiPort = $null
   $webPort = $null
@@ -356,7 +339,7 @@ try {
 
   Write-Host ""
   Write-Host "codex-loop launcher" -ForegroundColor White
-  Write-Host "workspace: $workspaceRoot" -ForegroundColor DarkGray
+  Write-Host "console: $consoleRoot" -ForegroundColor DarkGray
   Write-Host ""
 
   if (-not (Get-Command node -ErrorAction SilentlyContinue)) {
