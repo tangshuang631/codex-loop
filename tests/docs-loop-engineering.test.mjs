@@ -96,3 +96,32 @@ test("architecture map documents current files and target enterprise boundaries"
   assert.match(architectureSource, /每次只迁移一条已测试的能力边界/);
   assert.match(architectureSource, /不得为了目录好看而搬家/);
 });
+
+test("product docs define task-first monitoring, mobile app, and durable phone pairing", async () => {
+  const readmeSource = await fs.readFile("README.md", "utf8");
+  const roadmapSource = await fs.readFile("docs/product-roadmap.md", "utf8");
+  const principlesSource = await fs.readFile("docs/loop-engineering-principles.md", "utf8");
+  const checklistSource = await fs.readFile("codex-loop6.7-13-29开发清单.md", "utf8");
+
+  for (const source of [readmeSource, roadmapSource, principlesSource, checklistSource]) {
+    assert.match(source, /新建任务/);
+    assert.match(source, /监控模式/);
+    assert.match(source, /不开始循环/);
+    assert.match(source, /发送引导/);
+    assert.match(source, /移动端 App/);
+    assert.match(source, /扫码/);
+    assert.match(source, /长期绑定/);
+    assert.match(source, /项目路径.*窗口名|窗口名.*项目路径/);
+  }
+});
+
+test("architecture map includes productized binding and mobile-app target modules", async () => {
+  const architectureSource = await fs.readFile("docs/enterprise-loop-architecture.md", "utf8");
+
+  assert.match(architectureSource, /app\/mobile/);
+  assert.match(architectureSource, /remote-access\.mjs/);
+  assert.match(architectureSource, /device-pairing/);
+  assert.match(architectureSource, /thread-resolver/);
+  assert.match(architectureSource, /项目路径.*窗口名|窗口名.*项目路径/);
+  assert.match(architectureSource, /扫码.*长期绑定|长期绑定.*扫码/);
+});

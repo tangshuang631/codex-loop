@@ -10,6 +10,7 @@ import { deleteAutomationForThread } from "./automation-store.mjs";
 import { dispatchThreadMessage as defaultDispatchThreadMessage } from "./codex-dispatcher.mjs";
 import { readCodexConversationMirror } from "./codex-session-reader.mjs";
 import { readLauncherStatus } from "./launcher-status.mjs";
+import { resolveReviewHumanDeferral } from "./npc/confirmation-policy.mjs";
 import { planLoopWithFallback } from "./ollama-loop-planner.mjs";
 import {
   generateCodexSummaryWithOllama,
@@ -4169,6 +4170,21 @@ function normalizeMilestoneReviewResult(result = {}, fallback = {}) {
   };
 }
 
+function buildMilestoneReviewDecisionContext(snapshot, fallbackReview = {}) {
+  return [
+    snapshot.thread.latestCodexSummary,
+    snapshot.thread.lastAssistantActionSummary,
+    snapshot.thread.lastUserInstructionSummary,
+    snapshot.thread.pendingUserGuidance,
+    snapshot.state.recentSummary,
+    fallbackReview.summary,
+    fallbackReview.nextInstruction,
+  ]
+    .map((item) => safeText(item, ""))
+    .filter(Boolean)
+    .join("\n");
+}
+
 export async function reviewCodexMilestone(
   startDir = process.cwd(),
   {
@@ -4185,6 +4201,12 @@ export async function reviewCodexMilestone(
     (generator.enabled === true || generator.enabled === "auto") &&
     generator.provider === "ollama";
   const ollamaAutoMode = generator.enabled === "auto";
+  const englishPreferred = safeText(
+    snapshot.profile?.resolved?.conversation?.language,
+    "zh-CN",
+  )
+    .toLowerCase()
+    .startsWith("en");
 
   let review = fallbackReview;
   let source = "template";
@@ -4213,6 +4235,12 @@ export async function reviewCodexMilestone(
     }
   }
 
+  review = resolveReviewHumanDeferral({
+    review,
+    context: buildMilestoneReviewDecisionContext(snapshot, fallbackReview),
+    englishPreferred,
+  });
+
   const verification = await runSupervisorIndependentVerification(snapshot, review, {
     runVerificationCommand,
   });
@@ -4220,12 +4248,20 @@ export async function reviewCodexMilestone(
     review.nextInstruction,
     verification,
   );
+  const pausedMessage = "监督复盘建议暂停等待人工确认。";
+  const pauseFailure = review.shouldContinue
+    ? null
+    : classifyContinuationFailure({
+        message: pausedMessage,
+        latestSummary: review.summary,
+      });
 
   const nextThread = await persistThreadMirror(
     snapshot.paths.threadPath,
     snapshot.thread,
     snapshot.state,
     {
+      continuationStatus: review.shouldContinue ? "idle" : "error",
       lastSupervisorReview: review.summary,
       lastSupervisorReviewAt: at,
       lastSupervisorInstruction: nextInstruction,
@@ -4242,7 +4278,12 @@ export async function reviewCodexMilestone(
       latestEventType: review.shouldContinue
         ? "supervisor_review_completed"
         : "supervisor_review_skipped",
-      lastContinuationError: review.shouldContinue ? "" : "监督复盘建议暂停等待人工确认。",
+      lastContinuationError: review.shouldContinue ? "" : pausedMessage,
+      lastContinuationFailureCategory: pauseFailure?.category || "",
+      lastContinuationFailureLabel: pauseFailure?.label || "",
+      lastContinuationFailureSeverity: pauseFailure?.severity || "",
+      lastContinuationFailureMessage: pauseFailure?.userMessage || "",
+      lastContinuationFailureAction: pauseFailure?.nextAction || "",
       lastUpdatedAt: at,
     },
   );
@@ -4269,6 +4310,7 @@ export async function reviewCodexMilestone(
     verificationResults: verification.results,
     acceptanceFocus: review.acceptanceFocus,
     risks: review.risks,
+    autoResolvedHumanDeferral: Boolean(review.autoResolvedHumanDeferral),
   });
   if (verification.status && verification.status !== "not_requested") {
     await appendJsonLine(snapshot.paths.logPath, {

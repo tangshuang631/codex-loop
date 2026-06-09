@@ -29,11 +29,22 @@ The current top priority is the core local loop business:
 
 后续进度不按“prompt 写得更聪明”判断，而按 loop 是否更可靠判断。优先建设 loop，而不是堆 prompt。
 
-- P0 可运行闭环：用户能创建 loop、绑定线程、开始循环、停止收尾，并在控制台看到 Codex 回复和 codex-loop 指令。
+- P0 可运行闭环：用户能新建任务、绑定线程、开始循环、停止收尾，并在控制台看到 Codex 回复和 codex-loop 指令。
 - P1 可控闭环：系统能识别 Codex 是否仍在工作，用户补充会排队等待当前轮完成，停止条件和预算会阻止下一轮派发。
 - P2 可验证闭环：NPC 会结合项目文档、用户规则和 Codex 最新回复生成下一步；测试、构建、日志或截图验收能写回状态。
 - P3 可长期监控闭环：运行日志可读，失败可恢复，移动端可查看当前状态和历史，用户能远程补充下一轮引导。
 - P4 企业级治理闭环：多项目多 loop 稳定运行，角色规则可定制，权限边界可审计，长期任务有成本、失败率和质量趋势。
+
+## Task-first product model
+
+The product language should move from "create a loop" to "新建任务". A task can run an automatic loop, but it can also stay in 监控模式. In 监控模式, the user can bind a Codex window, watch the mirrored conversation, and 发送引导 without starting automation.
+
+Required behavior:
+
+- 新建任务 must first describe the user goal and target project, then optionally configure loop behavior.
+- 不开始循环 must not make the task useless; it should still monitor Codex and allow guidance messages.
+- 发送引导 while Codex is working must wait until Codex can accept the next turn, then merge the guidance through the NPC workflow.
+- Binding should prefer 项目路径 + Codex 窗口名. Manual thread ID is only a fallback when automatic matching is unclear.
 
 Current implementation progress:
 
@@ -87,7 +98,7 @@ This should make `codex_loop` more reusable and easier to adopt across different
 
 Mobile support is valuable because it helps users check progress away from the desk.
 
-But mobile is not a v1 core business requirement.
+Mobile is now part of the production monitoring target. It should be treated as a 移动端 App experience, not just a small responsive web page.
 
 The correct ordering is:
 
@@ -95,17 +106,25 @@ The correct ordering is:
 2. make Codex linkage feel seamless
 3. add lightweight phone access for status and summaries
 
-The first mobile capability should likely be:
+The first mobile App capability should be:
 
-- read-only
-- summary-first
+- history conversation
+- current task state
+- send-guidance composer
 - safe by default
+- consistent with the web task detail content
 
 Not:
 
-- full remote control
 - destructive actions
 - replacing the desktop Codex workflow
+
+Phone pairing requirement:
+
+- First connection should use 扫码 from the desktop console.
+- The scan creates a 长期绑定 between the mobile App and that workstation's codex-loop service identity.
+- After codex-loop restarts on the same computer, the same mobile App should reconnect without requiring another scan.
+- If the token is revoked or the machine identity changes, the App must ask the user to scan again.
 
 ## Current implementation note
 

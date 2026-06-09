@@ -1,6 +1,11 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 
+import {
+  buildDecisiveContinuationInstruction,
+  shouldAutoResolveHumanDeferral,
+} from "./npc/confirmation-policy.mjs";
+
 function safeText(value, fallback = "") {
   if (value === null || value === undefined) {
     return fallback;
@@ -54,27 +59,12 @@ function extractJsonMessage(text) {
   return "";
 }
 
-function hasHighRiskSignal(text) {
-  return /删除|清空|覆盖|重置|回滚|不可逆|凭证|密钥|token|权限|授权|登录|安全|支付|费用|生产环境|destructive|irreversible|credential|permission|security|payment|production/i.test(
-    safeText(text, ""),
-  );
-}
-
 function shouldReplaceOrdinaryUserDeferral(text, context = "") {
   const value = safeText(text, "");
-  if (!value) return false;
-  const asksForConfirmation =
-    /(?:如果)?没有偏好|等待.*用户|用户确认|待.*确认|等.*确认后再继续|defer to the human|wait for user confirmation/i.test(
-      value,
-    );
-  const highRisk = hasHighRiskSignal(`${value}\n${safeText(context, "")}`);
-  return asksForConfirmation && !highRisk;
-}
-
-function decisiveContinuationFallback(englishPreferred = false) {
-  return englishPreferred
-    ? "Choose the safest small verifiable path from the project docs and current rules, then continue. After finishing, report the change summary, verification result, and the next recommended step."
-    : "请基于项目文档和现有规则，直接选择最安全、最小、可验证的方案继续推进；完成后给出改动摘要、验证结果和下一步建议。";
+  return shouldAutoResolveHumanDeferral({
+    text: value,
+    context,
+  });
 }
 
 function cleanGeneratedMessage(value, maxChars = 900, options = {}) {
@@ -101,7 +91,9 @@ function cleanGeneratedMessage(value, maxChars = 900, options = {}) {
     options.replaceOrdinaryUserDeferral &&
     shouldReplaceOrdinaryUserDeferral(text, options.riskContext)
   ) {
-    text = decisiveContinuationFallback(options.englishPreferred);
+    text = buildDecisiveContinuationInstruction({
+      englishPreferred: options.englishPreferred,
+    });
   }
 
   if (text.length <= maxChars) return text;

@@ -22,12 +22,16 @@
 - `app/server/lib/loop-core/controller-gates.mjs`：自动循环闸门已经迁入 Loop 内核，负责判断是否等待 Codex、是否进入监督复盘、是否到达预算停止条件、是否允许发送下一轮。
 - `app/server/lib/codex-dispatcher.mjs`：当前承载 Codex 线程发送与可见性校验。后续应归入 Codex 联动层，并继续禁止不可见兜底链路假装成功。
 - `app/server/lib/codex-session-reader.mjs`：当前承载 Codex 历史读取和聊天镜像。后续应与 dispatcher 一起收束为 Codex 联动层。
+- `app/server/lib/codex-link/thread-resolver.mjs`：目标模块，后续承载项目路径 + Codex 窗口名的自动匹配，只有匹配失败或存在歧义时才回退手动线程 ID。
 - `app/server/lib/ollama-prompt-generator.mjs`：当前承载本地模型生成、Codex 摘要和里程碑复盘。后续应归入 NPC 决策层。
 - `app/server/lib/ollama-loop-planner.mjs`：当前承载创建 loop 时的规划增强。后续应与 NPC 决策层共享项目记忆和用户规则。
+- `app/server/lib/npc/confirmation-policy.mjs`：NPC 普通确认策略已经迁入决策层，用于区分普通产品偏好和高风险人工确认。
 - `app/server/lib/verification/supervisor-verification.mjs`：监督独立验收已经迁入验证层，负责安全命令过滤、验收冷却、结果摘要和失败/跳过证据注入下一轮指令。
 - `app/server/lib/runtime-governance/failure-classifier.mjs`：续跑失败分类已经迁入运行治理层，负责把 Codex 发送、本地模型、文档规则、工作区、重复发送、预算停止等异常转成中文原因和恢复动作。
 - `app/server/lib/launcher-status.mjs`、`remote-access.mjs`、`paths.mjs`：当前承载启动、远程访问、路径解析等治理能力。后续应归入运行治理层。
+- `app/server/lib/runtime-governance/device-pairing.mjs`：目标模块，后续承载移动端 App 的扫码配对、长期绑定、令牌撤销和服务重启后的自动重连。
 - `app/web/src/App.jsx`、`app/web/src/runtime-events.mjs`、`app/web/src/styles.css`：当前承载产品界面层。这里应该只展示用户需要的状态、对话和操作，不暴露内部模块名。
+- `app/mobile`：目标目录，后续承载移动端 App 体验。它应复用 Web 任务详情数据，只展示历史对话、当前状态和发送引导，不复制桌面端全部设置。
 
 ## 迁移规则
 
@@ -43,8 +47,19 @@
 1. 继续扩展 `app/server/lib/loop-core/controller-gates.mjs`，把更多停止条件、失败分类和恢复策略收束为可单测的 Loop 内核判断模块。
 2. 继续扩展 `app/server/lib/verification/supervisor-verification.mjs`，把更多测试、构建、日志、截图验收能力收束进验证层。
 3. 把 NPC 复盘、用户补充合并、项目规则读取收束到 NPC 决策层。
-4. 把 Codex 发送、历史读取、可见性校验收束为 Codex 联动层统一接口。
-5. 继续把启动残留状态、日志可读化、关闭服务、远程访问收束为运行治理层，并复用失败分类字段输出一致的状态提示。
+4. 把 Codex 发送、历史读取、可见性校验收束为 Codex 联动层统一接口，并补上项目路径 + 窗口名的 thread-resolver 自动绑定。
+5. 继续把启动残留状态、日志可读化、关闭服务、远程访问收束为运行治理层，并补上扫码长期绑定的 device-pairing 能力。
+6. 建立 `app/mobile` 的移动端 App 入口，让手机端专注监控模式、历史对话和发送引导。
+
+## 产品化绑定边界
+
+绑定能力要服务用户，而不是要求用户理解内部线程号。
+
+- 新建任务时优先收集项目路径和 Codex 窗口名，系统根据 Codex 历史、窗口标题、工作区路径和最近活动时间自动匹配线程。
+- 匹配结果唯一时直接保存绑定；匹配结果不唯一时让用户选择；匹配失败时才显示手动线程 ID 入口。
+- 不开始循环时，任务进入监控模式，仍然可以同步历史、显示 Codex 状态并发送引导。
+- 移动端 App 首次连接通过扫码建立长期绑定。扫码绑定的是这台电脑上的 codex-loop 服务身份，不是某一次端口或进程。
+- codex-loop 服务重启后，已授权手机应通过长期绑定自动重连；用户主动撤销、密钥轮换或机器身份变化时才需要重新扫码。
 
 ## 完成判断
 

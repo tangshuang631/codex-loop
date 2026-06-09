@@ -1082,6 +1082,74 @@ test("milestone review stores supervisor guidance that the next loop turn uses",
   assert.match(dispatchedPrompt, /不要扩大到新功能/);
 });
 
+test("milestone review auto-resolves ordinary product confirmation instead of stopping", async () => {
+  const configRoot = await createWorkspace();
+  await ensureLoopArtifacts(configRoot);
+  await saveThreadBinding(configRoot, {
+    workspaceName: "demo",
+    threadTitle: "普通确认复盘线程",
+    threadId: "thread-supervisor-ordinary-confirmation",
+    singleThreadMode: true,
+  });
+  await syncCodexThreadMirror(configRoot, {
+    lastUserInstructionSummary: "把历史对话展示做得更接近 Codex 桌面端",
+    latestCodexSummary:
+      "Codex 已完成一版对话流布局，现在询问如果没有偏好，是否等待用户确认浅灰分割线还是卡片式展示。",
+  });
+
+  const reviewed = await reviewCodexMilestone(configRoot, {
+    generateMilestoneReview: async () => ({
+      summary: "监督复盘：Codex 正在等待普通产品偏好确认。",
+      nextInstruction: "如果没有偏好，请等待用户确认后再继续。",
+      shouldContinue: false,
+      needsIndependentVerification: false,
+      verificationCommands: [],
+      acceptanceFocus: [],
+      risks: ["普通展示风格需要确认"],
+    }),
+  });
+
+  assert.equal(reviewed.thread.latestEventType, "supervisor_review_completed");
+  assert.equal(reviewed.thread.lastContinuationError, "");
+  assert.doesNotMatch(
+    reviewed.thread.lastSupervisorInstruction,
+    /等待.*用户|用户确认|没有偏好/,
+  );
+  assert.match(reviewed.thread.lastSupervisorInstruction, /最安全|可验证|继续/);
+});
+
+test("milestone review still pauses for high-risk user confirmation", async () => {
+  const configRoot = await createWorkspace();
+  await ensureLoopArtifacts(configRoot);
+  await saveThreadBinding(configRoot, {
+    workspaceName: "demo",
+    threadTitle: "高风险确认复盘线程",
+    threadId: "thread-supervisor-risk-confirmation",
+    singleThreadMode: true,
+  });
+  await syncCodexThreadMirror(configRoot, {
+    lastUserInstructionSummary: "让 codex-loop 长期稳定运行",
+    latestCodexSummary:
+      "Codex 准备删除旧运行目录并清理凭证缓存，正在等待用户确认后再继续。",
+  });
+
+  const reviewed = await reviewCodexMilestone(configRoot, {
+    generateMilestoneReview: async () => ({
+      summary: "监督复盘：涉及删除运行目录和凭证缓存，需要用户确认。",
+      nextInstruction: "涉及删除运行目录和凭证缓存，请等待用户确认后再继续。",
+      shouldContinue: false,
+      needsIndependentVerification: false,
+      verificationCommands: [],
+      acceptanceFocus: [],
+      risks: ["删除运行目录", "清理凭证缓存"],
+    }),
+  });
+
+  assert.equal(reviewed.thread.latestEventType, "supervisor_review_skipped");
+  assert.match(reviewed.thread.lastContinuationError, /人工确认|暂停/);
+  assert.match(reviewed.thread.lastSupervisorInstruction, /删除|凭证|用户确认/);
+});
+
 test("milestone review exposes an in-progress supervisor state before the next turn", async () => {
   const configRoot = await createWorkspace();
   await ensureLoopArtifacts(configRoot);
