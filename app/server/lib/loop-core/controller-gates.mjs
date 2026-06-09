@@ -67,6 +67,10 @@ export function decideLoopControllerGate(snapshot = {}, controllerState = {}) {
     };
   }
 
+  if (state.monitorOnly) {
+    return { type: "monitor_only_stopped", status: "stopped" };
+  }
+
   if (budgetLimitReached(state)) {
     return { type: "budget_stopped", status: "budget_stopped" };
   }

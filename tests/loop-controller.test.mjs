@@ -465,3 +465,47 @@ test("loop controller stops before sending another turn when budget limit is rea
   assert.match(stopRequests[0].payload.reason, /预算|budget/i);
   assert.equal(controller.isRunning("demo"), false);
 });
+
+test("loop controller stops automatic control after monitor-mode one-shot completion", async () => {
+  const scheduled = [];
+  let runTurnCount = 0;
+  let reviewCount = 0;
+  const controller = createLoopController({
+    readSnapshot: async () => ({
+      state: {
+        mode: "running",
+        monitorOnly: true,
+        stopRequested: false,
+        finalizeRequested: false,
+      },
+      thread: {
+        continuationStatus: "idle",
+        latestEventType: "codex_followup_completed",
+        lastCompletionAt: "2026-06-09T12:00:00.000Z",
+        lastSupervisorReviewAt: "",
+      },
+    }),
+    runTurn: async () => {
+      runTurnCount += 1;
+    },
+    reviewCompletion: async () => {
+      reviewCount += 1;
+    },
+    schedule: (fn) => {
+      scheduled.push(fn);
+      return fn;
+    },
+    cancel: () => {},
+  });
+
+  assert.equal(await controller.start("demo"), true);
+  assert.equal(await flushScheduled(scheduled), true);
+
+  const status = controller.getStatus("demo");
+  assert.equal(status.running, false);
+  assert.equal(status.state, "monitor_only_stopped");
+  assert.match(status.detail, /监控模式|不会自动循环/);
+  assert.equal(controller.isRunning("demo"), false);
+  assert.equal(runTurnCount, 0);
+  assert.equal(reviewCount, 0);
+});

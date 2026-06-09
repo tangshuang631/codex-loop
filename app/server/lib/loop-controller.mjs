@@ -61,6 +61,13 @@ function controllerStatus(state, overrides = {}) {
       detail: "预算或停止条件已达到，已停止自动发送下一轮指令。",
       nextAction: "查看最近记录；需要继续时调整停止条件后重新开始。",
     },
+    monitor_only_stopped: {
+      running: false,
+      state: "monitor_only_stopped",
+      label: "监控中",
+      detail: "监控模式的一次性引导已结束，不会自动循环。",
+      nextAction: "继续查看 Codex 回复；需要时在底部再发送新的引导。",
+    },
     error_stopped: {
       running: false,
       state: "error_stopped",
@@ -154,6 +161,12 @@ export function createLoopController({
         return;
       }
 
+      if (gate.type === "monitor_only_stopped") {
+        rememberStatus(startDir, controllerStatus("monitor_only_stopped"));
+        activeLoops.delete(startDir);
+        return;
+      }
+
       if (gate.type === "waiting_for_new_completion") {
         rememberStatus(startDir, controllerStatus("waiting_codex"));
         scheduleNext(active, startDir, 1500);
@@ -208,6 +221,11 @@ export function createLoopController({
           await requestStop(startDir, {
             reason: "预算已到达，codex-loop 已停止自动发送下一轮指令。",
           });
+          activeLoops.delete(startDir);
+          return;
+        }
+        if (reviewedGate.type === "monitor_only_stopped") {
+          rememberStatus(startDir, controllerStatus("monitor_only_stopped"));
           activeLoops.delete(startDir);
           return;
         }

@@ -152,3 +152,39 @@ test("loop core keeps waiting when the same completion has already been consumed
     { type: "waiting_for_new_completion", status: "waiting_codex" },
   );
 });
+
+test("loop core stops automatic control after monitor-mode one-shot guidance finishes", () => {
+  assert.deepEqual(
+    decideLoopControllerGate({
+      state: {
+        mode: "running",
+        monitorOnly: true,
+        stopRequested: false,
+        finalizeRequested: false,
+      },
+      thread: {
+        continuationStatus: "dispatching",
+        latestEventType: "codex_followup_sent_waiting",
+      },
+    }),
+    { type: "waiting_codex", status: "waiting_codex", awaitingCompletion: true },
+  );
+
+  assert.deepEqual(
+    decideLoopControllerGate({
+      state: {
+        mode: "running",
+        monitorOnly: true,
+        stopRequested: false,
+        finalizeRequested: false,
+      },
+      thread: {
+        continuationStatus: "idle",
+        latestEventType: "codex_followup_completed",
+        lastCompletionAt: "2026-06-09T12:00:00.000Z",
+        lastSupervisorReviewAt: "",
+      },
+    }),
+    { type: "monitor_only_stopped", status: "stopped" },
+  );
+});
