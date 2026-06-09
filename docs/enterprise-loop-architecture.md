@@ -25,7 +25,7 @@
 - `app/server/lib/codex-session-reader.mjs`：当前承载 Codex 历史读取和聊天镜像。后续应与 dispatcher 一起收束为 Codex 联动层。
 - `app/server/lib/codex-link/thread-resolver.mjs`：目标模块，后续承载项目路径 + Codex 窗口名的自动匹配，只有匹配失败或存在歧义时才回退手动线程 ID。
 - `app/server/lib/ollama-prompt-generator.mjs`：当前承载本地模型生成、Codex 摘要和里程碑复盘。后续应归入 NPC 决策层。
-- `app/server/lib/ollama-loop-planner.mjs`：当前承载创建 loop 时的规划增强。后续应与 NPC 决策层共享项目记忆和用户规则。
+- `app/server/lib/ollama-loop-planner.mjs`：当前承载创建任务时的规划增强。后续应与 NPC 决策层共享项目记忆和用户规则。
 - `app/server/lib/npc/confirmation-policy.mjs`：NPC 普通确认策略已经迁入决策层，用于区分普通产品偏好和高风险人工确认。
 - `app/server/lib/verification/supervisor-verification.mjs`：监督独立验收已经迁入验证层，负责安全命令过滤、验收冷却、结果摘要和失败/跳过证据注入下一轮指令。
 - `app/server/lib/runtime-governance/failure-classifier.mjs`：续跑失败分类已经迁入运行治理层，负责把 Codex 发送、本地模型、文档规则、工作区、重复发送、预算停止等异常转成中文原因和恢复动作。

@@ -490,7 +490,7 @@ test("exportMobileView exposes customized npc rules and pending mobile guidance"
       supervisor: {
         roleTraits: "像产品经理、测试人员和真实用户一样监督项目，不允许偏离用户目标。",
         testingRules: "每个移动端改动都要检查状态、历史记录和补充引导入口。",
-        acceptanceCriteria: "用户在手机上 10 秒内能判断当前 loop 是否健康。",
+        acceptanceCriteria: "用户在手机上 10 秒内能判断当前任务是否健康。",
       },
     },
   });

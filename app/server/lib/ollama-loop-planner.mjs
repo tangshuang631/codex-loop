@@ -61,7 +61,7 @@ function buildFallbackPlan({ draft, answer }) {
   const objectiveSummary =
     safeText(draft.intent, "") ||
     safeText(answer, "") ||
-    "继续推进当前项目的首个自动化 loop";
+    "继续推进当前项目的首个自动化任务";
 
   const suggestedProjectName =
     safeText(draft.projectName, "") ||
@@ -86,7 +86,7 @@ function buildFallbackPlan({ draft, answer }) {
       "确认项目路径、项目名和当前目标是否正确",
       "确认 Git 状态、工作分支与后续提交策略",
       "确认规则文档、开发清单和验证命令是否需要纳入",
-      "创建首个 loop，并绑定到可见 Codex 线程",
+      "创建首个任务，并绑定到可见 Codex 线程",
     ],
     riskNotes: [
       draft.git?.hasGit ? "已检测到 Git，可继续规划提交与推送节奏" : "尚未检测到 Git，长任务前建议先初始化仓库",
@@ -105,15 +105,15 @@ export async function generateLoopPlanWithOllama({
 }) {
   const docsContext = await collectDocsContext(draft);
   const system =
-    "你是 codex-loop 的本地规划助手。请基于用户当前意图、项目文档线索、Git 状态和已有草稿，生成首个自动化 loop 的建议。只返回 JSON。";
+    "你是 codex-loop 的本地规划助手。请基于用户当前意图、项目文档线索、Git 状态和已有草稿，生成首个自动化任务的建议。只返回 JSON。";
 
   const prompt = [
     "请输出 JSON，不要输出解释。",
     "JSON 字段要求：",
     "{",
-    '  "objectiveSummary": "一句话总结当前 loop 目标",',
+    '  "objectiveSummary": "一句话总结当前任务目标",',
     '  "suggestedProjectName": "建议项目名",',
-    '  "suggestedLoopName": "建议 loop 名称",',
+    '  "suggestedLoopName": "建议任务名称",',
     '  "suggestedBranch": "建议分支",',
     '  "checklist": ["3到6条配置步骤"],',
     '  "riskNotes": ["0到5条风险提醒"],',
@@ -124,7 +124,7 @@ export async function generateLoopPlanWithOllama({
     `已有意图：${safeText(draft.intent, "暂无")}`,
     `项目路径：${safeText(draft.workspaceRoot, "暂无")}`,
     `当前项目名：${safeText(draft.projectName, "暂无")}`,
-    `当前 loop 名：${safeText(draft.loopName, "暂无")}`,
+    `当前任务名：${safeText(draft.loopName, "暂无")}`,
     `当前分支：${safeText(draft.branch, "暂无")}`,
     `Git 状态：${draft.git?.hasGit ? `已存在，当前分支 ${safeText(draft.git.branch, "未知")}` : "未检测到 Git"}`,
     `项目类型：${safeText(draft.projectProfile?.projectType, "generic")}`,
@@ -134,7 +134,7 @@ export async function generateLoopPlanWithOllama({
     "",
     "要求：",
     "1. 建议值要尽量贴近真实开发任务，而不是空泛命名。",
-    "2. nextQuestion 必须是继续创建 loop 所需要的下一句自然追问。",
+    "2. nextQuestion 必须是继续创建任务所需要的下一句自然追问。",
     "3. 不要编造不存在的文件或命令。",
   ].join("\n");
 

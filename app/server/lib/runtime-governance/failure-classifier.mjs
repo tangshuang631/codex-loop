@@ -52,7 +52,7 @@ export function classifyContinuationFailure(input = {}) {
       label: "缺少项目规则",
       severity: "error",
       userMessage: originalMessage,
-      nextAction: "先补齐创建 loop 时指定的文档或开发规则；如果路径填错，请回到创建 loop 或管理页重新配置。",
+      nextAction: "先补齐创建任务时指定的文档或开发规则；如果路径填错，请回到创建任务或管理页重新配置。",
     };
   }
 
@@ -85,7 +85,10 @@ export function classifyContinuationFailure(input = {}) {
       /already dispatching/i,
       /still waiting/i,
       /等待 Codex 完成/u,
+      /等待 Codex 回复/u,
       /正在处理当前轮/u,
+      /正在发送/u,
+      /不要重复点击/u,
     ])
   ) {
     return {

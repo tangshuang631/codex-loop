@@ -150,7 +150,7 @@ export async function readRemoteAccessStatus({
 
   const headline = "手机查看 codex-loop";
   const summary = tailscaleInstalled
-    ? "已检测到 Tailscale。手机接入同一个 Tailnet 后，就可以用这台电脑的 Tailscale 地址查看当前 loop。"
+    ? "已检测到 Tailscale。手机接入同一个 Tailnet 后，就可以用这台电脑的 Tailscale 地址查看当前任务。"
     : cloudflaredInstalled
       ? "已检测到 cloudflared。可以创建隧道，把 codex-loop 页面临时暴露给手机查看。"
       : "建议安装 Tailscale。它是最简单、最稳的手机远程查看方案。";

@@ -194,6 +194,86 @@ test("saveThreadBinding persists project and title display metadata", async () =
   assert.equal(snapshot.thread.latestMode, "running");
 });
 
+test("readLoopSnapshot normalizes legacy loop wording in visible thread fields", async () => {
+  const configRoot = await createWorkspace();
+  const initialSnapshot = await ensureLoopArtifacts(configRoot);
+
+  await fs.writeFile(
+    initialSnapshot.paths.threadPath,
+    `${JSON.stringify(
+      {
+        ...initialSnapshot.thread,
+        note: "当前 loop：旧任务，已绑定线程 thread-legacy。",
+        latestSummary: "当前 loop 已停止。请回到创建 loop 或管理页处理。",
+        lastDispatchPrompt: "继续当前 loop，并遵守 loop 规则。",
+        lastUserInstructionSummary: "继续当前 loop。",
+      },
+      null,
+      2,
+    )}\n`,
+    "utf8",
+  );
+
+  const snapshot = await readLoopSnapshot(configRoot);
+
+  assert.equal(snapshot.thread.note, "当前任务：旧任务，已绑定线程 thread-legacy。");
+  assert.equal(snapshot.thread.latestSummary, "当前任务已停止。请回到创建任务或管理页处理。");
+  assert.match(snapshot.thread.lastDispatchPrompt, /继续当前任务/);
+  assert.doesNotMatch(snapshot.thread.lastDispatchPrompt, /当前 loop|loop 规则/);
+  assert.equal(snapshot.thread.lastUserInstructionSummary, "继续当前任务。");
+});
+
+test("saveThreadBinding resolves a Codex thread from project path and window name when thread id is empty", async () => {
+  const configRoot = await createWorkspace();
+
+  const snapshot = await saveThreadBinding(configRoot, {
+    workspaceName: "自动绑定窗口",
+    threadTitle: "核心任务窗口",
+    threadId: "",
+    workspaceRoot: "E:\\2026\\opencow",
+    resolveCodexThread: async ({ workspaceRoot, windowTitle }) => {
+      assert.equal(workspaceRoot, "E:\\2026\\opencow");
+      assert.equal(windowTitle, "核心任务窗口");
+      return {
+        status: "matched",
+        threadId: "auto-thread-123",
+        threadTitle: "核心任务窗口",
+        workspaceName: "自动绑定窗口",
+        workspaceRoot,
+        userMessage: "已找到 Codex 窗口。",
+      };
+    },
+  });
+
+  assert.equal(snapshot.thread.threadId, "auto-thread-123");
+  assert.equal(snapshot.thread.threadTitle, "核心任务窗口");
+  assert.equal(snapshot.thread.workspaceName, "自动绑定窗口");
+  assert.equal(snapshot.thread.workspaceRoot, "E:\\2026\\opencow");
+  assert.equal(snapshot.thread.windowTitle, "核心任务窗口");
+  assert.match(snapshot.thread.note, /已找到 Codex 窗口/);
+});
+
+test("saveThreadBinding keeps manual fallback clear when automatic thread resolution is ambiguous", async () => {
+  const configRoot = await createWorkspace();
+
+  await assert.rejects(
+    () =>
+      saveThreadBinding(configRoot, {
+        workspaceName: "自动绑定窗口",
+        threadTitle: "核心任务窗口",
+        threadId: "",
+        workspaceRoot: "E:\\2026\\opencow",
+        resolveCodexThread: async () => ({
+          status: "ambiguous",
+          threadId: "",
+          candidates: [{ threadId: "a" }, { threadId: "b" }],
+          userMessage: "找到 2 个可能的 Codex 窗口，请手动填写线程 ID。",
+        }),
+      }),
+    /找到 2 个可能的 Codex 窗口/,
+  );
+});
+
 test("recordHeartbeat stores recent summary and appends transcript entry", async () => {
   const configRoot = await createWorkspace();
   const initialSnapshot = await ensureLoopArtifacts(configRoot);
@@ -2833,7 +2913,7 @@ test("runLoopTurn rejects duplicate dispatch while a continuation is actively in
 
   await assert.rejects(
     () => runLoopTurn(configRoot),
-    /already dispatching/i,
+    /正在发送|等待 Codex 回复|不要重复点击/,
   );
 });
 
@@ -2901,7 +2981,7 @@ test("runLoopTurn does not send another prompt while Codex is still processing",
 
   await assert.rejects(
     () => runLoopTurn(configRoot),
-    /already dispatching/i,
+    /正在发送|等待 Codex 回复|不要重复点击/,
   );
 });
 
@@ -2921,7 +3001,7 @@ test("runLoopTurn rejects using the current Codex session thread as the loop tar
 
     await assert.rejects(
       () => runLoopTurn(configRoot),
-      /current Codex session/i,
+      /当前 codex-loop|另一个可见 Codex 窗口/,
     );
   } finally {
     if (originalThreadId === undefined) {
@@ -3056,7 +3136,7 @@ test("updateLoopSupervisor stores project-specific npc rules and merges them int
   );
   assert.match(
     snapshot.profile.resolved.conversation.supervisor.roleTraits,
-    /当前 loop：当前项目：像挑剔真实用户/,
+    /当前任务：当前项目：像挑剔真实用户/,
   );
   assert.match(
     snapshot.profile.resolved.conversation.supervisor.testingRules,
@@ -3070,7 +3150,7 @@ test("updateLoopSupervisor stores project-specific npc rules and merges them int
       ok: true,
       json: async () => ({
         response: JSON.stringify({
-          summary: "监督复盘：按当前 loop 规则继续。",
+          summary: "监督复盘：按当前任务规则继续。",
           nextInstruction: "先修复移动端对话流。",
           shouldContinue: true,
           needsIndependentVerification: true,
@@ -3244,6 +3324,34 @@ test("loop creation assistant asks for missing project path first", async () => 
   assert.equal(state.status, "collecting");
   assert.equal(state.currentQuestion.id, "workspace_root");
   assert.match(state.currentQuestion.prompt, /项目路径|workspace/i);
+  assert.doesNotMatch(state.currentQuestion.prompt, /新 loop|这个 loop|当前 loop/);
+});
+
+test("loop creation assistant keeps visible questions in product task wording", async () => {
+  const configRoot = await createWorkspace();
+  const projectRoot = path.join(configRoot, "demo-project");
+  await fs.mkdir(projectRoot, { recursive: true });
+  await fs.mkdir(path.join(projectRoot, ".git"), { recursive: true });
+
+  let state = await replyLoopCreationAssistant(configRoot, {
+    answer: projectRoot,
+  });
+  assert.equal(state.currentQuestion.id, "project_name");
+  assert.doesNotMatch(state.currentQuestion.prompt, /新 loop|这个 loop|当前 loop/);
+
+  state = await replyLoopCreationAssistant(configRoot, {
+    answer: "演示项目",
+  });
+  assert.equal(state.currentQuestion.id, "loop_name");
+  assert.match(state.currentQuestion.prompt, /任务/);
+  assert.doesNotMatch(state.currentQuestion.prompt, /新 loop|这个 loop|当前 loop/);
+
+  state = await replyLoopCreationAssistant(configRoot, {
+    answer: "核心链路推进",
+  });
+  assert.equal(state.currentQuestion.id, "branch");
+  assert.match(state.currentQuestion.prompt, /任务/);
+  assert.doesNotMatch(state.currentQuestion.prompt, /新 loop|这个 loop|当前 loop/);
 });
 
 test("loop creation assistant can start from a natural-language planning intent", async () => {

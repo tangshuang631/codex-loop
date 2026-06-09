@@ -35,7 +35,7 @@ test("classifies local project blockers before dispatch guidance", () => {
 
   assert.equal(missingDocs.category, "context_missing");
   assert.equal(missingDocs.label, "缺少项目规则");
-  assert.match(missingDocs.nextAction, /文档|规则|创建 loop/);
+  assert.match(missingDocs.nextAction, /文档|规则|创建任务/);
 
   const missingWorkspace = classifyContinuationFailure({
     message: "项目路径或工作区不存在，无法继续自动续跑。",
@@ -57,7 +57,7 @@ test("classifies loop-control blockers separately from transport errors", () => 
   assert.equal(supervisorPause.severity, "warning");
 
   const duplicateDispatch = classifyContinuationFailure({
-    message: "Loop continuation is already dispatching for the bound Codex thread.",
+    message: "当前任务已经在发送或等待 Codex 回复，请不要重复点击。",
   });
 
   assert.equal(duplicateDispatch.category, "duplicate_dispatch");

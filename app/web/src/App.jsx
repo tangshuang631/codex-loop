@@ -266,12 +266,14 @@ const THREAD_ID_REQUEST_PROMPT =
 function ThreadIdHelpCard({ compact = false }) {
   const steps = compact
     ? [
-        "在要接入的 Codex 窗口发送下面这句话。",
+        "优先在创建任务里填写项目路径和 Codex 窗口名自动匹配。",
+        "自动匹配失败时，再在 Codex 窗口发送下面这句话。",
         "复制 Codex 返回的 threadId。",
-        "粘贴到新任务的线程 ID，再继续创建。",
+        "粘贴到线程 ID 作为兜底。",
       ]
     : [
-        "打开新的 Codex 窗口，复制这句话发给 Codex。",
+        "优先填写项目路径和 Codex 窗口名，让系统自动匹配。",
+        "如果提示找不到或不唯一，再复制这句话发给目标 Codex 窗口。",
         "它返回 threadId 后，粘贴到线程 ID。",
         "保存绑定后再开始循环。",
       ];
@@ -283,7 +285,7 @@ function ThreadIdHelpCard({ compact = false }) {
         <p>
           {compact
             ? "创建前先确认这个任务要绑定哪个 Codex 窗口。"
-            : "用这一句向目标 Codex 窗口询问 threadId，再把结果保存到绑定信息里。"}
+            : "自动匹配失败时，再用这一句向目标 Codex 窗口询问 threadId。"}
         </p>
       </div>
       <ol className="thread-id-step-list">
@@ -1606,9 +1608,8 @@ function ManagePane({
           }}
         >
           <p className="sidebar-help">
-            第一次接入，或要把任务切换到另一个可见线程时，再来这里修改。
+            优先填写项目路径和 Codex 窗口名自动匹配；线程 ID 可留空。自动匹配失败时，再手动填写线程 ID。
           </p>
-          <ThreadIdHelpCard />
           <label>
             <span>显示名称</span>
             <input
@@ -1622,21 +1623,37 @@ function ManagePane({
             />
           </label>
           <label>
-            <span>线程名称</span>
+            <span>项目路径</span>
             <input
-              value={threadForm.threadTitle}
+              value={threadForm.workspaceRoot}
+              placeholder="例如 E:\\2026\\your-project"
               onChange={(event) =>
                 setThreadForm((current) => ({
                   ...current,
+                  workspaceRoot: event.target.value,
+                }))
+              }
+            />
+          </label>
+          <label>
+            <span>Codex 窗口名</span>
+            <input
+              value={threadForm.windowTitle}
+              placeholder="输入 Codex 左侧看到的窗口标题关键词"
+              onChange={(event) =>
+                setThreadForm((current) => ({
+                  ...current,
+                  windowTitle: event.target.value,
                   threadTitle: event.target.value,
                 }))
               }
             />
           </label>
           <label>
-            <span>线程 ID</span>
+            <span>线程 ID 可留空</span>
             <input
               value={threadForm.threadId}
+              placeholder="自动匹配失败时再填写"
               onChange={(event) =>
                 setThreadForm((current) => ({
                   ...current,
@@ -1645,6 +1662,7 @@ function ManagePane({
               }
             />
           </label>
+          <ThreadIdHelpCard />
           <label>
             <span>备注</span>
             <textarea
@@ -2477,6 +2495,8 @@ export function App() {
   const [threadForm, setThreadForm] = useState({
     workspaceName: "",
     threadTitle: "",
+    workspaceRoot: "",
+    windowTitle: "",
     threadId: "",
     note: "",
     singleThreadMode: true,
@@ -2572,6 +2592,15 @@ export function App() {
       setThreadForm({
         workspaceName: nextSnapshot.thread.workspaceName || "",
         threadTitle: nextSnapshot.thread.threadTitle || "",
+        workspaceRoot:
+          nextSnapshot.thread.workspaceRoot ||
+          nextSnapshot.loop?.workspaceRoot ||
+          nextSnapshot.paths?.workspaceRoot ||
+          "",
+        windowTitle:
+          nextSnapshot.thread.windowTitle ||
+          nextSnapshot.thread.threadTitle ||
+          "",
         threadId: nextSnapshot.thread.threadId || "",
         note: nextSnapshot.thread.note || "",
         singleThreadMode: Boolean(nextSnapshot.thread.singleThreadMode),

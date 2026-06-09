@@ -133,6 +133,6 @@ test("docs distinguish shipped phone-pairing foundation from the future mobile a
   for (const source of [readmeSource, roadmapSource]) {
     assert.match(source, /扫码长期绑定基础已接入/);
     assert.match(source, /完整移动端 App 仍是下一批/);
-    assert.match(source, /自动窗口绑定仍是下一批/);
+    assert.match(source, /自动窗口绑定基础已接入/);
   }
 });

@@ -427,12 +427,12 @@ export async function generateMilestoneReviewWithOllama({
       ? "Return JSON: {\"summary\":\"...\",\"nextInstruction\":\"...\",\"shouldContinue\":true,\"needsIndependentVerification\":true,\"verificationCommands\":[\"...\"],\"acceptanceFocus\":[\"...\"],\"risks\":[\"...\"]}"
       : "请返回 JSON：{\"summary\":\"复盘摘要\",\"nextInstruction\":\"下一条发给 Codex 的简洁指令\",\"shouldContinue\":true,\"needsIndependentVerification\":true,\"verificationCommands\":[\"建议验证命令\"],\"acceptanceFocus\":[\"验收重点\"],\"risks\":[\"需要注意的问题\"]}",
     "",
-    `Loop: ${safeText(snapshot.config.loopName, snapshot.config.projectName)}`,
+    `Task: ${safeText(snapshot.config.loopName, snapshot.config.projectName)}`,
     `Branch: ${safeText(snapshot.config.branch, "dev")}`,
     `Thread: ${safeText(snapshot.thread.threadTitle, snapshot.thread.threadId)}`,
     englishPreferred
-      ? `User goal: ${safeText(snapshot.thread.lastUserInstructionSummary, "Continue current loop")}`
-      : `用户目标：${safeText(snapshot.thread.lastUserInstructionSummary, "继续当前 loop")}`,
+      ? `User goal: ${safeText(snapshot.thread.lastUserInstructionSummary, "Continue current task")}`
+      : `用户目标：${safeText(snapshot.thread.lastUserInstructionSummary, "继续当前任务")}`,
     englishPreferred
       ? `Latest Codex completion:\n${latestCodexText.slice(0, 7000)}`
       : `Codex 最新完成结果：\n${latestCodexText.slice(0, 7000)}`,

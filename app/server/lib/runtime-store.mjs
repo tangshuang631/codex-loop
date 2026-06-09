@@ -8,6 +8,7 @@ import { applyHeartbeat, decideLoopMode } from "../../../scripts/lib/state.mjs";
 import { readResolvedLoopProfile } from "./adapter-store.mjs";
 import { deleteAutomationForThread } from "./automation-store.mjs";
 import { dispatchThreadMessage as defaultDispatchThreadMessage } from "./codex-dispatcher.mjs";
+import { resolveCodexThread as defaultResolveCodexThread } from "./codex-link/thread-resolver.mjs";
 import { readCodexConversationMirror } from "./codex-session-reader.mjs";
 import { readLauncherStatus } from "./launcher-status.mjs";
 import { resolveReviewHumanDeferral } from "./npc/confirmation-policy.mjs";
@@ -109,8 +110,18 @@ function firstNonEmpty(...values) {
   return "";
 }
 
+function normalizeUserFacingTaskText(value) {
+  return safeText(value, "")
+    .replace(/当前\s*loop\s*/g, "当前任务")
+    .replace(/创建\s*loop\s*/g, "创建任务")
+    .replace(/新建\s*loop\s*/g, "新建任务")
+    .replace(/loop\s*规则/g, "任务规则")
+    .replace(/loop\s*名/g, "任务名")
+    .replace(/loop\s*目标/g, "任务目标");
+}
+
 function summarizeForFollowup(value, maxLength = 220) {
-  const normalized = stripMarkdownCode(value);
+  const normalized = normalizeUserFacingTaskText(stripMarkdownCode(value));
   if (!normalized) {
     return "";
   }
@@ -156,10 +167,10 @@ function mergeLoopSupervisorField(globalValue, loopValue) {
   const globalText = safeText(globalValue, "");
   const loopText = safeText(loopValue, "");
   if (globalText && loopText) {
-    return `${globalText}\n当前 loop：${loopText}`;
+    return `${globalText}\n当前任务：${loopText}`;
   }
   if (loopText) {
-    return `当前 loop：${loopText}`;
+    return `当前任务：${loopText}`;
   }
   return globalText;
 }
@@ -673,6 +684,8 @@ function createThreadDefaults(config) {
   return {
     workspaceName: config.projectName || "未命名项目",
     threadTitle: config.threadTitle || config.loopName || "未绑定线程",
+    workspaceRoot: config.workspaceRoot || "",
+    windowTitle: config.threadTitle || config.loopName || "",
     threadId: "",
     singleThreadMode: true,
     note: "",
@@ -1224,7 +1237,7 @@ function buildLoopAssistantQuestion(step, draft = createLoopAssistantDraft()) {
   if (step === "workspace_root") {
     return {
       id: "workspace_root",
-      prompt: "先告诉我这个 loop 对应的项目路径，我会自动检查 git、文档和可用命令。",
+      prompt: "先告诉我这个任务对应的项目路径，我会自动检查 git、文档和可用命令。",
       placeholder: "例如 E:\\2026\\codex-loop",
     };
   }
@@ -1280,7 +1293,7 @@ function buildLoopAssistantQuestion(step, draft = createLoopAssistantDraft()) {
     const suggestedLoopName = safeText(draft.plan?.suggestedLoopName, draft.loopName);
     return {
       id: "loop_name",
-      prompt: "这个新 loop 的任务名是什么？建议写成当前要推进的子任务。",
+      prompt: "这个新任务的名称是什么？建议写成当前要推进的子任务。",
       placeholder: suggestedLoopName || "例如 核心链路推进",
     };
   }
@@ -1292,7 +1305,7 @@ function buildLoopAssistantQuestion(step, draft = createLoopAssistantDraft()) {
     );
     return {
       id: "branch",
-      prompt: "这个 loop 主要工作的分支是什么？默认建议使用 dev。",
+      prompt: "这个任务主要工作的分支是什么？默认建议使用 dev。",
       placeholder: suggestedBranch || "dev",
     };
   }
@@ -1675,7 +1688,7 @@ function buildContinuationStrategy(snapshot) {
   const generator = snapshot.profile?.resolved?.conversation?.promptGenerator || {};
   return {
     contextCard: {
-      whyContinue: snapshot.thread.lastUserInstructionSummary || "继续当前 loop 主线任务",
+      whyContinue: snapshot.thread.lastUserInstructionSummary || "继续当前任务主线",
       nextAction:
         snapshot.thread.latestCodexSummary ||
         snapshot.thread.latestSummary ||
@@ -1866,7 +1879,7 @@ function buildProcessStatus(snapshot) {
     canSendNextTurn = false;
     holdReason = waitingForCodex
       ? "已收到停止指令，但 Codex 仍在处理当前轮。"
-      : "当前 loop 已进入收尾状态。";
+      : "当前任务已进入收尾状态。";
     nextAction = "等待当前轮结束后查看最后记录；确认无误后再重新开始。";
   } else if (continuationStatus === "error") {
     const failureCategory = safeText(snapshot.thread.lastContinuationFailureCategory, "");
@@ -2215,7 +2228,7 @@ function buildThreadMirror(thread, state, overrides = {}) {
         ""
       : overrides.lastContinuationFailureAction ?? "";
 
-  return {
+  const nextThread = {
     ...thread,
     ...overrides,
     currentRunId: overrides.currentRunId ?? thread.currentRunId ?? state.currentRunId,
@@ -2300,6 +2313,15 @@ function buildThreadMirror(thread, state, overrides = {}) {
       overrides.promptGenerationWarning ?? thread.promptGenerationWarning ?? "",
     lastUpdatedAt: overrides.lastUpdatedAt ?? nowIso(),
   };
+  return {
+    ...nextThread,
+    note: normalizeUserFacingTaskText(nextThread.note),
+    latestSummary: normalizeUserFacingTaskText(nextThread.latestSummary),
+    lastDispatchPrompt: normalizeUserFacingTaskText(nextThread.lastDispatchPrompt),
+    lastUserInstructionSummary: normalizeUserFacingTaskText(nextThread.lastUserInstructionSummary),
+    lastAssistantActionSummary: normalizeUserFacingTaskText(nextThread.lastAssistantActionSummary),
+    latestCodexSummary: normalizeUserFacingTaskText(nextThread.latestCodexSummary),
+  };
 }
 
 async function persistThreadMirror(threadPath, currentThread, state, overrides = {}) {
@@ -2346,7 +2368,7 @@ function buildFollowupPrompt(snapshot) {
   const lastAction = safeText(snapshot.thread.lastAssistantActionSummary, "");
   const userIntent = safeText(
     snapshot.thread.lastUserInstructionSummary,
-    englishPreferred ? "Continue the current loop." : "继续当前 loop。",
+    englishPreferred ? "Continue the current task." : "继续当前任务。",
   );
   const focus = firstNonEmpty(latestSummary, lastAction, userIntent);
 
@@ -2381,7 +2403,7 @@ function buildVisibleThreadPrompt(snapshot) {
     summarizeForFollowup(snapshot.thread.latestCodexSummary),
     summarizeForFollowup(snapshot.thread.lastAssistantActionSummary),
     summarizeForFollowup(snapshot.thread.lastUserInstructionSummary),
-    englishPreferred ? "Continue the current loop." : "继续当前循环。",
+    englishPreferred ? "Continue the current task." : "继续当前任务。",
   );
   const conciseFocus = safeText(focus, "")
     .replace(/\s+/g, " ")
@@ -2630,7 +2652,7 @@ function shouldAutoFinalizeToStopped(state, thread) {
 
 async function finalizeLoopAsStopped(snapshot, reason = "graceful stop completed") {
   const at = nowIso();
-  const stoppedSummary = "当前 loop 已停止。可以先查看最近记录，确认结果后再决定是否重新开始。";
+  const stoppedSummary = "当前任务已停止。可以先查看最近记录，确认结果后再决定是否重新开始。";
   const nextState = {
     ...snapshot.state,
     mode: "stopped",
@@ -3031,13 +3053,57 @@ export async function readLoopSnapshot(startDir = process.cwd()) {
 
 export async function saveThreadBinding(startDir = process.cwd(), payload) {
   const snapshot = await ensureLoopArtifacts(startDir);
+  const requestedThreadId = safeText(payload.threadId, "");
+  let resolvedThread = null;
+  if (!requestedThreadId && safeText(payload.workspaceRoot, "")) {
+    const resolveCodexThread = payload.resolveCodexThread || defaultResolveCodexThread;
+    const resolution = await resolveCodexThread({
+      workspaceRoot: payload.workspaceRoot,
+      windowTitle: payload.windowTitle || payload.threadTitle || payload.workspaceName,
+    });
+    if (resolution.status !== "matched") {
+      throw new Error(resolution.userMessage || "没有找到匹配的 Codex 窗口，请手动填写线程 ID。");
+    }
+    resolvedThread = resolution;
+  }
+
+  const hasPayloadThreadId = Object.prototype.hasOwnProperty.call(payload, "threadId");
+  const hasPayloadNote = Object.prototype.hasOwnProperty.call(payload, "note");
+  const resolvedThreadId =
+    resolvedThread?.threadId ||
+    (hasPayloadThreadId ? payload.threadId : snapshot.thread.threadId);
+  const resolvedThreadTitle =
+    payload.threadTitle ||
+    resolvedThread?.threadTitle ||
+    snapshot.thread.threadTitle;
+  const resolvedWorkspaceName =
+    payload.workspaceName ||
+    resolvedThread?.workspaceName ||
+    snapshot.thread.workspaceName;
+  const resolvedWorkspaceRoot =
+    payload.workspaceRoot ||
+    resolvedThread?.workspaceRoot ||
+    snapshot.thread.workspaceRoot ||
+    snapshot.loop?.workspaceRoot ||
+    "";
+  const resolvedWindowTitle =
+    payload.windowTitle ||
+    resolvedThread?.threadTitle ||
+    payload.threadTitle ||
+    snapshot.thread.windowTitle ||
+    "";
+  const resolvedNote = hasPayloadNote
+    ? payload.note
+    : resolvedThread?.userMessage || snapshot.thread.note;
   const updatedThread = {
     ...snapshot.thread,
-    workspaceName: payload.workspaceName ?? snapshot.thread.workspaceName,
-    threadTitle: payload.threadTitle ?? snapshot.thread.threadTitle,
-    threadId: payload.threadId ?? snapshot.thread.threadId,
+    workspaceName: resolvedWorkspaceName,
+    threadTitle: resolvedThreadTitle,
+    workspaceRoot: resolvedWorkspaceRoot,
+    windowTitle: resolvedWindowTitle,
+    threadId: resolvedThreadId,
     singleThreadMode: payload.singleThreadMode ?? snapshot.thread.singleThreadMode,
-    note: payload.note ?? snapshot.thread.note,
+    note: resolvedNote,
     heartbeatAutomation:
       payload.heartbeatAutomation ?? snapshot.thread.heartbeatAutomation,
   };
@@ -3047,7 +3113,7 @@ export async function saveThreadBinding(startDir = process.cwd(), payload) {
     updatedThread,
     snapshot.state,
     {
-      continuationEnabled: Boolean(payload.threadId ?? snapshot.thread.threadId),
+      continuationEnabled: Boolean(resolvedThreadId),
       lastUpdatedAt: nowIso(),
     },
   );
@@ -3406,7 +3472,7 @@ async function runLoopTurnLegacy(
 ) {
   const snapshot = await ensureLoopArtifacts(startDir);
   if (!snapshot.thread.threadId) {
-    throw new Error("Cannot continue loop because no Codex thread is bound.");
+    throw new Error("还没有绑定 Codex 线程，请先绑定目标窗口再开始循环。");
   }
 
   const prompt = buildVisibleThreadPrompt(snapshot);
@@ -3463,7 +3529,7 @@ export async function runLoopTurn(
   const layout = await resolveProjectLayout(startDir);
   const continuationKey = layout.codexLoopRoot;
   if (activeContinuationKeys.has(continuationKey)) {
-    throw new Error("Loop continuation is already dispatching for the bound Codex thread.");
+    throw new Error("当前任务已经在发送或等待 Codex 回复，请不要重复点击。");
   }
 
   activeContinuationKeys.add(continuationKey);
@@ -3471,7 +3537,7 @@ export async function runLoopTurn(
   try {
   const snapshot = await ensureLoopArtifacts(startDir);
   if (!snapshot.thread.threadId) {
-    throw new Error("Cannot continue loop because no Codex thread is bound.");
+    throw new Error("还没有绑定 Codex 线程，请先绑定目标窗口再开始循环。");
   }
   const workspaceErrorMessage = invalidWorkspaceMessage(snapshot.health);
   if (workspaceErrorMessage) {
@@ -3498,7 +3564,7 @@ export async function runLoopTurn(
     throw error;
   }
   if (snapshot.thread.continuationStatus === "dispatching") {
-    throw new Error("Loop continuation is already dispatching for the bound Codex thread.");
+    throw new Error("当前任务已经在发送或等待 Codex 回复，请不要重复点击。");
   }
   if (snapshot.thread.continuationStatus === "reviewing") {
     throw new Error("本地模型监督复盘正在进行，请等待复盘完成后再发送下一轮指令。");
@@ -3518,7 +3584,7 @@ export async function runLoopTurn(
     snapshot.thread.threadId === process.env.CODEX_THREAD_ID
   ) {
     throw new Error(
-      "The bound thread is the current Codex session. Please bind a different visible thread before continuing the loop.",
+      "不能把当前 codex-loop 自己所在的 Codex 线程作为目标。请绑定另一个可见 Codex 窗口。",
     );
   }
 
@@ -3745,16 +3811,16 @@ export async function selectLoop(startDir = process.cwd(), payload = {}) {
   const selectedSnapshot = await ensureLoopArtifacts(startDir);
   const hasBoundThread = Boolean(selectedSnapshot.thread.threadId);
   const generatedNote = hasBoundThread
-    ? "当前 loop：" +
+    ? "当前任务：" +
       loop.name +
       "，已绑定线程 " +
       (selectedSnapshot.thread.threadTitle || loop.threadTitle) +
       "（" +
       selectedSnapshot.thread.threadId +
       "）。"
-    : "当前 loop：" + loop.name + "，尚未绑定可见线程，请先完成线程绑定再启动续跑。";
+    : "当前任务：" + loop.name + "，尚未绑定可见线程，请先完成线程绑定再启动续跑。";
   const currentNote = safeText(selectedSnapshot.thread.note, "");
-  const isSystemLoopNote = currentNote.startsWith("当前 loop：");
+  const isSystemLoopNote = currentNote.startsWith("当前 loop：") || currentNote.startsWith("当前任务：");
   const nextNote = currentNote && !isSystemLoopNote ? currentNote : generatedNote;
   await persistThreadMirror(
     selectedSnapshot.paths.threadPath,
@@ -4073,7 +4139,7 @@ export async function replyLoopCreationAssistant(startDir = process.cwd(), paylo
     ),
     createdLoop: {
       loop: createdLoop,
-      summary: "已创建 loop「" + createdLoop.name + "」，归入项目「" + createdLoop.projectName + "」。",
+      summary: "已创建任务「" + createdLoop.name + "」，归入项目「" + createdLoop.projectName + "」。",
     },
   });
 }
