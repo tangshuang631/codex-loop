@@ -1660,6 +1660,30 @@ test("savePendingGuidance appends multiple user notes instead of replacing earli
   assert.match(mobile.pendingGuidance.text, /再检查历史对话/);
 });
 
+test("savePendingGuidance can replace queued guidance when the user edits it", async () => {
+  const configRoot = await createWorkspace();
+  await ensureLoopArtifacts(configRoot);
+  await saveThreadBinding(configRoot, {
+    workspaceName: "demo",
+    threadTitle: "编辑补充线程",
+    threadId: "thread-guidance-replace",
+    singleThreadMode: true,
+  });
+
+  await savePendingGuidance(configRoot, {
+    text: "先检查移动端能否看到当前状态。",
+  });
+  const snapshot = await savePendingGuidance(configRoot, {
+    text: "改成只检查创建任务入口是否清楚。",
+    replace: true,
+  });
+  const mobile = await exportMobileView(configRoot);
+
+  assert.equal(snapshot.thread.pendingUserGuidance, "改成只检查创建任务入口是否清楚。");
+  assert.equal(mobile.pendingGuidance.text, "改成只检查创建任务入口是否清楚。");
+  assert.doesNotMatch(snapshot.thread.pendingUserGuidance, /先检查移动端/);
+});
+
 test("clearPendingGuidance removes unsent user guidance without losing thread state", async () => {
   const configRoot = await createWorkspace();
   await ensureLoopArtifacts(configRoot);

@@ -3283,7 +3283,9 @@ export async function savePendingGuidance(startDir = process.cwd(), payload = {}
 
   const at = nowIso();
   const previousGuidance = safeText(snapshot.thread.pendingUserGuidance, "");
-  const nextGuidance = previousGuidance ? `${previousGuidance}\n${text}` : text;
+  const replacingGuidance = payload.replace === true;
+  const nextGuidance = replacingGuidance || !previousGuidance ? text : `${previousGuidance}\n${text}`;
+  const visibleAction = replacingGuidance ? "已更新补充引导" : "已记录补充引导";
   const nextThread = await persistThreadMirror(
     snapshot.paths.threadPath,
     snapshot.thread,
@@ -3291,8 +3293,8 @@ export async function savePendingGuidance(startDir = process.cwd(), payload = {}
     {
       pendingUserGuidance: nextGuidance,
       pendingUserGuidanceAt: at,
-      latestSummary: "已记录补充引导，会在 Codex 当前轮完成后交给本地模型合并到下一条指令。",
-      latestEventType: "pending_guidance_saved",
+      latestSummary: `${visibleAction}，会在 Codex 当前轮完成后交给本地模型合并到下一条指令。`,
+      latestEventType: replacingGuidance ? "pending_guidance_updated" : "pending_guidance_saved",
       lastUpdatedAt: at,
     },
   );
@@ -3303,7 +3305,7 @@ export async function savePendingGuidance(startDir = process.cwd(), payload = {}
     (loop) => ({ threadBinding: { ...(loop.threadBinding || {}), ...nextThread } }),
   );
   await appendJsonLine(snapshot.paths.logPath, {
-    type: "pending_guidance_saved",
+    type: replacingGuidance ? "pending_guidance_updated" : "pending_guidance_saved",
     at,
     threadId: nextThread.threadId,
     preview: buildPromptPreview(text),
@@ -3311,8 +3313,8 @@ export async function savePendingGuidance(startDir = process.cwd(), payload = {}
   await appendTranscriptEntry(snapshot.paths.transcriptPath, {
     at,
     activeTask: snapshot.state.activeTask,
-    note: "pending_guidance_saved",
-    summary: "已记录补充引导：" + buildPromptPreview(text),
+    note: replacingGuidance ? "pending_guidance_updated" : "pending_guidance_saved",
+    summary: `${visibleAction}：${buildPromptPreview(text)}`,
     mode: snapshot.state.mode,
   });
   return readLoopSnapshot(startDir);

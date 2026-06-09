@@ -948,8 +948,10 @@ function IconButton({ label, children, disabled = false, tone = "default", onCli
 function PendingGuidanceComposer({
   pendingGuidanceText,
   setPendingGuidanceText,
+  pendingGuidanceEditMode = false,
   submitting,
   onSavePendingGuidance,
+  onCancelPendingGuidanceEdit,
 }) {
   return (
     <form
@@ -966,12 +968,22 @@ function PendingGuidanceComposer({
         placeholder="补充你要说的话 ,等 Codex 完成后合并，会等 Codex 当前任务完成再发送"
         onChange={(event) => setPendingGuidanceText(event.target.value)}
       />
+      {pendingGuidanceEditMode ? (
+        <button
+          type="button"
+          className="ghost-button"
+          disabled={submitting}
+          onClick={() => onCancelPendingGuidanceEdit?.()}
+        >
+          取消编辑
+        </button>
+      ) : null}
       <button
         type="submit"
         className="primary-button"
         disabled={submitting || !pendingGuidanceText.trim()}
       >
-        发送
+        {pendingGuidanceEditMode ? "保存修改" : "发送"}
       </button>
     </form>
   );
@@ -1152,6 +1164,7 @@ function MobileTaskApp() {
   const [pairingCode, setPairingCode] = useState("");
   const [sessionId, setSessionId] = useState("");
   const [guidanceText, setGuidanceText] = useState("");
+  const [mobileGuidanceEditMode, setMobileGuidanceEditMode] = useState(false);
   const [statusText, setStatusText] = useState("正在连接 codex-loop。");
   const [errorText, setErrorText] = useState("");
   const [submitting, setSubmitting] = useState(false);
@@ -1258,9 +1271,11 @@ function MobileTaskApp() {
           deviceId: mobileDevice?.deviceId,
           deviceToken: mobileDevice?.deviceToken,
           text,
+          replace: mobileGuidanceEditMode,
         }),
       });
       setGuidanceText("");
+      setMobileGuidanceEditMode(false);
       setStatusText(
         guidanceResult?.message ||
           (guidanceResult?.dispatch === "sent"
@@ -1291,6 +1306,8 @@ function MobileTaskApp() {
         }),
       });
       setStatusText(result?.message || "已撤回待合并引导。");
+      setGuidanceText("");
+      setMobileGuidanceEditMode(false);
       await loadProtectedMobileView({ silent: true });
     } catch (error) {
       setErrorText(error?.message || "撤回失败，请稍后重试。");
@@ -1365,14 +1382,27 @@ function MobileTaskApp() {
                 <span>待合并</span>
                 <div className="mobile-task-pending-actions">
                   <strong>{mobileView.pendingGuidance.preview || mobileView.pendingGuidance.text}</strong>
-                  <button
-                    type="button"
-                    className="ghost-button"
-                    disabled={submitting}
-                    onClick={() => void clearMobileGuidance()}
-                  >
-                    撤回
-                  </button>
+                  <div className="mobile-task-pending-buttons">
+                    <button
+                      type="button"
+                      className="ghost-button"
+                      disabled={submitting}
+                      onClick={() => {
+                        setGuidanceText(mobileView.pendingGuidance.text || "");
+                        setMobileGuidanceEditMode(true);
+                      }}
+                    >
+                      编辑
+                    </button>
+                    <button
+                      type="button"
+                      className="ghost-button"
+                      disabled={submitting}
+                      onClick={() => void clearMobileGuidance()}
+                    >
+                      撤回
+                    </button>
+                  </div>
                 </div>
               </div>
             ) : null}
@@ -1393,12 +1423,25 @@ function MobileTaskApp() {
               placeholder="补充你要说的话 ,等 Codex 完成后合并，会等 Codex 当前任务完成再发送"
               onChange={(event) => setGuidanceText(event.target.value)}
             />
+            {mobileGuidanceEditMode ? (
+              <button
+                type="button"
+                className="ghost-button"
+                disabled={submitting}
+                onClick={() => {
+                  setGuidanceText("");
+                  setMobileGuidanceEditMode(false);
+                }}
+              >
+                取消编辑
+              </button>
+            ) : null}
             <button
               type="submit"
               className="primary-button"
               disabled={submitting || !guidanceText.trim()}
             >
-              发送引导
+              {mobileGuidanceEditMode ? "保存修改" : "发送引导"}
             </button>
           </form>
         </>
@@ -1539,8 +1582,10 @@ function ConversationTimeline({
   pendingGuidanceAt,
   pendingGuidanceText,
   setPendingGuidanceText,
+  pendingGuidanceEditMode,
   submitting,
   onSavePendingGuidance,
+  onCancelPendingGuidanceEdit,
   onClearPendingGuidance,
   onEditPendingGuidance,
   onSendPendingGuidance,
@@ -1714,8 +1759,10 @@ function ConversationTimeline({
       <PendingGuidanceComposer
         pendingGuidanceText={pendingGuidanceText}
         setPendingGuidanceText={setPendingGuidanceText}
+        pendingGuidanceEditMode={pendingGuidanceEditMode}
         submitting={submitting}
         onSavePendingGuidance={onSavePendingGuidance}
+        onCancelPendingGuidanceEdit={onCancelPendingGuidanceEdit}
       />
       <div className="conversation-bottom-anchor" ref={conversationBottomRef} aria-hidden="true" />
     </div>
@@ -2612,12 +2659,12 @@ function CreateWorkspaceView({
   return (
     <section className="workspace-focus">
       <div className="workspace-focus-head">
-        <span className="workspace-focus-eyebrow">{projectMode ? "创建项目" : "创建任务"}</span>
-        <h1>{projectMode ? "先建立项目，再添加任务" : "对话创建任务"}</h1>
+        <span className="workspace-focus-eyebrow">{projectMode ? "新建项目" : "新建任务"}</span>
+        <h1>{projectMode ? "先建立项目，再添加任务" : "新建一个任务"}</h1>
         <p>
           {projectMode
             ? "项目用来收纳同一工作区下的多个任务。当前会先创建项目下的第一个任务。"
-            : "这里会完整显示创建流程，你不需要挤在侧边栏里操作。"}
+            : "这里只显示新建流程，不会混入已经创建的任务。"}
         </p>
       </div>
 
@@ -2776,6 +2823,8 @@ function DashboardHome({
   uiError,
   pendingGuidanceText,
   setPendingGuidanceText,
+  pendingGuidanceEditMode,
+  setPendingGuidanceEditMode,
   onSavePendingGuidance,
   onClearPendingGuidance,
   onSendPendingGuidance,
@@ -2849,8 +2898,8 @@ function DashboardHome({
   const savedPendingGuidance = snapshot?.thread?.pendingUserGuidance || "";
   const runtimeEvents = snapshot?.runtimeEvents || [];
   async function handleEditPendingGuidance(text) {
-    await onClearPendingGuidance();
     setPendingGuidanceText(formatValue(text, ""));
+    setPendingGuidanceEditMode(true);
   }
 
   return (
@@ -2966,8 +3015,13 @@ function DashboardHome({
               pendingGuidanceAt={snapshot?.thread?.pendingUserGuidanceAt}
               pendingGuidanceText={pendingGuidanceText}
               setPendingGuidanceText={setPendingGuidanceText}
+              pendingGuidanceEditMode={pendingGuidanceEditMode}
               submitting={submitting}
               onSavePendingGuidance={onSavePendingGuidance}
+              onCancelPendingGuidanceEdit={() => {
+                setPendingGuidanceText("");
+                setPendingGuidanceEditMode(false);
+              }}
               onClearPendingGuidance={onClearPendingGuidance}
               onEditPendingGuidance={handleEditPendingGuidance}
               onSendPendingGuidance={onSendPendingGuidance}
@@ -3016,6 +3070,7 @@ function DesktopConsoleApp() {
   const [submitting, setSubmitting] = useState(false);
   const [uiError, setUiError] = useState("");
   const [pendingGuidanceText, setPendingGuidanceText] = useState("");
+  const [pendingGuidanceEditMode, setPendingGuidanceEditMode] = useState(false);
   const [collapsedProjects, setCollapsedProjects] = useState({});
   const [sidebarOpen, setSidebarOpen] = useState(getInitialSidebarOpen);
   const [activeSidebarPane, setActiveSidebarPane] = useState("loops");
@@ -3292,9 +3347,13 @@ function DesktopConsoleApp() {
     await withSubmit(async () => {
       await requestJson("/pending-guidance", {
         method: "POST",
-        body: JSON.stringify({ text: cleanText }),
+        body: JSON.stringify({
+          text: cleanText,
+          replace: pendingGuidanceEditMode,
+        }),
       });
       setPendingGuidanceText("");
+      setPendingGuidanceEditMode(false);
     });
   }
 
@@ -3304,6 +3363,7 @@ function DesktopConsoleApp() {
         method: "DELETE",
       });
       setPendingGuidanceText("");
+      setPendingGuidanceEditMode(false);
     });
   }
 
@@ -3313,6 +3373,7 @@ function DesktopConsoleApp() {
         method: "POST",
       });
       setPendingGuidanceText("");
+      setPendingGuidanceEditMode(false);
     });
   }
 
@@ -3444,7 +3505,7 @@ function DesktopConsoleApp() {
 
     if (nextCreationMode === "task") {
       setAssistantState(null);
-      await withSubmit(async () => {
+      void withSubmit(async () => {
         const nextAssistantState = await requestJson("/loop-creation-assistant/reset", {
           method: "POST",
         });
@@ -3508,21 +3569,23 @@ function DesktopConsoleApp() {
             <div className="sidebar-action-grid">
               <button
                 type="button"
+                aria-label="新建项目"
                 className={`sidebar-action-button ${
                   activeSidebarPane === "create" && creationMode === "project" ? "is-active" : ""
                 }`}
                 onClick={() => void openCreatePane("project")}
               >
-                创建项目
+                新建项目
               </button>
               <button
                 type="button"
+                aria-label="新建任务"
                 className={`sidebar-action-button ${
                   activeSidebarPane === "create" && creationMode === "task" ? "is-active" : ""
                 }`}
                 onClick={() => void openCreatePane("task")}
               >
-                创建任务
+                新建任务
               </button>
             </div>
 
@@ -3654,7 +3717,7 @@ function DesktopConsoleApp() {
               </div>
             ) : (
               <div className="sidebar-create-focus">
-                <strong>{creationMode === "project" ? "创建新项目" : "创建新任务"}</strong>
+                <strong>{creationMode === "project" ? "正在新建项目" : "正在新建任务"}</strong>
                 <p>这里不会展示已经创建的任务。创建完成后再回到项目列表查看。</p>
               </div>
             )}
@@ -3689,25 +3752,27 @@ function DesktopConsoleApp() {
           <div className="sidebar-collapsed-list">
             <button
               type="button"
+              aria-label="新建项目"
               className={`collapsed-loop-pill ${
                 activeSidebarPane === "create" && creationMode === "project" ? "is-active" : ""
               }`}
               onClick={() => void openCreatePane("project")}
-              title="创建项目"
+              title="新建项目"
             >
               <span>项目</span>
-              <span className="mobile-only-label">创建项目</span>
+              <span className="mobile-only-label">新建项目</span>
             </button>
             <button
               type="button"
+              aria-label="新建任务"
               className={`collapsed-loop-pill ${
                 activeSidebarPane === "create" && creationMode === "task" ? "is-active" : ""
               }`}
               onClick={() => void openCreatePane("task")}
-              title="创建任务"
+              title="新建任务"
             >
-              <span>任务</span>
-              <span className="mobile-only-label">创建任务</span>
+              <span>新建</span>
+              <span className="mobile-only-label">新建任务</span>
             </button>
             {!showingCreationPane ? (
               <>
@@ -3866,6 +3931,8 @@ function DesktopConsoleApp() {
             uiError={uiError}
             pendingGuidanceText={pendingGuidanceText}
             setPendingGuidanceText={setPendingGuidanceText}
+            pendingGuidanceEditMode={pendingGuidanceEditMode}
+            setPendingGuidanceEditMode={setPendingGuidanceEditMode}
             onSavePendingGuidance={savePendingGuidance}
             onClearPendingGuidance={clearPendingGuidance}
             onSendPendingGuidance={sendPendingGuidance}

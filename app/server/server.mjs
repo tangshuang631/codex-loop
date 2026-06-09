@@ -246,6 +246,7 @@ export function buildHandler({
 
         const result = await operations.savePendingGuidance(process.cwd(), {
           text: body.text,
+          replace: body.replace === true,
           source: "mobile",
           deviceId: body.deviceId,
         });

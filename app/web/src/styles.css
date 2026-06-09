@@ -2079,7 +2079,14 @@ select {
   gap: 10px;
 }
 
-.mobile-task-pending-actions .ghost-button {
+.mobile-task-pending-buttons {
+  display: inline-flex;
+  flex-shrink: 0;
+  gap: 6px;
+}
+
+.mobile-task-pending-actions .ghost-button,
+.mobile-task-composer .ghost-button {
   min-height: 30px;
   padding: 0 10px;
   border-radius: 999px;

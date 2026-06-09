@@ -39,6 +39,23 @@ test("dashboard lets users edit or delete unsent pending guidance from the chat 
   assert.match(stylesSource, /\.icon-button/);
 });
 
+test("dashboard edits pending guidance in place instead of clearing it first", async () => {
+  const appSource = await fs.readFile("app/web/src/App.jsx", "utf8");
+  const dashboardStart = appSource.indexOf("function DashboardHome");
+  const dashboardEnd = appSource.indexOf("function SidebarSummary", dashboardStart);
+  const dashboardSource = appSource.slice(dashboardStart, dashboardEnd);
+  const saveStart = appSource.indexOf("async function savePendingGuidance");
+  const saveEnd = appSource.indexOf("async function clearPendingGuidance", saveStart);
+  const saveSource = appSource.slice(saveStart, saveEnd);
+
+  assert.notEqual(dashboardStart, -1);
+  assert.match(appSource, /pendingGuidanceEditMode/);
+  assert.match(dashboardSource, /setPendingGuidanceEditMode\(true\)/);
+  assert.doesNotMatch(dashboardSource, /await onClearPendingGuidance\(\)/);
+  assert.match(saveSource, /replace:\s*pendingGuidanceEditMode/);
+  assert.match(saveSource, /setPendingGuidanceEditMode\(false\)/);
+});
+
 test("dashboard can send queued guidance once from monitor mode without starting a loop", async () => {
   const appSource = await fs.readFile("app/web/src/App.jsx", "utf8");
 
@@ -84,4 +101,21 @@ test("dashboard shows saved user guidance inside the conversation flow", async (
   assert.match(appSource, /conversation-row is-guidance/);
   assert.match(appSource, /pending-guidance-queued/);
   assert.match(stylesSource, /\.conversation-row\.is-guidance/);
+});
+
+test("mobile task app can edit queued guidance before it is merged", async () => {
+  const appSource = await fs.readFile("app/web/src/App.jsx", "utf8");
+  const stylesSource = await fs.readFile("app/web/src/styles.css", "utf8");
+  const mobileStart = appSource.indexOf("function MobileTaskApp");
+  const mobileEnd = appSource.indexOf("function DesktopConsoleApp", mobileStart);
+  const mobileSource = appSource.slice(mobileStart, mobileEnd);
+
+  assert.notEqual(mobileStart, -1);
+  assert.match(mobileSource, /mobileGuidanceEditMode/);
+  assert.match(mobileSource, /编辑/);
+  assert.match(mobileSource, /setMobileGuidanceEditMode\(true\)/);
+  assert.match(mobileSource, /replace:\s*mobileGuidanceEditMode/);
+  assert.match(mobileSource, /setMobileGuidanceEditMode\(false\)/);
+  assert.match(mobileSource, /取消编辑/);
+  assert.match(stylesSource, /\.mobile-task-pending-buttons/);
 });

@@ -286,8 +286,8 @@ test("sidebar uses compact project navigation instead of task tab cards", async 
   const footerSource = sidebarSource.slice(footerStart);
 
   assert.match(sidebarSource, /sidebar-action-grid/);
-  assert.match(sidebarSource, /创建项目/);
-  assert.match(sidebarSource, /创建任务/);
+  assert.match(sidebarSource, /新建项目/);
+  assert.match(sidebarSource, /新建任务/);
   assert.doesNotMatch(sidebarSource, /\["loops", "任务"\]/);
   assert.doesNotMatch(sidebarSource, /sidebar-pane-tab/);
   assert.match(sidebarSource, /sidebar-project-title/);
@@ -338,6 +338,32 @@ test("create task entry resets stale completed assistant state before opening", 
   assert.match(appSource, /onClick=\{\(\) => void openCreatePane\("project"\)\}/);
 });
 
+test("create task entry is an explicit new-task action and does not wait for full dashboard refresh", async () => {
+  const appSource = await fs.readFile("app/web/src/App.jsx", "utf8");
+  const sidebarStart = appSource.indexOf("<aside className={`workspace-sidebar");
+  const sidebarEnd = appSource.indexOf("</aside>", sidebarStart);
+  const sidebarSource = appSource.slice(sidebarStart, sidebarEnd);
+  const actionGridStart = sidebarSource.indexOf("<div className=\"sidebar-action-grid\">");
+  const actionGridEnd = sidebarSource.indexOf("</div>", actionGridStart);
+  const actionGridSource = sidebarSource.slice(actionGridStart, actionGridEnd);
+  const collapsedStart = sidebarSource.indexOf("<div className=\"sidebar-collapsed-list\">");
+  const collapsedSource = sidebarSource.slice(collapsedStart);
+  const openCreatePaneStart = appSource.indexOf("async function openCreatePane");
+  const openCreatePaneEnd = appSource.indexOf("async function handleDashboardAction", openCreatePaneStart);
+  const openCreatePaneSource = appSource.slice(openCreatePaneStart, openCreatePaneEnd);
+
+  assert.notEqual(sidebarStart, -1);
+  assert.notEqual(actionGridStart, -1);
+  assert.notEqual(collapsedStart, -1);
+  assert.match(actionGridSource, /aria-label="新建任务"/);
+  assert.match(actionGridSource, /新建任务/);
+  assert.doesNotMatch(actionGridSource, />创建任务</);
+  assert.match(collapsedSource, /aria-label="新建任务"/);
+  assert.match(collapsedSource, />新建</);
+  assert.match(sidebarSource, /正在新建任务/);
+  assert.doesNotMatch(openCreatePaneSource, /await withSubmit/);
+});
+
 test("create task back and reset actions replace stale assistant state", async () => {
   const appSource = await fs.readFile("app/web/src/App.jsx", "utf8");
   const createViewStart = appSource.indexOf("<CreateWorkspaceView");
@@ -380,12 +406,12 @@ test("create pane hides historical task navigation and keeps creation entry avai
   assert.notEqual(collapsedStart, -1);
   assert.match(appSource, /const showingCreationPane\s*=\s*activeSidebarPane === "create"/);
   assert.match(sidebarSource, /\{!showingCreationPane \? \(/);
-  assert.match(sidebarSource, /创建新任务/);
+  assert.match(sidebarSource, /正在新建任务/);
   assert.match(collapsedSource, /\{!showingCreationPane \? \(\s*<>\s*\{visibleLoops\.map/);
   assert.match(collapsedSource, /openCreatePane\("project"\)/);
   assert.match(collapsedSource, /openCreatePane\("task"\)/);
   assert.match(collapsedSource, />项目</);
-  assert.match(collapsedSource, />任务</);
+  assert.match(collapsedSource, />新建</);
 });
 
 test("dashboard avoids long thread ids stretching the mobile home header", async () => {
