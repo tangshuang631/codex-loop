@@ -1103,6 +1103,15 @@ function buildAssistantStatePath(codexLoopRoot) {
 function createLoopAssistantDraft() {
   return {
     workspaceRoot: "",
+    windowTitle: "",
+    threadResolution: {
+      status: "",
+      threadId: "",
+      threadTitle: "",
+      workspaceName: "",
+      workspaceRoot: "",
+      userMessage: "",
+    },
     projectName: "",
     loopName: "",
     branch: "dev",
@@ -1166,6 +1175,71 @@ function normalizeAssistantFieldAnswer(answer) {
     .trim();
 }
 
+function parseWorkspaceRootAnswer(answer) {
+  const lines = safeText(answer, "")
+    .split(/\r?\n/u)
+    .map((line) => line.trim())
+    .filter(Boolean);
+  let workspaceRoot = "";
+  let windowTitle = "";
+
+  for (const line of lines) {
+    const windowMatch = line.match(/^(?:窗口名|窗口|Codex\s*窗口|window\s*title|title)\s*[：:]\s*(.+)$/iu);
+    if (windowMatch) {
+      windowTitle = safeText(windowMatch[1], windowTitle);
+      continue;
+    }
+
+    if (!workspaceRoot) {
+      workspaceRoot = line;
+    }
+  }
+
+  return {
+    workspaceRoot: workspaceRoot || safeText(answer, ""),
+    windowTitle,
+  };
+}
+
+function normalizeThreadResolution(resolution = {}) {
+  return {
+    status: safeText(resolution.status, ""),
+    threadId: safeText(resolution.threadId, ""),
+    threadTitle: safeText(resolution.threadTitle, ""),
+    workspaceName: safeText(resolution.workspaceName, ""),
+    workspaceRoot: safeText(resolution.workspaceRoot, ""),
+    userMessage: safeText(resolution.userMessage, ""),
+  };
+}
+
+function buildThreadBindingFromResolution({ config, draft, loopId, loopName, projectName, resolution }) {
+  const normalizedResolution = normalizeThreadResolution(resolution);
+  if (normalizedResolution.status !== "matched" || !normalizedResolution.threadId) {
+    return null;
+  }
+
+  return createLoopThreadBinding(
+    {
+      ...config,
+      currentRunId: loopId,
+      loopName,
+      projectName,
+      workspaceRoot: draft.workspaceRoot,
+      threadTitle: normalizedResolution.threadTitle || draft.windowTitle || loopName,
+    },
+    {
+      workspaceName: normalizedResolution.workspaceName || projectName,
+      workspaceRoot: normalizedResolution.workspaceRoot || draft.workspaceRoot,
+      windowTitle: draft.windowTitle || normalizedResolution.threadTitle || loopName,
+      threadTitle: normalizedResolution.threadTitle || draft.windowTitle || loopName,
+      threadId: normalizedResolution.threadId,
+      note: normalizedResolution.userMessage || "已自动绑定 Codex 窗口。",
+      currentRunId: loopId,
+      continuationEnabled: true,
+    },
+  );
+}
+
 function buildLoopSnapshot(loop) {
   if (!loop) {
     return {
@@ -1209,6 +1283,8 @@ function normalizeCreationEvidence({ git = {}, docs = {}, projectProfile = {} } 
   const devDocs = Array.isArray(docs.devDocs) ? docs.devDocs : [];
   const detectedCommands = normalizeTextList(projectProfile.commands || [], 12, 180);
   const gitStatus = safeText(git.gitStatus || git.status, git.hasGit ? "ready" : "missing");
+  const threadResolutionStatus = safeText(projectProfile.threadResolutionStatus, "");
+  const threadResolutionMessage = safeText(projectProfile.threadResolutionMessage, "");
   return {
     gitStatus,
     hasGit: Boolean(git.hasGit),
@@ -1219,7 +1295,14 @@ function normalizeCreationEvidence({ git = {}, docs = {}, projectProfile = {} } 
     detectedCommands,
     projectType: safeText(projectProfile.projectType, "generic"),
     strictness: safeText(projectProfile.strictness, "medium"),
-    summary: `git ${gitStatus} · 文档 ${ruleDocs.length + devDocs.length} 个 · 命令 ${detectedCommands.length} 个`,
+    threadResolutionStatus,
+    threadResolutionMessage,
+    summary: [
+      `git ${gitStatus}`,
+      `文档 ${ruleDocs.length + devDocs.length} 个`,
+      `命令 ${detectedCommands.length} 个`,
+      threadResolutionStatus ? `线程 ${threadResolutionStatus}` : "",
+    ].filter(Boolean).join(" · "),
   };
 }
 
@@ -1250,6 +1333,7 @@ function normalizeLoopCreation(creation = null) {
 }
 
 function buildLoopCreationMetadata({ draft, docs, confirmedAt = nowIso() }) {
+  const threadResolution = normalizeThreadResolution(draft.threadResolution || {});
   const planning = normalizeCreationPlanning({
     ...(draft.plan || {}),
     confirmedAt,
@@ -1257,7 +1341,11 @@ function buildLoopCreationMetadata({ draft, docs, confirmedAt = nowIso() }) {
   const evidence = normalizeCreationEvidence({
     git: draft.git || {},
     docs,
-    projectProfile: draft.projectProfile || {},
+    projectProfile: {
+      ...(draft.projectProfile || {}),
+      threadResolutionStatus: threadResolution.status,
+      threadResolutionMessage: threadResolution.userMessage,
+    },
   });
   return {
     source: "assistant",
@@ -1629,6 +1717,10 @@ function normalizeAssistantDraft(state) {
   return {
     ...createLoopAssistantDraft(),
     ...(state.draft || {}),
+    threadResolution: {
+      ...createLoopAssistantDraft().threadResolution,
+      ...(state.draft?.threadResolution || {}),
+    },
     git: {
       ...createLoopAssistantDraft().git,
       ...(state.draft?.git || {}),
@@ -3944,20 +4036,22 @@ export async function createLoop(startDir = process.cwd(), payload = {}) {
     docs: payload.docs || null,
     git: payload.git || null,
     creation: payload.creation || null,
-    threadBinding: createLoopThreadBinding(
-      {
-        ...config,
-        currentRunId: loopId,
-        loopName,
-        threadTitle: payload.threadTitle || loopName,
-        projectName: payload.projectName || config.projectName || "project",
-        workspaceRoot: payload.workspaceRoot || config.workspaceRoot || layout.workspaceRoot,
-      },
-      {
-        workspaceName: payload.projectName || config.projectName || "project",
-        threadTitle: payload.threadTitle || loopName,
-      },
-    ),
+    threadBinding:
+      payload.threadBinding ||
+      createLoopThreadBinding(
+        {
+          ...config,
+          currentRunId: loopId,
+          loopName,
+          threadTitle: payload.threadTitle || loopName,
+          projectName: payload.projectName || config.projectName || "project",
+          workspaceRoot: payload.workspaceRoot || config.workspaceRoot || layout.workspaceRoot,
+        },
+        {
+          workspaceName: payload.projectName || config.projectName || "project",
+          threadTitle: payload.threadTitle || loopName,
+        },
+      ),
   });
 
   const nextRegistry = {
@@ -4102,7 +4196,9 @@ export async function replyLoopCreationAssistant(startDir = process.cwd(), paylo
   );
 
   if (state.step === "workspace_root") {
-    const workspaceRoot = path.resolve(answer);
+    const parsedWorkspace = parseWorkspaceRootAnswer(answer);
+    const workspaceRoot = path.resolve(parsedWorkspace.workspaceRoot);
+    const windowTitle = parsedWorkspace.windowTitle;
     const git = await detectGitMetadata(workspaceRoot);
     const docs = await collectLoopDocs(workspaceRoot);
     const projectProfile = await detectProjectProfileForAssistant(workspaceRoot);
@@ -4113,6 +4209,7 @@ export async function replyLoopCreationAssistant(startDir = process.cwd(), paylo
       draft: {
         ...draft,
         workspaceRoot,
+        windowTitle,
         projectName: projectProfile.detectedProjectName,
         branch: normalizeBranchName(git.branch || config.branch || "dev"),
         git,
@@ -4122,7 +4219,10 @@ export async function replyLoopCreationAssistant(startDir = process.cwd(), paylo
       messages: appendAssistantMessage(
         state.messages || [],
         "assistant",
-        "已识别项目路径：" + workspaceRoot + "。接下来先确认这个项目在左侧如何显示。",
+        "已识别项目路径：" +
+          workspaceRoot +
+          (windowTitle ? "，将优先匹配 Codex 窗口：" + windowTitle : "") +
+          "。接下来先确认这个项目在左侧如何显示。",
         "workspace_root",
       ),
       currentQuestion: buildLoopAssistantQuestion("project_name", {
@@ -4283,15 +4383,46 @@ export async function replyLoopCreationAssistant(startDir = process.cwd(), paylo
   }
 
   const createdAt = nowIso();
+  let threadResolution = normalizeThreadResolution(draft.threadResolution || {});
+  const shouldResolveThread = Boolean(draft.workspaceRoot);
+  if (shouldResolveThread) {
+    const resolveCodexThread = payload.resolveCodexThread || defaultResolveCodexThread;
+    try {
+      threadResolution = normalizeThreadResolution(
+        await resolveCodexThread({
+          workspaceRoot: draft.workspaceRoot,
+          windowTitle: draft.windowTitle || draft.loopName || draft.projectName,
+        }),
+      );
+    } catch (error) {
+      threadResolution = normalizeThreadResolution({
+        status: "error",
+        userMessage: error?.message || "自动匹配 Codex 窗口失败，请创建后手动绑定。",
+      });
+    }
+  }
+  const finalDraft = {
+    ...draft,
+    threadResolution,
+  };
+  const createdLoopId = buildSafeLoopId(draft.loopName, draft.projectName, "assistant-loop");
+  const createdThreadBinding = buildThreadBindingFromResolution({
+    config,
+    draft: finalDraft,
+    loopId: createdLoopId,
+    loopName: draft.loopName,
+    projectName: draft.projectName,
+    resolution: threadResolution,
+  });
   const creationMetadata = buildLoopCreationMetadata({
-    draft,
+    draft: finalDraft,
     docs,
     confirmedAt: createdAt,
   });
   const loopRegistry = await createLoop(startDir, {
     loopName: draft.loopName,
-    runId: buildSafeLoopId(draft.loopName, draft.projectName, "assistant-loop"),
-    threadTitle: draft.loopName,
+    runId: createdLoopId,
+    threadTitle: createdThreadBinding?.threadTitle || draft.windowTitle || draft.loopName,
     branch: draft.branch,
     projectName: draft.projectName,
     projectAdapter: config.projectAdapter || config.projectName || "generic",
@@ -4300,30 +4431,50 @@ export async function replyLoopCreationAssistant(startDir = process.cwd(), paylo
     git: draft.git,
     startContextPaths: [...docs.ruleDocs, ...docs.devDocs],
     creation: creationMetadata,
+    threadBinding: createdThreadBinding,
   });
-  const createdLoopId = buildSafeLoopId(draft.loopName, draft.projectName, "assistant-loop");
+  const { registry: persistedRegistry } = await loadLoopRegistry(layout, config);
   const createdLoop =
+    persistedRegistry.loops.find((loop) => loop.id === createdLoopId) ||
     loopRegistry.loops.find((loop) => loop.id === createdLoopId) ||
-    loopRegistry.loops.find((loop) => loop.id === loopRegistry.currentLoopId) ||
-    loopRegistry.loops.at(-1);
+    persistedRegistry.loops.find((loop) => loop.id === persistedRegistry.currentLoopId) ||
+    persistedRegistry.loops.at(-1);
 
   return saveLoopAssistantState(assistantPath, {
     status: "completed",
     step: "completed",
     draft: {
-      ...draft,
+      ...finalDraft,
       docs,
     },
     currentQuestion: null,
     messages: appendAssistantMessage(
       state.messages || [],
       "assistant",
-      "任务已创建：" + createdLoop.name + "，已归入项目 " + createdLoop.projectName + "。",
+      "任务已创建：" +
+        createdLoop.name +
+        "，已归入项目 " +
+        createdLoop.projectName +
+        (createdThreadBinding
+          ? "，并已自动绑定 Codex 窗口。"
+          : threadResolution.userMessage
+            ? "。自动绑定提示：" + threadResolution.userMessage
+            : "。"),
       "completed",
     ),
     createdLoop: {
       loop: createdLoop,
-      summary: "已创建任务「" + createdLoop.name + "」，归入项目「" + createdLoop.projectName + "」。",
+      summary:
+        "已创建任务「" +
+        createdLoop.name +
+        "」，归入项目「" +
+        createdLoop.projectName +
+        "」。" +
+        (createdThreadBinding
+          ? "已自动绑定 Codex 窗口。"
+          : threadResolution.userMessage
+            ? "自动绑定未完成：" + threadResolution.userMessage
+            : ""),
     },
   });
 }

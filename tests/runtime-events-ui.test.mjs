@@ -360,6 +360,8 @@ test("create task entry is an explicit new-task action and does not wait for ful
   assert.doesNotMatch(actionGridSource, />创建任务</);
   assert.match(collapsedSource, /aria-label="新建任务"/);
   assert.match(collapsedSource, />新建</);
+  assert.match(appSource, /handleDashboardAction\("open-create"\)/);
+  assert.doesNotMatch(appSource, /onClick=\{\(\) => setActiveSidebarPane\("create"\)\}/);
   assert.match(sidebarSource, /正在新建任务/);
   assert.doesNotMatch(openCreatePaneSource, /await withSubmit/);
 });

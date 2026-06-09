@@ -2949,7 +2949,7 @@ function DashboardHome({
                   type="button"
                   className="ghost-button"
                   disabled={submitting}
-                  onClick={() => setActiveSidebarPane("create")}
+                  onClick={() => void handleDashboardAction("open-create")}
                 >
                   新建任务
                 </button>

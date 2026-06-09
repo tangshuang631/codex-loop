@@ -3664,6 +3664,61 @@ test("loop creation assistant can detect git, docs, and create a grouped loop", 
   assert.equal(createdLoop.workspaceRoot, projectRoot);
 });
 
+test("loop creation assistant automatically binds a matched Codex thread when creating a task", async () => {
+  const configRoot = await createWorkspace();
+  const projectRoot = path.join(configRoot, "auto-bind-project");
+  await fs.mkdir(projectRoot, { recursive: true });
+  await fs.mkdir(path.join(projectRoot, ".git"), { recursive: true });
+  await fs.writeFile(
+    path.join(projectRoot, ".git", "HEAD"),
+    "ref: refs/heads/dev\n",
+    "utf8",
+  );
+
+  let state = await replyLoopCreationAssistant(configRoot, {
+    answer: `${projectRoot}\n窗口名：产品控制台任务`,
+  });
+  assert.equal(state.currentQuestion.id, "project_name");
+  assert.equal(state.draft.workspaceRoot, projectRoot);
+  assert.equal(state.draft.windowTitle, "产品控制台任务");
+
+  state = await replyLoopCreationAssistant(configRoot, {
+    answer: "自动绑定项目",
+  });
+  state = await replyLoopCreationAssistant(configRoot, {
+    answer: "自动绑定任务",
+  });
+  state = await replyLoopCreationAssistant(configRoot, {
+    answer: "dev",
+  });
+  state = await replyLoopCreationAssistant(configRoot, {
+    answer: "confirm",
+    resolveCodexThread: async ({ workspaceRoot, windowTitle }) => {
+      assert.equal(workspaceRoot, projectRoot);
+      assert.equal(windowTitle, "产品控制台任务");
+      return {
+        status: "matched",
+        threadId: "auto-thread-from-create",
+        threadTitle: "产品控制台任务",
+        workspaceName: "自动绑定项目",
+        workspaceRoot,
+        userMessage: "已自动绑定 Codex 窗口。",
+      };
+    },
+  });
+
+  assert.equal(state.status, "completed");
+  assert.equal(state.createdLoop.loop.threadBinding.threadId, "auto-thread-from-create");
+  assert.equal(state.createdLoop.loop.threadBinding.threadTitle, "产品控制台任务");
+  assert.equal(state.createdLoop.loop.threadBinding.continuationEnabled, true);
+  assert.equal(state.createdLoop.loop.creation.evidence.threadResolutionStatus, "matched");
+  assert.match(state.createdLoop.summary, /已自动绑定/);
+
+  const snapshot = await selectLoop(configRoot, { loopId: state.createdLoop.loop.id });
+  assert.equal(snapshot.thread.threadId, "auto-thread-from-create");
+  assert.match(snapshot.thread.note, /已自动绑定 Codex 窗口/);
+});
+
 test("syncCodexThreadMirror stores normalized Codex linkage summaries", async () => {
   const configRoot = await createWorkspace();
   await ensureLoopArtifacts(configRoot);
