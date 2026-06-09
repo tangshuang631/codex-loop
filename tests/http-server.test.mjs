@@ -1085,6 +1085,62 @@ test("handler dispatches run turn route", async () => {
   assert.match(chunks.join(""), /"continued":true/);
 });
 
+test("handler dispatches send guidance route without starting the automatic controller", async () => {
+  let sentOnce = false;
+  let controllerStarted = false;
+  const handler = buildHandler({
+    loopController: {
+      start: async () => {
+        controllerStarted = true;
+        return true;
+      },
+    },
+    operations: {
+      readLoopSnapshot: async () => ({}),
+      exportLoopSummary: async () => ({}),
+      startRun: async () => ({}),
+      sendPendingGuidanceOnce: async () => {
+        sentOnce = true;
+        return { thread: { continuationStatus: "dispatching" } };
+      },
+      runLoopTurn: async () => ({ continued: true }),
+      renameLoop: async () => ({}),
+      requestGracefulStop: async () => ({}),
+      updateBudgets: async () => ({}),
+      saveThreadBinding: async () => ({}),
+      syncCodexThreadMirror: async () => ({}),
+      recordHeartbeat: async () => ({}),
+      recordError: async () => ({}),
+      saveUserOverrides: async () => ({}),
+    },
+  });
+
+  const chunks = [];
+  const response = {
+    writeHead(statusCode, headers) {
+      this.statusCode = statusCode;
+      this.headers = headers;
+    },
+    end(text) {
+      chunks.push(text);
+    },
+  };
+
+  await handler(
+    {
+      method: "POST",
+      url: "/api/send-guidance",
+      [Symbol.asyncIterator]: async function* iterator() {},
+    },
+    response,
+  );
+
+  assert.equal(response.statusCode, 200);
+  assert.equal(sentOnce, true);
+  assert.equal(controllerStarted, false);
+  assert.match(chunks.join(""), /dispatching/);
+});
+
 test("handler dispatches rename loop route", async () => {
   const handler = buildHandler({
     operations: {

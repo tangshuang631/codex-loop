@@ -1789,6 +1789,11 @@ function deriveMonitorStatus(processState) {
       monitorLabel: "已停止",
       monitorTone: "soft",
     },
+    monitoring: {
+      monitorLevel: "ready",
+      monitorLabel: "监控中",
+      monitorTone: "ready",
+    },
   };
   return map[processState] || {
     monitorLevel: "idle",
@@ -1880,12 +1885,18 @@ function buildProcessStatus(snapshot) {
       failureAction ||
       "先检查线程绑定和 Codex 桌面端连接；必要时重新绑定后再开始循环。";
   } else if (mode === "stopped") {
-    state = "stopped";
-    headline = "已停止";
-    detail = "当前不会自动发送指令；需要继续时可以手动开始循环。";
-    canSendNextTurn = false;
-    holdReason = "当前 loop 没有在运行。";
-    nextAction = "先看对话记录确认结果；需要继续时点击开始循环。";
+    state = hasThread ? "monitoring" : "stopped";
+    headline = hasThread ? "监控中" : "已停止";
+    detail = hasThread
+      ? "当前不会自动循环；可以查看 Codex 历史，或在底部补充后手动发送一次引导。"
+      : "当前不会自动发送指令；需要继续时可以手动开始循环。";
+    canSendNextTurn = hasThread && continuationStatus === "idle";
+    holdReason = hasThread
+      ? "监控模式不会自动派发，只有你手动发送引导时才会推进一次。"
+      : "当前任务没有在运行。";
+    nextAction = hasThread
+      ? "需要介入时，在对话底部写补充，再点击待发送补充旁的发送按钮。"
+      : "先看对话记录确认结果；需要继续时点击开始循环。";
   } else if (healthBlocker) {
     state = "health_blocked";
     headline = "需要处理配置";
@@ -2081,7 +2092,7 @@ export async function exportMobileView(startDir = process.cwd()) {
     suggestedAction = "正在收尾，请等待当前轮结束后查看总结。";
   } else if (snapshot.state.mode === "stopped") {
     suggestedAction = snapshot.thread.threadId
-      ? "当前已停止，可以查看最近记录后重新开始。"
+      ? "当前处于监控模式，可以查看记录或手动发送引导；不会自动循环。"
       : "当前已停止，请先绑定线程。";
   } else if (snapshot.thread.threadId) {
     if (snapshot.thread.continuationStatus === "dispatching") {
@@ -3280,6 +3291,7 @@ export async function startRun(startDir = process.cwd()) {
     ...snapshot.state,
     startedAt: snapshot.state.startedAt || at,
     mode: "running",
+    monitorOnly: false,
     stopRequested: false,
     finalizeRequested: false,
     recentSummary: startSummary,
@@ -3313,6 +3325,79 @@ export async function startRun(startDir = process.cwd()) {
     mode: nextState.mode,
   });
   return readLoopSnapshot(startDir);
+}
+
+export async function sendPendingGuidanceOnce(
+  startDir = process.cwd(),
+  {
+    dispatchThreadMessage = defaultDispatchThreadMessage,
+    generateFollowupPrompt = generatePromptWithOllama,
+  } = {},
+) {
+  const snapshot = await ensureLoopArtifacts(startDir);
+  const pendingGuidance = safeText(snapshot.thread.pendingUserGuidance, "");
+  if (!pendingGuidance) {
+    throw new Error("没有待发送的补充引导。");
+  }
+
+  if (snapshot.thread.continuationStatus === "dispatching") {
+    throw new Error("Codex 正在处理当前轮，请等完成后再发送引导。");
+  }
+  if (snapshot.thread.continuationStatus === "reviewing") {
+    throw new Error("本地模型正在复盘，请等复盘完成后再发送引导。");
+  }
+
+  if (snapshot.state.mode !== "running" || !snapshot.state.monitorOnly) {
+    const at = nowIso();
+    const monitorSummary =
+      "正在以监控模式手动发送这条引导；只推进一次，不会启动自动循环。";
+    const nextState = {
+      ...snapshot.state,
+      mode: "running",
+      monitorOnly: true,
+      stopRequested: false,
+      finalizeRequested: false,
+      recentSummary: monitorSummary,
+      events: [
+        ...snapshot.state.events,
+        {
+          type: "monitor_guidance_send_requested",
+          at,
+          mode: "running",
+        },
+      ],
+    };
+    await writeJson(snapshot.paths.statePath, nextState);
+    const nextThread = await persistThreadMirror(
+      snapshot.paths.threadPath,
+      snapshot.thread,
+      nextState,
+      {
+        latestSummary: monitorSummary,
+        latestEventType: "monitor_guidance_send_requested",
+        lastContinuationError: "",
+        lastUpdatedAt: at,
+      },
+    );
+    await updateRegistryLoopBinding(
+      snapshot.paths.codexLoopRoot,
+      snapshot.config.currentRunId,
+      (loop) => ({ threadBinding: { ...(loop.threadBinding || {}), ...nextThread } }),
+    );
+    await appendJsonLine(snapshot.paths.logPath, nextState.events.at(-1));
+    await appendTranscriptEntry(snapshot.paths.transcriptPath, {
+      at,
+      activeTask: snapshot.state.activeTask,
+      note: "monitor_guidance_send_requested",
+      summary: monitorSummary,
+      mode: nextState.mode,
+    });
+  }
+
+  return runLoopTurn(startDir, {
+    dispatchThreadMessage,
+    generateFollowupPrompt,
+  });
 }
 
 async function runLoopTurnLegacy(

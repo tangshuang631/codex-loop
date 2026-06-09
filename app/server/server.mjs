@@ -15,6 +15,7 @@ import {
   renameLoop,
   requestGracefulStop,
   runLoopTurn,
+  sendPendingGuidanceOnce,
   clearPendingGuidance,
   savePendingGuidance,
   saveThreadBinding,
@@ -143,6 +144,7 @@ export function buildHandler({
       replyLoopCreationAssistant,
       requestGracefulStop,
       runLoopTurn,
+      sendPendingGuidanceOnce,
       clearPendingGuidance,
       savePendingGuidance,
       updateBudgets,
@@ -291,6 +293,15 @@ export function buildHandler({
 
       if (request.method === "POST" && request.url === "/api/run-turn") {
         sendJson(response, 200, await operations.runLoopTurn(process.cwd()));
+        return;
+      }
+
+      if (request.method === "POST" && request.url === "/api/send-guidance") {
+        sendJson(
+          response,
+          200,
+          await operations.sendPendingGuidanceOnce(process.cwd()),
+        );
         return;
       }
 

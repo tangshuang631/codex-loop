@@ -888,6 +888,15 @@ function TrashIcon() {
   );
 }
 
+function SendIcon() {
+  return (
+    <svg viewBox="0 0 20 20" aria-hidden="true" focusable="false">
+      <path d="M3.4 10 16.2 3.8 12 16.2l-2.4-5.8L3.4 10Z" />
+      <path d="m9.6 10.4 6.6-6.6" />
+    </svg>
+  );
+}
+
 function IconButton({ label, children, disabled = false, tone = "default", onClick }) {
   return (
     <button
@@ -1071,6 +1080,7 @@ function ConversationTimeline({
   onSavePendingGuidance,
   onClearPendingGuidance,
   onEditPendingGuidance,
+  onSendPendingGuidance,
   fallbackEntries,
 }) {
   const baseConversationEntries = entries.length
@@ -1204,6 +1214,13 @@ function ConversationTimeline({
               <div className="pending-guidance-queued">
                 {bubble}
                 <div className="pending-guidance-tools" aria-label="待发送补充操作">
+                  <IconButton
+                    label="发送引导"
+                    disabled={submitting}
+                    onClick={() => void onSendPendingGuidance?.()}
+                  >
+                    <SendIcon />
+                  </IconButton>
                   <IconButton
                     label="编辑补充"
                     disabled={submitting}
@@ -2214,6 +2231,7 @@ function DashboardHome({
   setPendingGuidanceText,
   onSavePendingGuidance,
   onClearPendingGuidance,
+  onSendPendingGuidance,
   remoteAccessStatus,
   launcherWebUrl,
   devicePairingSession,
@@ -2405,6 +2423,7 @@ function DashboardHome({
               onSavePendingGuidance={onSavePendingGuidance}
               onClearPendingGuidance={onClearPendingGuidance}
               onEditPendingGuidance={handleEditPendingGuidance}
+              onSendPendingGuidance={onSendPendingGuidance}
               fallbackEntries={visibleTranscriptEntries}
             />
           </Section>
@@ -2705,6 +2724,15 @@ export function App() {
     await withSubmit(async () => {
       await requestJson("/pending-guidance", {
         method: "DELETE",
+      });
+      setPendingGuidanceText("");
+    });
+  }
+
+  async function sendPendingGuidance() {
+    await withSubmit(async () => {
+      await requestJson("/send-guidance", {
+        method: "POST",
       });
       setPendingGuidanceText("");
     });
@@ -3176,6 +3204,7 @@ export function App() {
             setPendingGuidanceText={setPendingGuidanceText}
             onSavePendingGuidance={savePendingGuidance}
             onClearPendingGuidance={clearPendingGuidance}
+            onSendPendingGuidance={sendPendingGuidance}
             remoteAccessStatus={remoteAccessStatus}
             launcherWebUrl={launcherWebUrl}
             devicePairingSession={devicePairingSession}

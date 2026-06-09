@@ -56,6 +56,7 @@ Current implementation progress:
 - quick thread binding helpers are being added to speed up real-project setup
 - template-driven loop setup is being formalized
 - loop renaming support is being added
+- monitor-mode manual guidance sending is in place: a stopped bound task can send the queued guidance once without starting automatic looping.
 
 ## Near-term roadmap
 
@@ -129,6 +130,7 @@ Phone pairing requirement:
 Current mobile boundary:
 
 - 扫码长期绑定基础已接入：桌面控制台可以生成配对会话，后端可以确认配对并校验长期设备令牌。
+- 监控模式手动发送引导已接入：桌面端可以先保存补充，再从待发送气泡手动派发一次，不会启动自动循环。
 - 完整移动端 App 仍是下一批：后续再建立 `app/mobile`，复用 Web 任务详情数据，主界面只放历史对话、当前状态和发送引导。
 - 自动窗口绑定仍是下一批：后续通过项目路径和 Codex 窗口名匹配线程，当前仍保留手动线程 ID 兜底。
 

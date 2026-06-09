@@ -18,6 +18,7 @@
 当前代码仍集中在 `app/server/lib` 和 `app/web/src`。这是历史实现形态，不代表最终边界。
 
 - `app/server/lib/runtime-store.mjs`：当前承载最多运行状态、loop 轮次、NPC 调度、验证回写和聊天镜像编排。后续应逐步拆出 Loop 内核、NPC 决策、验证层和运行治理层。
+- `app/server/lib/runtime-store.mjs#sendPendingGuidanceOnce`：当前承载监控模式的一次性手动派发；它复用 NPC 合并和 Codex 发送链路，但不会启动自动循环控制器。
 - `app/server/lib/loop-controller.mjs`：当前承载自动循环控制、开始停止和调度执行。后续应继续瘦身为 Loop 内核的编排入口。
 - `app/server/lib/loop-core/controller-gates.mjs`：自动循环闸门已经迁入 Loop 内核，负责判断是否等待 Codex、是否进入监督复盘、是否到达预算停止条件、是否允许发送下一轮。
 - `app/server/lib/codex-dispatcher.mjs`：当前承载 Codex 线程发送与可见性校验。后续应归入 Codex 联动层，并继续禁止不可见兜底链路假装成功。

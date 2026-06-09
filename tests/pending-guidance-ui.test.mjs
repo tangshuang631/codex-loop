@@ -39,6 +39,17 @@ test("dashboard lets users edit or delete unsent pending guidance from the chat 
   assert.match(stylesSource, /\.icon-button/);
 });
 
+test("dashboard can send queued guidance once from monitor mode without starting a loop", async () => {
+  const appSource = await fs.readFile("app/web/src/App.jsx", "utf8");
+
+  assert.match(appSource, /发送引导/);
+  assert.match(appSource, /onSendPendingGuidance/);
+  assert.match(appSource, /sendPendingGuidance/);
+  assert.match(appSource, /requestJson\("\/send-guidance",\s*\{\s*method:\s*"POST"/);
+  assert.match(appSource, /<ConversationTimeline[\s\S]*onSendPendingGuidance=\{onSendPendingGuidance\}/);
+  assert.match(appSource, /<DashboardHome[\s\S]*onSendPendingGuidance=\{sendPendingGuidance\}/);
+});
+
 test("dashboard exposes customizable npc supervisor settings", async () => {
   const appSource = await fs.readFile("app/web/src/App.jsx", "utf8");
 

@@ -17,6 +17,7 @@ import {
   replyLoopCreationAssistant,
   restartLoopCreationAssistant,
   runLoopTurn,
+  sendPendingGuidanceOnce,
   startRun,
   selectLoop,
   renameLoop,
@@ -1453,6 +1454,53 @@ test("runLoopTurn auto fallback keeps pending guidance in the sent prompt before
   assert.match(snapshot.thread.promptGenerationWarning, /Ollama/);
   assert.equal(snapshot.thread.pendingUserGuidance, "");
   assert.equal(snapshot.thread.continuationStatus, "dispatching");
+});
+
+test("sendPendingGuidanceOnce sends queued guidance from monitor mode without starting automatic loop", async () => {
+  const configRoot = await createWorkspace();
+  await ensureLoopArtifacts(configRoot);
+  await saveThreadBinding(configRoot, {
+    workspaceName: "demo",
+    threadTitle: "监控模式线程",
+    threadId: "thread-monitor-guidance",
+    singleThreadMode: true,
+  });
+  await syncCodexThreadMirror(configRoot, {
+    latestCodexSummary: "Codex 已完成当前批次，等待下一条指令。",
+  });
+  await savePendingGuidance(configRoot, {
+    text: "请先从真实用户角度检查首页状态是否够清楚。",
+  });
+
+  const beforeSend = await readLoopSnapshot(configRoot);
+  assert.equal(beforeSend.state.mode, "running");
+  await requestGracefulStop(configRoot, {
+    reason: "enter monitor mode",
+  });
+  const stopped = await readLoopSnapshot(configRoot);
+  assert.equal(stopped.state.mode, "stopped");
+  assert.match(stopped.thread.pendingUserGuidance, /真实用户角度/);
+
+  let dispatchedPrompt = "";
+  const snapshot = await sendPendingGuidanceOnce(configRoot, {
+    generateFollowupPrompt: async ({ fallbackPrompt }) => fallbackPrompt,
+    dispatchThreadMessage: async ({ prompt }) => {
+      dispatchedPrompt = prompt;
+      return {
+        deliveryObserved: true,
+        completionObserved: false,
+        lastMessage: "",
+      };
+    },
+  });
+
+  assert.match(dispatchedPrompt, /用户临时补充/);
+  assert.match(dispatchedPrompt, /真实用户角度/);
+  assert.equal(snapshot.state.mode, "running");
+  assert.equal(snapshot.state.monitorOnly, true);
+  assert.equal(snapshot.thread.pendingUserGuidance, "");
+  assert.equal(snapshot.thread.continuationStatus, "dispatching");
+  assert.equal(snapshot.thread.latestEventType, "codex_followup_sent_waiting");
 });
 
 test("savePendingGuidance appends multiple user notes instead of replacing earlier guidance", async () => {
