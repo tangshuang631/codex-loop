@@ -24,11 +24,16 @@ async function createWorkspace() {
 test("device pairing creates a scan session without storing the raw code", async () => {
   const configRoot = await createWorkspace();
 
-  const session = await createDevicePairingSession(configRoot, {
-    mobileBaseUrl: "http://100.64.0.10:3001",
-    now: () => new Date("2026-06-09T07:00:00.000Z"),
-    randomToken: () => "fixed-random",
-  });
+  const session = await createDevicePairingSession(
+    configRoot,
+    {
+      mobileBaseUrl: "http://100.64.0.10:3001",
+    },
+    {
+      now: () => new Date("2026-06-09T07:00:00.000Z"),
+      randomToken: () => "fixed-random",
+    },
+  );
 
   assert.equal(session.status, "waiting_scan");
   assert.match(session.pairingCode, /^[A-Z0-9-]+$/);
@@ -47,11 +52,16 @@ test("device pairing creates a scan session without storing the raw code", async
 
 test("device pairing confirms a scan into a reusable long-term device token", async () => {
   const configRoot = await createWorkspace();
-  const session = await createDevicePairingSession(configRoot, {
-    mobileBaseUrl: "http://100.64.0.10:3001",
-    now: () => new Date("2026-06-09T07:00:00.000Z"),
-    randomToken: () => "first-random",
-  });
+  const session = await createDevicePairingSession(
+    configRoot,
+    {
+      mobileBaseUrl: "http://100.64.0.10:3001",
+    },
+    {
+      now: () => new Date("2026-06-09T07:00:00.000Z"),
+      randomToken: () => "first-random",
+    },
+  );
 
   const paired = await confirmDevicePairing(configRoot, {
     sessionId: session.sessionId,
@@ -85,10 +95,14 @@ test("device pairing confirms a scan into a reusable long-term device token", as
 
 test("device pairing rejects expired or mismatched scan confirmations", async () => {
   const configRoot = await createWorkspace();
-  const session = await createDevicePairingSession(configRoot, {
-    now: () => new Date("2026-06-09T07:00:00.000Z"),
-    randomToken: () => "expire-random",
-  });
+  const session = await createDevicePairingSession(
+    configRoot,
+    {},
+    {
+      now: () => new Date("2026-06-09T07:00:00.000Z"),
+      randomToken: () => "expire-random",
+    },
+  );
 
   await assert.rejects(
     () =>

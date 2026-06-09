@@ -52,13 +52,13 @@ test("dashboard exposes customizable npc supervisor settings", async () => {
   assert.match(appSource, /settingsForm\.supervisorAcceptanceCriteria/);
 });
 
-test("dashboard exposes current loop npc supervisor settings separately", async () => {
+test("dashboard exposes current task npc supervisor settings separately", async () => {
   const appSource = await fs.readFile("app/web/src/App.jsx", "utf8");
 
   assert.match(appSource, /当前任务 NPC/);
   assert.match(appSource, /\/loop-supervisor/);
   assert.match(appSource, /loopSupervisorForm/);
-  assert.match(appSource, /当前 loop 专用/);
+  assert.match(appSource, /当前任务专用/);
   assert.match(appSource, /setLoopSupervisorForm/);
 });
 

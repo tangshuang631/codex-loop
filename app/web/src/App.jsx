@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
+import QRCode from "qrcode";
 
 import { deriveDashboardGuide } from "./dashboard-guide.mjs";
 import { dedupeRuntimeEventsForDisplay } from "./runtime-events.mjs";
@@ -267,7 +268,7 @@ function ThreadIdHelpCard({ compact = false }) {
     ? [
         "在要接入的 Codex 窗口发送下面这句话。",
         "复制 Codex 返回的 threadId。",
-        "粘贴到新 loop 的线程 ID，再继续创建。",
+        "粘贴到新任务的线程 ID，再继续创建。",
       ]
     : [
         "打开新的 Codex 窗口，复制这句话发给 Codex。",
@@ -281,7 +282,7 @@ function ThreadIdHelpCard({ compact = false }) {
         <strong>{compact ? "新窗口线程号" : "获取线程号"}</strong>
         <p>
           {compact
-            ? "创建前先确认这个 loop 要绑定哪个 Codex 窗口。"
+            ? "创建前先确认这个任务要绑定哪个 Codex 窗口。"
             : "用这一句向目标 Codex 窗口询问 threadId，再把结果保存到绑定信息里。"}
         </p>
       </div>
@@ -707,13 +708,22 @@ function LoopProgressPanel({ processStatus, runtimeEvents, healthSummary }) {
   );
 }
 
-function MobileAccessFold({ remoteAccessStatus, launcherWebUrl }) {
+function MobileAccessFold({
+  remoteAccessStatus,
+  launcherWebUrl,
+  pairingSession,
+  pairingLoading,
+  pairingError,
+  onCreatePairingSession,
+}) {
+  const [pairingQrDataUrl, setPairingQrDataUrl] = useState("");
   const mobileUrl = remoteAccessStatus?.url || remoteAccessStatus?.publicBaseUrl || launcherWebUrl || "";
   const candidateUrls = remoteAccessStatus?.candidateUrls || [];
   const steps = remoteAccessStatus?.recommendedSteps || [];
+  const devicePairing = remoteAccessStatus?.devicePairing || {};
   const summary =
     remoteAccessStatus?.summary ||
-    "手机和这台电脑在同一网络后，可以用控制台地址查看当前 loop。";
+    "手机和这台电脑在同一网络后，可以用控制台地址查看当前任务。";
   const warning = remoteAccessStatus?.warning || "";
   const statusText =
     remoteAccessStatus?.statusText ||
@@ -724,6 +734,49 @@ function MobileAccessFold({ remoteAccessStatus, launcherWebUrl }) {
       ? "请换成这台电脑的 Tailscale 地址或局域网 IP。"
       : "用手机浏览器打开上面的地址。");
   const mobileUrlHint = remoteAccessStatus?.mobileUrlHint || "";
+  const pairingSummary =
+    remoteAccessStatus?.devicePairing?.summary ||
+    devicePairing.summary ||
+    "还没有绑定手机。";
+  const pairingAction =
+    remoteAccessStatus?.pairingAction ||
+    devicePairing.nextAction ||
+    "生成扫码绑定后，移动端 App 可以长期访问这台电脑。";
+
+  useEffect(() => {
+    let cancelled = false;
+    const payload = pairingSession?.qrPayload || "";
+    if (!payload) {
+      setPairingQrDataUrl("");
+      return () => {
+        cancelled = true;
+      };
+    }
+
+    QRCode.toDataURL(payload, {
+      errorCorrectionLevel: "M",
+      margin: 2,
+      width: 176,
+      color: {
+        dark: "#111111",
+        light: "#ffffff",
+      },
+    })
+      .then((url) => {
+        if (!cancelled) {
+          setPairingQrDataUrl(url);
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setPairingQrDataUrl("");
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [pairingSession?.qrPayload]);
 
   return (
     <details className="mobile-access-fold">
@@ -760,6 +813,50 @@ function MobileAccessFold({ remoteAccessStatus, launcherWebUrl }) {
       <p>{nextAction}</p>
       <p>{summary}</p>
       {warning ? <p className="mobile-access-warning">{warning}</p> : null}
+      <div className="mobile-pairing-panel">
+        <div className="mobile-pairing-head">
+          <div>
+            <strong>手机绑定</strong>
+            <p>{pairingSummary}</p>
+          </div>
+          <button type="button" disabled={pairingLoading} onClick={onCreatePairingSession}>
+            {pairingLoading ? "生成中" : "生成扫码绑定"}
+          </button>
+        </div>
+        <p>{pairingAction}</p>
+        <p>长期绑定后，codex-loop 重启后不用重复扫码。</p>
+        {pairingError ? <p className="mobile-access-warning">{pairingError}</p> : null}
+        {pairingSession?.pairingCode ? (
+          <div className="mobile-pairing-session">
+            <div className="mobile-pairing-code">
+              <span>配对码</span>
+              <strong>{pairingSession.pairingCode}</strong>
+              <button type="button" onClick={() => copyTextToClipboard(pairingSession.pairingCode)}>
+                复制配对码
+              </button>
+            </div>
+            {pairingSession?.qrPayload ? (
+              <div className="mobile-pairing-qr">
+                <span>扫码内容</span>
+                {pairingQrDataUrl ? (
+                  <img
+                    className="mobile-pairing-qr-image"
+                    src={pairingQrDataUrl}
+                    alt="手机扫码绑定"
+                  />
+                ) : null}
+                <code>{pairingSession.qrPayload}</code>
+                <button type="button" onClick={() => copyTextToClipboard(pairingSession.qrPayload)}>
+                  复制扫码内容
+                </button>
+              </div>
+            ) : null}
+            {pairingSession?.expiresAt ? (
+              <p>有效期到 {formatTime(pairingSession.expiresAt)}，过期后重新生成即可。</p>
+            ) : null}
+          </div>
+        ) : null}
+      </div>
       {steps.length ? (
         <div className="mobile-access-steps">
           {steps.map((step, index) => (
@@ -1268,7 +1365,7 @@ function LoopCreationAssistantPane({
 
   return (
     <div className="sidebar-form assistant-pane">
-      <h3>创建 loop</h3>
+      <h3>创建任务</h3>
       <p className="sidebar-help">
         先确认项目、任务名和分支，再开始循环。
       </p>
@@ -1453,7 +1550,7 @@ function ManagePane({
         ? "监督复盘中"
         : isRunning
         ? "循环运行中"
-        : "当前 loop 已停止";
+        : "当前任务已停止";
   const runningDescription = isFinalizing
     ? "不会再发送新指令，等待当前轮结束后停止。"
     : isDispatching
@@ -1492,7 +1589,7 @@ function ManagePane({
           }}
         >
           <p className="sidebar-help">
-            第一次接入，或要把 loop 切换到另一个可见线程时，再来这里修改。
+            第一次接入，或要把任务切换到另一个可见线程时，再来这里修改。
           </p>
           <ThreadIdHelpCard />
           <label>
@@ -1679,7 +1776,7 @@ function ManagePane({
                     }))
                   }
                 />
-                <span>开启 Ollama 后，默认用于所有 loop</span>
+                <span>开启 Ollama 后，默认用于所有任务</span>
               </label>
               <label>
                 <span>模型名称</span>
@@ -1900,7 +1997,7 @@ function ManagePane({
           }}
         >
           <p className="sidebar-help">
-            当前 loop 专用：补充这个项目自己的测试要求、验收规则和监督风格，不会改掉全局默认。
+            当前任务专用：补充这个项目自己的测试要求、验收规则和监督风格，不会改掉全局默认。
           </p>
           <div className="settings-grid">
             <label>
@@ -2011,7 +2108,7 @@ function CreateWorkspaceView({
     <section className="workspace-focus">
       <div className="workspace-focus-head">
         <span className="workspace-focus-eyebrow">创建新任务</span>
-        <h1>对话创建 loop</h1>
+        <h1>对话创建任务</h1>
         <p>这里会完整显示创建流程，你不需要挤在侧边栏里操作。</p>
       </div>
 
@@ -2045,8 +2142,8 @@ function ManageWorkspaceView(props) {
 function HelpWorkspaceView() {
   const guides = [
     {
-      title: "loop 是什么",
-      body: "loop 会把一个 Codex 线程变成可持续推进的开发任务：等待 Codex 完成当前轮，再结合项目规则、本地模型和你的补充生成下一条指令。",
+      title: "任务循环是什么",
+      body: "任务循环会把一个 Codex 线程变成可持续推进的开发任务：等待 Codex 完成当前轮，再结合项目规则、本地模型和你的补充生成下一条指令。",
     },
     {
       title: "如何创建任务",
@@ -2058,7 +2155,7 @@ function HelpWorkspaceView() {
     },
     {
       title: "如何开启本地模型增强",
-      body: "进入设置，打开 Ollama 接入并选择模型。开启后，所有 loop 默认会把 Codex 回复交给本地模型整理，再生成下一轮指令。",
+      body: "进入设置，打开 Ollama 接入并选择模型。开启后，所有任务默认会把 Codex 回复交给本地模型整理，再生成下一轮指令。",
     },
     {
       title: "如何安全停止与关闭服务",
@@ -2119,6 +2216,10 @@ function DashboardHome({
   onClearPendingGuidance,
   remoteAccessStatus,
   launcherWebUrl,
+  devicePairingSession,
+  devicePairingLoading,
+  devicePairingError,
+  onCreateDevicePairingSession,
 }) {
   const projectTitle = formatValue(
     currentLoop?.projectName || snapshot?.config?.projectName,
@@ -2126,7 +2227,7 @@ function DashboardHome({
   );
   const loopTitle = formatValue(
     currentLoop?.name || snapshot?.config?.loopName,
-    "当前 loop",
+    "当前任务",
   );
   const codexConversation = snapshot?.codexConversation || {};
   const latestCodexUser = codexConversation.latestUser || null;
@@ -2236,7 +2337,7 @@ function DashboardHome({
                   disabled={submitting}
                   onClick={() => setActiveSidebarPane("create")}
                 >
-                  新建 loop
+                  新建任务
                 </button>
                 <button
                   type="button"
@@ -2277,6 +2378,10 @@ function DashboardHome({
           <MobileAccessFold
             remoteAccessStatus={remoteAccessStatus}
             launcherWebUrl={launcherWebUrl}
+            pairingSession={devicePairingSession}
+            pairingLoading={devicePairingLoading}
+            pairingError={devicePairingError}
+            onCreatePairingSession={onCreateDevicePairingSession}
           />
         </div>
       </section>
@@ -2331,6 +2436,9 @@ export function App() {
   const [mobileView, setMobileView] = useState(null);
   const [launcherStatus, setLauncherStatus] = useState(null);
   const [remoteAccessStatus, setRemoteAccessStatus] = useState(null);
+  const [devicePairingSession, setDevicePairingSession] = useState(null);
+  const [devicePairingLoading, setDevicePairingLoading] = useState(false);
+  const [devicePairingError, setDevicePairingError] = useState("");
   const [automationStatus, setAutomationStatus] = useState(null);
   const [controllerStatus, setControllerStatus] = useState(null);
   const [ollamaModels, setOllamaModels] = useState([]);
@@ -2600,6 +2708,29 @@ export function App() {
       });
       setPendingGuidanceText("");
     });
+  }
+
+  async function createDevicePairingSession() {
+    const mobileBaseUrl =
+      remoteAccessStatus?.primaryMobileUrl ||
+      remoteAccessStatus?.url ||
+      remoteAccessStatus?.publicBaseUrl ||
+      remoteAccessStatus?.mobileUrlHint ||
+      "";
+    setDevicePairingLoading(true);
+    setDevicePairingError("");
+
+    try {
+      const nextSession = await requestJson("/device-pairing/session", {
+        method: "POST",
+        body: JSON.stringify({ mobileBaseUrl }),
+      });
+      setDevicePairingSession(nextSession);
+    } catch (error) {
+      setDevicePairingError(error?.message || "生成扫码绑定失败，请稍后重试。");
+    } finally {
+      setDevicePairingLoading(false);
+    }
   }
 
   const loopGroups = useMemo(
@@ -3047,6 +3178,10 @@ export function App() {
             onClearPendingGuidance={clearPendingGuidance}
             remoteAccessStatus={remoteAccessStatus}
             launcherWebUrl={launcherWebUrl}
+            devicePairingSession={devicePairingSession}
+            devicePairingLoading={devicePairingLoading}
+            devicePairingError={devicePairingError}
+            onCreateDevicePairingSession={createDevicePairingSession}
           />
         ) : null}
 

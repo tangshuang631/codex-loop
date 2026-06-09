@@ -125,3 +125,14 @@ test("architecture map includes productized binding and mobile-app target module
   assert.match(architectureSource, /项目路径.*窗口名|窗口名.*项目路径/);
   assert.match(architectureSource, /扫码.*长期绑定|长期绑定.*扫码/);
 });
+
+test("docs distinguish shipped phone-pairing foundation from the future mobile app", async () => {
+  const readmeSource = await fs.readFile("README.md", "utf8");
+  const roadmapSource = await fs.readFile("docs/product-roadmap.md", "utf8");
+
+  for (const source of [readmeSource, roadmapSource]) {
+    assert.match(source, /扫码长期绑定基础已接入/);
+    assert.match(source, /完整移动端 App 仍是下一批/);
+    assert.match(source, /自动窗口绑定仍是下一批/);
+  }
+});

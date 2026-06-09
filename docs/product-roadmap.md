@@ -126,6 +126,12 @@ Phone pairing requirement:
 - After codex-loop restarts on the same computer, the same mobile App should reconnect without requiring another scan.
 - If the token is revoked or the machine identity changes, the App must ask the user to scan again.
 
+Current mobile boundary:
+
+- 扫码长期绑定基础已接入：桌面控制台可以生成配对会话，后端可以确认配对并校验长期设备令牌。
+- 完整移动端 App 仍是下一批：后续再建立 `app/mobile`，复用 Web 任务详情数据，主界面只放历史对话、当前状态和发送引导。
+- 自动窗口绑定仍是下一批：后续通过项目路径和 Codex 窗口名匹配线程，当前仍保留手动线程 ID 兜底。
+
 ## Current implementation note
 
 The product is now moving toward a stronger middle ground:

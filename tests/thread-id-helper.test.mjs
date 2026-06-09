@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs/promises";
 
-test("new loop flow explains how to get a Codex thread id", async () => {
+test("new task flow explains how to get a Codex thread id", async () => {
   const appSource = await fs.readFile("app/web/src/App.jsx", "utf8");
   const paneStart = appSource.indexOf("function LoopCreationAssistantPane");
   const paneEnd = appSource.indexOf("function ManagePane");
@@ -12,7 +12,7 @@ test("new loop flow explains how to get a Codex thread id", async () => {
   assert.match(appSource, /新窗口线程号/);
   assert.match(appSource, /在要接入的 Codex 窗口发送下面这句话/);
   assert.match(appSource, /复制 Codex 返回的 threadId/);
-  assert.match(appSource, /粘贴到新 loop 的线程 ID/);
+  assert.match(appSource, /粘贴到新任务的线程 ID/);
   assert.match(appSource, /这个指令只用于获取窗口编号，不会启动循环/);
   assert.match(paneSource, /<ThreadIdHelpCard compact \/>/);
   assert.match(appSource, /打开新的 Codex 窗口/);

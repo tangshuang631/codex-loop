@@ -59,7 +59,7 @@ export function deriveDashboardGuide({
     snapshot?.thread?.latestSummary,
     snapshot?.state?.recentSummary,
     mobileView?.bindingNote,
-    "还没有新的 loop 进展。",
+    "还没有新的任务进展。",
   );
   const lastUpdatedAt = firstDefined(
     snapshot?.thread?.latestHeartbeatAt,
@@ -92,20 +92,20 @@ export function deriveDashboardGuide({
   if (!hasBoundThread) {
     return {
       stage: "bind-thread",
-      title: "先绑定一个可见线程，让 loop 真正接入你的项目",
+      title: "先绑定一个可见线程，让任务真正接入你的项目",
       summary: safeText(
         mobileView?.bindingNote,
         "当前还没有绑定线程。首页状态会刷新，但还不会形成连续、可见的协作记录。",
       ),
       focusLabel: "现在最值得先做",
-      focusValue: "去“管理”里填写线程标题和 thread id，保存后再开始 loop。",
+      focusValue: "去“管理”里填写线程标题和 thread id，保存后再开始任务循环。",
       primaryAction: {
         id: "open-manage",
         label: "去绑定线程",
       },
       secondaryAction: {
         id: "open-create",
-        label: "先新建 loop",
+        label: "先新建任务",
       },
       supportingMetrics,
     };
@@ -114,7 +114,7 @@ export function deriveDashboardGuide({
   if (mode !== "running" && !hasTranscript) {
     return {
       stage: "start-loop",
-      title: "线程已经接好，可以开始第一轮 loop 了",
+      title: "线程已经接好，可以开始第一轮任务循环了",
       summary,
       focusLabel: "建议下一步",
       focusValue: safeText(nextAction, "点击“开始循环”，生成第一轮连续记录。"),
@@ -132,7 +132,7 @@ export function deriveDashboardGuide({
 
   return {
     stage: "active-loop",
-    title: "当前 loop 正在推进，首页只保留最关键的判断和动作",
+    title: "当前任务正在推进，首页只保留最关键的判断和动作",
     summary,
     focusLabel: "接下来做什么",
     focusValue: safeText(nextAction, "继续查看最近改动，并决定下一轮任务。"),

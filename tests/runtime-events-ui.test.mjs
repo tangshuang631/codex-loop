@@ -188,6 +188,32 @@ test("dashboard exposes mobile viewing as a folded product entry instead of nois
   assert.match(stylesSource, /\.mobile-access-candidates/);
 });
 
+test("dashboard can create a reusable mobile app pairing session from the mobile access fold", async () => {
+  const appSource = await fs.readFile("app/web/src/App.jsx", "utf8");
+  const stylesSource = await fs.readFile("app/web/src/styles.css", "utf8");
+
+  assert.match(appSource, /const \[devicePairingSession,\s*setDevicePairingSession\]/);
+  assert.match(appSource, /async function createDevicePairingSession/);
+  assert.match(appSource, /requestJson\("\/device-pairing\/session"/);
+  assert.match(appSource, /remoteAccessStatus\?\.primaryMobileUrl\s*\|\|\s*remoteAccessStatus\?\.url/);
+  assert.match(appSource, /onCreateDevicePairingSession=\{createDevicePairingSession\}/);
+  assert.match(appSource, /remoteAccessStatus\?\.devicePairing\?\.summary/);
+  assert.match(appSource, /remoteAccessStatus\?\.pairingAction/);
+  assert.match(appSource, /生成扫码绑定/);
+  assert.match(appSource, /长期绑定/);
+  assert.match(appSource, /重启后不用重复扫码/);
+  assert.match(appSource, /pairingSession\?\.pairingCode/);
+  assert.match(appSource, /pairingSession\?\.qrPayload/);
+  assert.match(appSource, /QRCode\.toDataURL/);
+  assert.match(appSource, /pairingQrDataUrl/);
+  assert.match(appSource, /alt="手机扫码绑定"/);
+  assert.match(appSource, /复制配对码/);
+  assert.match(appSource, /复制扫码内容/);
+  assert.match(stylesSource, /\.mobile-pairing-panel/);
+  assert.match(stylesSource, /\.mobile-pairing-qr-image/);
+  assert.match(stylesSource, /\.mobile-pairing-code/);
+});
+
 test("dashboard labels default ollama auto mode without turning it into strict mode", async () => {
   const appSource = await fs.readFile("app/web/src/App.jsx", "utf8");
 
@@ -233,6 +259,22 @@ test("dashboard keeps mobile first screen compact and conversation readable", as
   assert.match(stylesSource, /\.workspace-more-actions/);
   assert.match(stylesSource, /\.mobile-only-label/);
 });
+
+test("dashboard uses task wording for primary creation and status surfaces", async () => {
+  const appSource = await fs.readFile("app/web/src/App.jsx", "utf8");
+  const guideSource = await fs.readFile("app/web/src/dashboard-guide.mjs", "utf8");
+  const dashboardStart = appSource.indexOf("function DashboardHome");
+  const dashboardEnd = appSource.indexOf("export function App");
+  const dashboardSource = appSource.slice(dashboardStart, dashboardEnd);
+
+  assert.match(appSource, /创建任务/);
+  assert.match(appSource, /新建任务/);
+  assert.match(appSource, /当前任务/);
+  assert.match(guideSource, /先新建任务/);
+  assert.match(guideSource, /当前任务正在推进/);
+  assert.doesNotMatch(dashboardSource, /新建 loop|当前 loop/);
+}
+);
 
 test("dashboard avoids long thread ids stretching the mobile home header", async () => {
   const appSource = await fs.readFile("app/web/src/App.jsx", "utf8");

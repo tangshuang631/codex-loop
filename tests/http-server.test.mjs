@@ -444,6 +444,68 @@ test("handler dispatches device pairing confirmation route", async () => {
   assert.match(chunks.join(""), /device-token-visible-once/);
 });
 
+test("handler dispatches reusable device pairing verification route", async () => {
+  let verificationPayload = null;
+  const handler = buildHandler({
+    operations: {
+      readLoopSnapshot: async () => ({}),
+      exportLoopSummary: async () => ({}),
+      exportMobileView: async () => ({}),
+      readLauncherStatus: async () => ({}),
+      readRemoteAccessStatus: async () => ({}),
+      readAutomationStatus: async () => ({}),
+      verifyPairedDevice: async (_cwd, body) => {
+        verificationPayload = body;
+        return {
+          valid: true,
+          device: { id: body.deviceId, name: "iPhone" },
+        };
+      },
+      startRun: async () => ({}),
+      renameLoop: async () => ({}),
+      requestGracefulStop: async () => ({}),
+      updateBudgets: async () => ({}),
+      saveThreadBinding: async () => ({}),
+      syncCodexThreadMirror: async () => ({}),
+      recordHeartbeat: async () => ({}),
+      recordError: async () => ({}),
+      saveUserOverrides: async () => ({}),
+    },
+  });
+
+  const chunks = [];
+  const response = {
+    writeHead(statusCode) {
+      this.statusCode = statusCode;
+    },
+    end(text) {
+      chunks.push(text);
+    },
+  };
+
+  await handler(
+    {
+      method: "POST",
+      url: "/api/device-pairing/verify",
+      [Symbol.asyncIterator]: async function* iterator() {
+        yield Buffer.from(
+          JSON.stringify({
+            deviceId: "device-1",
+            deviceToken: "stored-token",
+          }),
+          "utf8",
+        );
+      },
+    },
+    response,
+  );
+
+  assert.equal(response.statusCode, 200);
+  assert.equal(verificationPayload.deviceToken, "stored-token");
+  assert.match(chunks.join(""), /"valid":true/);
+  assert.match(chunks.join(""), /"name":"iPhone"/);
+});
+
 test("handler dispatches ollama model list route", async () => {
   const handler = buildHandler({
     operations: {

@@ -33,6 +33,7 @@ import {
   confirmDevicePairing,
   createDevicePairingSession,
   readDevicePairingStatus,
+  verifyPairedDevice,
 } from "./lib/runtime-governance/device-pairing.mjs";
 import { listOllamaModels as defaultListOllamaModels } from "./lib/ollama-model-store.mjs";
 import {
@@ -88,6 +89,7 @@ export function buildHandler({
       readDevicePairingStatus,
       createDevicePairingSession,
       confirmDevicePairing,
+      verifyPairedDevice,
       readAutomationStatus: async (startDir = process.cwd()) => {
         const snapshot = await readLoopSnapshot(startDir);
         return readAutomationStatusForThread(snapshot.thread);
@@ -231,6 +233,19 @@ export function buildHandler({
           response,
           200,
           await operations.confirmDevicePairing(process.cwd(), body),
+        );
+        return;
+      }
+
+      if (
+        request.method === "POST" &&
+        request.url === "/api/device-pairing/verify"
+      ) {
+        const body = await readBody(request);
+        sendJson(
+          response,
+          200,
+          await operations.verifyPairedDevice(process.cwd(), body),
         );
         return;
       }
