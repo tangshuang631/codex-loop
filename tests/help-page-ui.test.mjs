@@ -7,7 +7,7 @@ test("dashboard exposes a dedicated Help page for explanatory product guidance",
   const stylesSource = await fs.readFile("app/web/src/styles.css", "utf8");
 
   assert.match(appSource, /function HelpWorkspaceView/);
-  assert.match(appSource, /\["help", "帮助"\]/);
+  assert.match(appSource, /sidebar-footer-button[\s\S]*帮助/);
   assert.match(appSource, /activeSidebarPane === "help"/);
   assert.match(appSource, /任务循环是什么/);
   assert.match(appSource, /如何创建任务/);

@@ -118,6 +118,7 @@ test("exportMobileView returns recent transcript entries for mobile readers", as
   assert.match(mobile.suggestedAction, /\u7b49\u5f85|\u7eed\u8dd1|\u7ed1\u5b9a/);
   assert.match(mobile.strategy.contextCard.whyContinue, /继续|Review mobile transcript|暂无/);
   assert.ok(mobile.strategy.guardrailCard.stopRule);
+  assert.equal(Array.isArray(mobile.codexConversation.entries), true);
 });
 
 test("exportMobileView returns readable runtime events for mobile monitoring", async () => {

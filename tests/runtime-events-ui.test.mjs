@@ -276,6 +276,33 @@ test("dashboard uses task wording for primary creation and status surfaces", asy
 }
 );
 
+test("sidebar uses compact project navigation instead of task tab cards", async () => {
+  const appSource = await fs.readFile("app/web/src/App.jsx", "utf8");
+  const stylesSource = await fs.readFile("app/web/src/styles.css", "utf8");
+  const sidebarStart = appSource.indexOf("<aside className={`workspace-sidebar");
+  const sidebarEnd = appSource.indexOf("</aside>", sidebarStart);
+  const sidebarSource = appSource.slice(sidebarStart, sidebarEnd);
+  const footerStart = sidebarSource.indexOf("sidebar-footer");
+  const footerSource = sidebarSource.slice(footerStart);
+
+  assert.match(sidebarSource, /sidebar-action-grid/);
+  assert.match(sidebarSource, /创建项目/);
+  assert.match(sidebarSource, /创建任务/);
+  assert.doesNotMatch(sidebarSource, /\["loops", "任务"\]/);
+  assert.doesNotMatch(sidebarSource, /sidebar-pane-tab/);
+  assert.match(sidebarSource, /sidebar-project-title/);
+  assert.match(sidebarSource, /sidebar-loop-name/);
+  assert.doesNotMatch(sidebarSource, /formatValue\(loop\.branch,\s*"dev"\)/);
+  assert.doesNotMatch(sidebarSource, />管理</);
+  assert.match(sidebarSource, /aria-label=\{`管理任务 \$\{loop\.name\}`\}/);
+  assert.ok(footerSource.indexOf("帮助") >= 0);
+  assert.ok(footerSource.indexOf("设置") >= 0);
+  assert.ok(footerSource.indexOf("帮助") < footerSource.indexOf("设置"));
+  assert.match(stylesSource, /\.sidebar-action-grid/);
+  assert.match(stylesSource, /\.sidebar-footer-button/);
+  assert.match(stylesSource, /\.sidebar-loop-name/);
+});
+
 test("dashboard avoids long thread ids stretching the mobile home header", async () => {
   const appSource = await fs.readFile("app/web/src/App.jsx", "utf8");
   const stylesSource = await fs.readFile("app/web/src/styles.css", "utf8");
@@ -285,4 +312,26 @@ test("dashboard avoids long thread ids stretching the mobile home header", async
   assert.match(appSource, /statusLine\s*=\s*`\$\{runningHeadline\} · \$\{heroThreadLabel\}`/);
   assert.match(stylesSource, /\.compact-actions > strong[\s\S]*overflow-wrap:\s*anywhere/);
   assert.match(stylesSource, /\.workspace-hero-copy[\s\S]*min-width:\s*0/);
+});
+
+test("mobile route renders a protected task app with durable pairing credentials", async () => {
+  const appSource = await fs.readFile("app/web/src/App.jsx", "utf8");
+  const stylesSource = await fs.readFile("app/web/src/styles.css", "utf8");
+
+  assert.match(appSource, /function MobileTaskApp/);
+  assert.match(appSource, /window\.location\.pathname === "\/mobile"/);
+  assert.match(appSource, /CODEX_LOOP_MOBILE_DEVICE/);
+  assert.match(appSource, /localStorage\.setItem\(MOBILE_DEVICE_STORAGE_KEY/);
+  assert.match(appSource, /requestJson\("\/mobile\/view"/);
+  assert.match(appSource, /requestJson\("\/device-pairing\/confirm"/);
+  assert.match(appSource, /deviceId:\s*mobileDevice\?\.deviceId/);
+  assert.match(appSource, /deviceToken:\s*mobileDevice\?\.deviceToken/);
+  assert.match(appSource, /移动端任务/);
+  assert.match(appSource, /手机已绑定/);
+  assert.match(appSource, /补充你要说的话/);
+  assert.match(appSource, /发送引导/);
+  assert.match(appSource, /MobileConversationTimeline/);
+  assert.match(stylesSource, /\.mobile-task-shell/);
+  assert.match(stylesSource, /\.mobile-task-composer/);
+  assert.match(stylesSource, /\.mobile-task-pairing/);
 });

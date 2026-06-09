@@ -216,6 +216,226 @@ test("handler dispatches mobile route", async () => {
   assert.match(chunks.join(""), /"mobile":true/);
 });
 
+test("handler protects paired mobile view with reusable device credentials", async () => {
+  let verificationPayload = null;
+  let exported = false;
+  const handler = buildHandler({
+    operations: {
+      exportMobileView: async () => {
+        exported = true;
+        return {
+          loop: { name: "按清单继续开发" },
+          transcriptEntries: [{ role: "assistant", text: "Codex 已完成一轮。" }],
+        };
+      },
+      verifyPairedDevice: async (_cwd, body) => {
+        verificationPayload = body;
+        return {
+          valid: true,
+          device: {
+            id: body.deviceId,
+            name: "iPhone",
+            lastSeenAt: "2026-06-09T09:30:00.000Z",
+          },
+        };
+      },
+    },
+  });
+
+  const chunks = [];
+  const response = {
+    writeHead(statusCode, headers) {
+      this.statusCode = statusCode;
+      this.headers = headers;
+    },
+    end(text) {
+      chunks.push(text);
+    },
+  };
+
+  await handler(
+    {
+      method: "POST",
+      url: "/api/mobile/view",
+      [Symbol.asyncIterator]: async function* iterator() {
+        yield Buffer.from(
+          JSON.stringify({
+            deviceId: "device-1",
+            deviceToken: "stored-token",
+          }),
+          "utf8",
+        );
+      },
+    },
+    response,
+  );
+
+  const text = chunks.join("");
+  assert.equal(response.statusCode, 200);
+  assert.equal(exported, true);
+  assert.equal(verificationPayload.deviceToken, "stored-token");
+  assert.match(text, /"valid":true/);
+  assert.match(text, /"name":"iPhone"/);
+  assert.match(text, /按清单继续开发/);
+  assert.match(text, /Codex 已完成一轮/);
+});
+
+test("handler rejects paired mobile view when device credentials are invalid", async () => {
+  let exported = false;
+  const handler = buildHandler({
+    operations: {
+      exportMobileView: async () => {
+        exported = true;
+        return { mobile: true };
+      },
+      verifyPairedDevice: async () => ({
+        valid: false,
+        reason: "设备未绑定或令牌已失效，请重新扫码。",
+      }),
+    },
+  });
+
+  const chunks = [];
+  const response = {
+    writeHead(statusCode, headers) {
+      this.statusCode = statusCode;
+      this.headers = headers;
+    },
+    end(text) {
+      chunks.push(text);
+    },
+  };
+
+  await handler(
+    {
+      method: "POST",
+      url: "/api/mobile/view",
+      [Symbol.asyncIterator]: async function* iterator() {
+        yield Buffer.from(
+          JSON.stringify({
+            deviceId: "device-1",
+            deviceToken: "bad-token",
+          }),
+          "utf8",
+        );
+      },
+    },
+    response,
+  );
+
+  assert.equal(response.statusCode, 401);
+  assert.equal(exported, false);
+  assert.match(chunks.join(""), /设备未绑定|重新扫码/);
+  assert.match(chunks.join(""), /device_not_paired/);
+});
+
+test("handler lets paired mobile devices save next-turn guidance", async () => {
+  let verificationPayload = null;
+  let savedPayload = null;
+  const handler = buildHandler({
+    operations: {
+      savePendingGuidance: async (_cwd, body) => {
+        savedPayload = body;
+        return { thread: { pendingUserGuidance: body.text } };
+      },
+      verifyPairedDevice: async (_cwd, body) => {
+        verificationPayload = body;
+        return {
+          valid: true,
+          device: {
+            id: body.deviceId,
+            name: "iPhone",
+            lastSeenAt: "2026-06-09T09:40:00.000Z",
+          },
+        };
+      },
+    },
+  });
+
+  const chunks = [];
+  const response = {
+    writeHead(statusCode, headers) {
+      this.statusCode = statusCode;
+      this.headers = headers;
+    },
+    end(text) {
+      chunks.push(text);
+    },
+  };
+
+  await handler(
+    {
+      method: "POST",
+      url: "/api/mobile/guidance",
+      [Symbol.asyncIterator]: async function* iterator() {
+        yield Buffer.from(
+          JSON.stringify({
+            deviceId: "device-1",
+            deviceToken: "stored-token",
+            text: "下一轮先检查移动端历史记录是否清晰。",
+          }),
+          "utf8",
+        );
+      },
+    },
+    response,
+  );
+
+  assert.equal(response.statusCode, 200);
+  assert.equal(verificationPayload.deviceToken, "stored-token");
+  assert.equal(savedPayload.text, "下一轮先检查移动端历史记录是否清晰。");
+  assert.match(chunks.join(""), /移动端历史记录/);
+});
+
+test("handler rejects mobile guidance when device credentials are invalid", async () => {
+  let saved = false;
+  const handler = buildHandler({
+    operations: {
+      savePendingGuidance: async () => {
+        saved = true;
+        return {};
+      },
+      verifyPairedDevice: async () => ({
+        valid: false,
+        reason: "设备未绑定或令牌已失效，请重新扫码。",
+      }),
+    },
+  });
+
+  const chunks = [];
+  const response = {
+    writeHead(statusCode, headers) {
+      this.statusCode = statusCode;
+      this.headers = headers;
+    },
+    end(text) {
+      chunks.push(text);
+    },
+  };
+
+  await handler(
+    {
+      method: "POST",
+      url: "/api/mobile/guidance",
+      [Symbol.asyncIterator]: async function* iterator() {
+        yield Buffer.from(
+          JSON.stringify({
+            deviceId: "device-1",
+            deviceToken: "bad-token",
+            text: "不应该写入。",
+          }),
+          "utf8",
+        );
+      },
+    },
+    response,
+  );
+
+  assert.equal(response.statusCode, 401);
+  assert.equal(saved, false);
+  assert.match(chunks.join(""), /设备未绑定|重新扫码/);
+});
+
 test("handler dispatches launcher status route", async () => {
   const handler = buildHandler({
     operations: {

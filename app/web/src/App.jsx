@@ -27,6 +27,8 @@ const API_BASE = resolveApiBase();
 const REQUEST_TIMEOUT_MS = 8000;
 const ACTIVE_POLL_MS = 5000;
 const IDLE_POLL_MS = 12000;
+const CODEX_LOOP_MOBILE_DEVICE = "codex-loop-mobile-device";
+const MOBILE_DEVICE_STORAGE_KEY = CODEX_LOOP_MOBILE_DEVICE;
 const DEFAULT_SUPERVISOR_FORM = {
   roleTraits:
     "同时扮演产品经理、测试人员和真实用户：控制范围，关注可用性，主动发现偏离用户目标的问题。",
@@ -946,6 +948,397 @@ function PendingGuidanceComposer({
   );
 }
 
+function readStoredMobileDevice() {
+  if (typeof window === "undefined") {
+    return null;
+  }
+
+  try {
+    const raw = window.localStorage.getItem(MOBILE_DEVICE_STORAGE_KEY);
+    return raw ? JSON.parse(raw) : null;
+  } catch {
+    return null;
+  }
+}
+
+function writeStoredMobileDevice(device) {
+  if (typeof window === "undefined") {
+    return;
+  }
+
+  if (!device?.deviceId || !device?.deviceToken) {
+    window.localStorage.removeItem(MOBILE_DEVICE_STORAGE_KEY);
+    return;
+  }
+
+  window.localStorage.setItem(MOBILE_DEVICE_STORAGE_KEY, JSON.stringify(device));
+}
+
+function parsePairingPayload(value) {
+  const text = formatValue(value, "");
+  if (!text) {
+    return {};
+  }
+
+  try {
+    const url = new URL(text);
+    return {
+      sessionId: url.searchParams.get("sessionId") || "",
+      pairingCode: url.searchParams.get("code") || "",
+    };
+  } catch {
+    return {};
+  }
+}
+
+function buildMobileConversationEntries(mobileView) {
+  const codexEntries = mobileView?.codexConversation?.entries || [];
+  if (codexEntries.length) {
+    return dedupeConversationEntries(codexEntries);
+  }
+
+  const entries = [];
+  const latestPrompt = formatValue(mobileView?.latestPrompt, "");
+  if (latestPrompt) {
+    entries.push({
+      at: mobileView?.thread?.lastDispatchAt || "",
+      role: "user",
+      text: latestPrompt,
+      preview: latestPrompt,
+      label: "codex-loop 指令",
+    });
+  }
+
+  for (const entry of mobileView?.transcriptEntries || []) {
+    const summary = entry.summary || entry.note || "";
+    if (!summary) continue;
+    entries.push({
+      at: entry.at,
+      role: "assistant",
+      text: summary,
+      preview: summary,
+      label: entry.activeTask || "Codex 回复",
+    });
+  }
+
+  for (const event of mobileView?.runtimeEvents || []) {
+    const detail = event.detail || event.title || "";
+    if (!detail) continue;
+    entries.push({
+      at: event.at,
+      role: event.type?.includes("dispatch") ? "user" : "assistant",
+      text: detail,
+      preview: detail,
+      label: event.title || "运行记录",
+    });
+  }
+
+  return dedupeConversationEntries(entries);
+}
+
+function MobileConversationTimeline({ mobileView }) {
+  const entries = buildMobileConversationEntries(mobileView).sort((a, b) => {
+    const left = Date.parse(a.at || "");
+    const right = Date.parse(b.at || "");
+    if (!Number.isFinite(left) && !Number.isFinite(right)) return 0;
+    if (!Number.isFinite(left)) return 1;
+    if (!Number.isFinite(right)) return -1;
+    return left - right;
+  });
+  const bottomRef = useRef(null);
+  const latest = entries.at(-1) || {};
+
+  useEffect(() => {
+    bottomRef.current?.scrollIntoView({ block: "end", behavior: "auto" });
+  }, [entries.length, latest.at, latest.role]);
+
+  if (!entries.length) {
+    return (
+      <div className="conversation-empty">
+        还没有同步到历史对话。绑定任务后，这里会展示 codex-loop 指令和 Codex 回复。
+      </div>
+    );
+  }
+
+  return (
+    <div className="conversation-timeline mobile-task-conversation">
+      {entries.map((entry, index) => {
+        const isLoopMessage = entry.role === "user";
+        const fullText = formatValue(entry.text || entry.summary || entry.preview, "");
+        const summary = summarizeVisibleText(
+          entry.preview || fullText,
+          isLoopMessage ? "codex-loop 已发送一条指令" : "Codex 已返回一条记录",
+          isLoopMessage ? 160 : 260,
+        );
+        return (
+          <article
+            className={isLoopMessage ? "conversation-row is-loop" : "conversation-row is-codex"}
+            key={`${entry.at || index}-${entry.role}-${index}`}
+          >
+            <details
+              className="conversation-bubble"
+              open={shouldOpenConversationEntry({
+                entry,
+                fullText,
+                isLoopMessage,
+                isGuidance: false,
+                index,
+                total: entries.length,
+              })}
+            >
+              <summary>
+                <span className="conversation-meta">
+                  {formatTime(entry.at, "未知时间")} · {isLoopMessage ? "codex-loop 指令" : "Codex 回复"}
+                </span>
+                <strong>{summary}</strong>
+                <span className="conversation-actions">
+                  <em>{isLoopMessage ? "查看完整指令" : "查看完整回复"}</em>
+                  {fullText ? (
+                    <button
+                      type="button"
+                      onClick={(event) => {
+                        event.preventDefault();
+                        copyTextToClipboard(fullText);
+                      }}
+                    >
+                      复制全文
+                    </button>
+                  ) : null}
+                </span>
+              </summary>
+              {fullText ? <MarkdownMessage text={fullText} /> : null}
+            </details>
+          </article>
+        );
+      })}
+      <div className="conversation-bottom-anchor" ref={bottomRef} aria-hidden="true" />
+    </div>
+  );
+}
+
+function MobileTaskApp() {
+  const [mobileDevice, setMobileDevice] = useState(readStoredMobileDevice);
+  const [mobileView, setMobileView] = useState(null);
+  const [pairingPayload, setPairingPayload] = useState("");
+  const [pairingCode, setPairingCode] = useState("");
+  const [sessionId, setSessionId] = useState("");
+  const [guidanceText, setGuidanceText] = useState("");
+  const [statusText, setStatusText] = useState("正在连接 codex-loop。");
+  const [errorText, setErrorText] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+  const pollRef = useRef(null);
+
+  const parsedPairing = parsePairingPayload(pairingPayload);
+  const effectiveSessionId = sessionId || parsedPairing.sessionId || "";
+  const effectivePairingCode = pairingCode || parsedPairing.pairingCode || "";
+
+  async function loadProtectedMobileView({ silent = false } = {}) {
+    if (!mobileDevice?.deviceId || !mobileDevice?.deviceToken) {
+      setStatusText("请先完成手机绑定。");
+      return;
+    }
+
+    if (!silent) {
+      setStatusText("正在同步任务。");
+    }
+    try {
+      const result = await requestJson("/mobile/view", {
+        method: "POST",
+        body: JSON.stringify({
+          deviceId: mobileDevice?.deviceId,
+          deviceToken: mobileDevice?.deviceToken,
+        }),
+      });
+      setMobileView(result.mobile);
+      setErrorText("");
+      setStatusText("手机已绑定，任务状态已同步。");
+    } catch (error) {
+      setErrorText(error?.message || "同步失败，请重新扫码。");
+      setStatusText("手机绑定不可用。");
+      if (/设备未绑定|重新扫码|令牌/.test(error?.message || "")) {
+        writeStoredMobileDevice(null);
+        setMobileDevice(null);
+      }
+    }
+  }
+
+  useEffect(() => {
+    void loadProtectedMobileView();
+  }, [mobileDevice?.deviceId, mobileDevice?.deviceToken]);
+
+  useEffect(() => {
+    window.clearInterval(pollRef.current);
+    if (!mobileDevice?.deviceId || !mobileDevice?.deviceToken) {
+      return undefined;
+    }
+
+    pollRef.current = window.setInterval(() => {
+      void loadProtectedMobileView({ silent: true });
+    }, ACTIVE_POLL_MS);
+
+    return () => window.clearInterval(pollRef.current);
+  }, [mobileDevice?.deviceId, mobileDevice?.deviceToken]);
+
+  async function confirmPairing() {
+    if (!effectiveSessionId || !effectivePairingCode) {
+      setErrorText("请粘贴扫码内容，或输入配对会话和配对码。");
+      return;
+    }
+
+    setSubmitting(true);
+    setErrorText("");
+    try {
+      const result = await requestJson("/device-pairing/confirm", {
+        method: "POST",
+        body: JSON.stringify({
+          sessionId: effectiveSessionId,
+          pairingCode: effectivePairingCode,
+          deviceName: "移动端任务",
+        }),
+      });
+      const nextDevice = {
+        deviceId: result.device?.id,
+        deviceToken: result.deviceToken,
+        deviceName: result.device?.name || "移动端任务",
+      };
+      writeStoredMobileDevice(nextDevice);
+      setMobileDevice(nextDevice);
+      setStatusText("手机已绑定，正在同步任务。");
+      setPairingPayload("");
+      setPairingCode("");
+      setSessionId("");
+    } catch (error) {
+      setErrorText(error?.message || "绑定失败，请重新扫码。");
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  async function saveMobileGuidance() {
+    const text = guidanceText.trim();
+    if (!text || !mobileDevice?.deviceId || !mobileDevice?.deviceToken) {
+      return;
+    }
+
+    setSubmitting(true);
+    setErrorText("");
+    try {
+      await requestJson("/mobile/guidance", {
+        method: "POST",
+        body: JSON.stringify({
+          deviceId: mobileDevice?.deviceId,
+          deviceToken: mobileDevice?.deviceToken,
+          text,
+        }),
+      });
+      setGuidanceText("");
+      setStatusText("已保存补充引导，会等 Codex 完成后合并。");
+      await loadProtectedMobileView({ silent: true });
+    } catch (error) {
+      setErrorText(error?.message || "发送引导失败，请稍后重试。");
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  const loopName = mobileView?.loop?.name || "移动端任务";
+  const processStatus = mobileView?.processStatus || {};
+  const headline = processStatus.headline || mobileView?.suggestedAction || statusText;
+  const threadTitle = mobileView?.thread?.title || mobileView?.thread?.threadId || "未绑定线程";
+
+  return (
+    <main className="mobile-task-shell">
+      <header className="mobile-task-header">
+        <span>codex-loop</span>
+        <h1>{loopName}</h1>
+        <p>{headline}</p>
+        <div className="mobile-task-status-line">
+          <strong>{statusText}</strong>
+          <span>{threadTitle}</span>
+        </div>
+      </header>
+
+      {errorText ? <div className="error-banner">{errorText}</div> : null}
+
+      {!mobileDevice ? (
+        <section className="mobile-task-pairing">
+          <h2>绑定这台电脑</h2>
+          <p>在桌面控制台生成扫码绑定后，把扫码内容粘贴到这里；绑定后下次不用重复扫码。</p>
+          <textarea
+            rows={4}
+            value={pairingPayload}
+            placeholder="粘贴扫码内容，例如 codex-loop://pair?sessionId=...&code=..."
+            onChange={(event) => setPairingPayload(event.target.value)}
+          />
+          <div className="mobile-task-pairing-grid">
+            <input
+              value={sessionId}
+              placeholder="配对会话"
+              onChange={(event) => setSessionId(event.target.value)}
+            />
+            <input
+              value={pairingCode}
+              placeholder="配对码"
+              onChange={(event) => setPairingCode(event.target.value)}
+            />
+          </div>
+          <button
+            type="button"
+            className="primary-button"
+            disabled={submitting}
+            onClick={() => void confirmPairing()}
+          >
+            确认绑定
+          </button>
+        </section>
+      ) : (
+        <>
+          <section className="mobile-task-panel">
+            <div className="mobile-task-panel-row">
+              <span>当前状态</span>
+              <strong>{processStatus.monitorLabel || mobileView?.loop?.modeLabel || "监控中"}</strong>
+            </div>
+            <div className="mobile-task-panel-row">
+              <span>下一步</span>
+              <strong>{processStatus.nextAction || mobileView?.suggestedAction || "等待下一轮更新"}</strong>
+            </div>
+            {mobileView?.pendingGuidance?.hasPending ? (
+              <div className="mobile-task-panel-row">
+                <span>待合并</span>
+                <strong>{mobileView.pendingGuidance.preview || mobileView.pendingGuidance.text}</strong>
+              </div>
+            ) : null}
+          </section>
+
+          <MobileConversationTimeline mobileView={mobileView} />
+
+          <form
+            className="mobile-task-composer"
+            onSubmit={(event) => {
+              event.preventDefault();
+              void saveMobileGuidance();
+            }}
+          >
+            <textarea
+              rows={3}
+              value={guidanceText}
+              placeholder="补充你要说的话 ,等 Codex 完成后合并，会等 Codex 当前任务完成再发送"
+              onChange={(event) => setGuidanceText(event.target.value)}
+            />
+            <button
+              type="submit"
+              className="primary-button"
+              disabled={submitting || !guidanceText.trim()}
+            >
+              发送引导
+            </button>
+          </form>
+        </>
+      )}
+    </main>
+  );
+}
+
 function StatusSummaryPanel({
   modeText,
   continuationStatus,
@@ -1375,18 +1768,22 @@ function LoopCreationAssistantPane({
   onSubmit,
   onBack,
   onReset,
+  creationMode = "task",
 }) {
   const currentQuestion = assistantState?.currentQuestion;
   const draft = assistantState?.draft || {};
   const plan = draft.plan || {};
   const createdLoop = assistantState?.createdLoop?.loop;
   const messages = assistantState?.messages || [];
+  const projectMode = creationMode === "project";
 
   return (
     <div className="sidebar-form assistant-pane">
-      <h3>创建任务</h3>
+      <h3>{projectMode ? "创建项目和首个任务" : "创建任务"}</h3>
       <p className="sidebar-help">
-        先确认项目、任务名和分支，再开始循环。
+        {projectMode
+          ? "先确认项目路径和项目名，再把任务收纳到这个项目下。"
+          : "先确认项目、任务名和分支，再开始循环。"}
       </p>
 
       {assistantState?.status === "completed" && createdLoop ? (
@@ -2138,13 +2535,19 @@ function CreateWorkspaceView({
   onSubmit,
   onBack,
   onReset,
+  creationMode = "task",
 }) {
+  const projectMode = creationMode === "project";
   return (
     <section className="workspace-focus">
       <div className="workspace-focus-head">
-        <span className="workspace-focus-eyebrow">创建新任务</span>
-        <h1>对话创建任务</h1>
-        <p>这里会完整显示创建流程，你不需要挤在侧边栏里操作。</p>
+        <span className="workspace-focus-eyebrow">{projectMode ? "创建项目" : "创建任务"}</span>
+        <h1>{projectMode ? "先建立项目，再添加任务" : "对话创建任务"}</h1>
+        <p>
+          {projectMode
+            ? "项目用来收纳同一工作区下的多个任务。当前会先创建项目下的第一个任务。"
+            : "这里会完整显示创建流程，你不需要挤在侧边栏里操作。"}
+        </p>
       </div>
 
       <LoopCreationAssistantPane
@@ -2155,6 +2558,7 @@ function CreateWorkspaceView({
         onSubmit={onSubmit}
         onBack={onBack}
         onReset={onReset}
+        creationMode={creationMode}
       />
     </section>
   );
@@ -2468,7 +2872,7 @@ function DashboardHome({
     </>
   );
 }
-export function App() {
+function DesktopConsoleApp() {
   const [snapshot, setSnapshot] = useState(null);
   const [mobileView, setMobileView] = useState(null);
   const [launcherStatus, setLauncherStatus] = useState(null);
@@ -2489,6 +2893,7 @@ export function App() {
   const [collapsedProjects, setCollapsedProjects] = useState({});
   const [sidebarOpen, setSidebarOpen] = useState(getInitialSidebarOpen);
   const [activeSidebarPane, setActiveSidebarPane] = useState("loops");
+  const [creationMode, setCreationMode] = useState("task");
   const [activeManageSection, setActiveManageSection] = useState("automation");
   const [selectedLoopId, setSelectedLoopId] = useState("");
   const [loopMenuOpenId, setLoopMenuOpenId] = useState("");
@@ -2866,6 +3271,12 @@ export function App() {
     pollStatus,
   });
 
+  function openCreatePane(nextCreationMode = "task") {
+    setCreationMode(nextCreationMode);
+    setActiveSidebarPane("create");
+    setLoopMenuOpenId("");
+  }
+
   async function handleDashboardAction(actionId) {
     if (actionId === "open-manage") {
       setActiveSidebarPane("manage");
@@ -2873,7 +3284,7 @@ export function App() {
     }
 
     if (actionId === "open-create") {
-      setActiveSidebarPane("create");
+      openCreatePane("task");
       return;
     }
 
@@ -2917,172 +3328,170 @@ export function App() {
 
         {sidebarOpen ? (
           <>
-            <SidebarSummary
-              currentLoop={currentLoop}
-              loopRegistry={loopRegistry}
-              snapshot={snapshot}
-              pollStatus={pollStatus}
-            />
-
-            <div className="sidebar-panes">
-              {[
-                ["loops", "任务"],
-                ["create", "创建"],
-                ["help", "帮助"],
-              ].map(([id, label]) => (
-                <button
-                  key={id}
-                  type="button"
-                  className={`sidebar-pane-tab ${activeSidebarPane === id ? "is-active" : ""}`}
-                  onClick={() => setActiveSidebarPane(id)}
-                >
-                  {label}
-                </button>
-              ))}
+            <div className="sidebar-action-grid">
+              <button
+                type="button"
+                className={`sidebar-action-button ${
+                  activeSidebarPane === "create" && creationMode === "project" ? "is-active" : ""
+                }`}
+                onClick={() => openCreatePane("project")}
+              >
+                创建项目
+              </button>
+              <button
+                type="button"
+                className={`sidebar-action-button ${
+                  activeSidebarPane === "create" && creationMode === "task" ? "is-active" : ""
+                }`}
+                onClick={() => openCreatePane("task")}
+              >
+                创建任务
+              </button>
             </div>
 
-            {activeSidebarPane === "loops" ? (
-              <div className="sidebar-pane-stack">
-                <div className="sidebar-loop-groups">
-                  {Object.entries(loopGroups).map(([projectName, loops]) => {
-                    const collapsed = collapsedProjects[projectName];
-                    return (
-                      <div key={projectName} className="sidebar-group">
-                        <button
-                          type="button"
-                          className="sidebar-group-toggle"
-                          onClick={() =>
-                            setCollapsedProjects((current) => ({
-                              ...current,
-                              [projectName]: !current[projectName],
-                            }))
-                          }
-                        >
-                          <span>{projectName}</span>
-                          <span>{collapsed ? "展开" : "折叠"}</span>
-                        </button>
+            <div className="sidebar-projects" aria-label="项目任务导航">
+              <div className="sidebar-projects-head">
+                <span>项目</span>
+                <span>{visibleLoops.length} 个任务</span>
+              </div>
+              <div className="sidebar-loop-groups">
+                {Object.entries(loopGroups).map(([projectName, loops]) => {
+                  const collapsed = collapsedProjects[projectName];
+                  return (
+                    <div key={projectName} className="sidebar-group">
+                      <button
+                        type="button"
+                        className="sidebar-group-toggle"
+                        aria-expanded={!collapsed}
+                        onClick={() =>
+                          setCollapsedProjects((current) => ({
+                            ...current,
+                            [projectName]: !current[projectName],
+                          }))
+                        }
+                      >
+                        <span className="sidebar-project-title">{projectName}</span>
+                        <span className="sidebar-project-count">{loops.length}</span>
+                        <span className="sidebar-project-chevron" aria-hidden="true">
+                          {collapsed ? "+" : "-"}
+                        </span>
+                      </button>
 
-                        {!collapsed ? (
-                          <div className="sidebar-loop-list">
-                            {loops.map((loop) => {
-                              const isActive = loop.id === (currentLoop?.id || loopRegistry.currentLoopId);
-                              return (
-                                <div key={loop.id} className={`sidebar-loop-item ${isActive ? "is-active" : ""}`}>
+                      {!collapsed ? (
+                        <div className="sidebar-loop-list">
+                          {loops.map((loop) => {
+                            const isActive = loop.id === (currentLoop?.id || loopRegistry.currentLoopId);
+                            return (
+                              <div key={loop.id} className={`sidebar-loop-item ${isActive ? "is-active" : ""}`}>
+                                <button
+                                  type="button"
+                                  className="sidebar-loop-main"
+                                  onClick={() =>
+                                    withSubmit(async () => {
+                                      setSelectedLoopId(loop.id);
+                                      setActiveSidebarPane("loops");
+                                      setLoopMenuOpenId("");
+                                      await requestJson("/loops/select", {
+                                        method: "POST",
+                                        body: JSON.stringify({ loopId: loop.id }),
+                                      });
+                                    })
+                                  }
+                                >
+                                  <span className="sidebar-loop-name">{loop.name}</span>
+                                </button>
+
+                                <div className="sidebar-loop-tools">
                                   <button
                                     type="button"
-                                    className="sidebar-loop-main"
+                                    className="loop-tool-button"
+                                    aria-label={`管理任务 ${loop.name}`}
+                                    title="更多"
                                     onClick={() =>
-                                      withSubmit(async () => {
-                                        setSelectedLoopId(loop.id);
-                                        await requestJson("/loops/select", {
-                                          method: "POST",
-                                          body: JSON.stringify({ loopId: loop.id }),
-                                        });
-                                      })
+                                      setLoopMenuOpenId((current) => (current === loop.id ? "" : loop.id))
                                     }
                                   >
-                                    <strong>{loop.name}</strong>
-                                      <span>{formatValue(loop.boundThreadTitle, "未绑定线程")}</span>
-                                    <span className="sidebar-loop-path">{formatValue(loop.branch, "dev")}</span>
+                                    <span aria-hidden="true">...</span>
                                   </button>
-
-                                  <div className="sidebar-loop-tools">
-                                    <button
-                                      type="button"
-                                      className="loop-tool-button"
-                                      onClick={() =>
-                                        setLoopMenuOpenId((current) => (current === loop.id ? "" : loop.id))
-                                      }
-                                    >
-                                      管理
-                                    </button>
-                                    {loopMenuOpenId === loop.id ? (
-                                      <div className="loop-context-menu">
-                                        <button
-                                          type="button"
-                                          onClick={() => {
-                                            setActiveSidebarPane("manage");
+                                  {loopMenuOpenId === loop.id ? (
+                                    <div className="loop-context-menu">
+                                      <button
+                                        type="button"
+                                        onClick={() => {
+                                          setActiveSidebarPane("manage");
+                                          setLoopMenuOpenId("");
+                                        }}
+                                      >
+                                        打开设置
+                                      </button>
+                                      <button
+                                        type="button"
+                                        onClick={() =>
+                                          withSubmit(async () => {
+                                            const nextName = window.prompt("输入新的任务名称", loop.name);
+                                            if (!nextName || nextName === loop.name) return;
+                                            await requestJson("/rename-loop", {
+                                              method: "POST",
+                                              body: JSON.stringify({ loopName: nextName }),
+                                            });
                                             setLoopMenuOpenId("");
-                                          }}
-                                        >
-                                          打开设置
-                                        </button>
+                                          })
+                                        }
+                                      >
+                                        重命名任务
+                                      </button>
+                                      {!loop.isCurrent ? (
                                         <button
                                           type="button"
                                           onClick={() =>
                                             withSubmit(async () => {
-                                              const nextName = window.prompt("输入新的任务名称", loop.name);
-                                              if (!nextName || nextName === loop.name) return;
-                                              await requestJson("/rename-loop", {
+                                              await requestJson("/loops/delete", {
                                                 method: "POST",
-                                                body: JSON.stringify({ loopName: nextName }),
+                                                body: JSON.stringify({ loopId: loop.id }),
                                               });
                                               setLoopMenuOpenId("");
                                             })
                                           }
                                         >
-                                          重命名任务
+                                          删除这个任务
                                         </button>
-                                        {!loop.isCurrent ? (
-                                          <button
-                                            type="button"
-                                            onClick={() =>
-                                              withSubmit(async () => {
-                                                await requestJson("/loops/delete", {
-                                                  method: "POST",
-                                                  body: JSON.stringify({ loopId: loop.id }),
-                                                });
-                                                setLoopMenuOpenId("");
-                                              })
-                                            }
-                                          >
-                                            删除这个任务
-                                          </button>
-                                        ) : null}
-                                      </div>
-                                    ) : null}
-                                  </div>
+                                      ) : null}
+                                    </div>
+                                  ) : null}
                                 </div>
-                              );
-                            })}
-                          </div>
-                        ) : null}
-                      </div>
-                    );
-                  })}
-                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      ) : null}
+                    </div>
+                  );
+                })}
               </div>
-            ) : null}
-
-            {activeSidebarPane !== "loops" ? (
-              <div className="sidebar-pane-hint">
-                <strong>
-                  {activeSidebarPane === "create"
-                    ? "正在创建新任务"
-                    : activeSidebarPane === "help"
-                      ? "正在查看帮助"
-                      : "正在调整全局设置"}
-                </strong>
-                <p>
-                  {activeSidebarPane === "create"
-                    ? "右侧已经切换到完整创建流程。"
-                    : activeSidebarPane === "help"
-                      ? "右侧已经切换到使用说明。"
-                      : "右侧已经切换到完整设置面板。"}
-                </p>
-              </div>
-            ) : null}
+            </div>
 
             <div className="sidebar-footer">
               <button
                 type="button"
-                className={`sidebar-settings-button ${activeSidebarPane === "manage" ? "is-active" : ""}`}
+                className={`sidebar-footer-button ${activeSidebarPane === "help" ? "is-active" : ""}`}
+                onClick={() => {
+                  setActiveSidebarPane("help");
+                  setLoopMenuOpenId("");
+                }}
+              >
+                <span className="sidebar-footer-icon" aria-hidden="true">?</span>
+                <span>帮助</span>
+              </button>
+              <button
+                type="button"
+                className={`sidebar-footer-button ${activeSidebarPane === "manage" ? "is-active" : ""}`}
                 onClick={() => {
                   setActiveManageSection("ollama");
                   setActiveSidebarPane("manage");
+                  setLoopMenuOpenId("");
                 }}
               >
-                <span className="sidebar-settings-icon" aria-hidden="true">⚙</span>
+                <span className="sidebar-footer-icon" aria-hidden="true">⚙</span>
                 <span>设置</span>
               </button>
             </div>
@@ -3111,6 +3520,15 @@ export function App() {
             ))}
             <button
               type="button"
+              className={`collapsed-loop-pill ${activeSidebarPane === "help" ? "is-active" : ""}`}
+              onClick={() => setActiveSidebarPane("help")}
+              title="帮助"
+            >
+              <span>帮</span>
+              <span className="mobile-only-label">帮助</span>
+            </button>
+            <button
+              type="button"
               className={`collapsed-loop-pill ${activeSidebarPane === "manage" ? "is-active" : ""}`}
               onClick={() => {
                 setActiveManageSection("ollama");
@@ -3120,15 +3538,6 @@ export function App() {
             >
               <span>⚙</span>
               <span className="mobile-only-label">设置</span>
-            </button>
-            <button
-              type="button"
-              className={`collapsed-loop-pill ${activeSidebarPane === "help" ? "is-active" : ""}`}
-              onClick={() => setActiveSidebarPane("help")}
-              title="帮助"
-            >
-              <span>帮</span>
-              <span className="mobile-only-label">帮助</span>
             </button>
           </div>
         )}
@@ -3166,6 +3575,7 @@ export function App() {
                 setAssistantAnswer("");
               })
             }
+            creationMode={creationMode}
           />
         ) : null}
 
@@ -3247,4 +3657,12 @@ export function App() {
       </section>
     </main>
   );
+}
+
+export function App() {
+  if (typeof window !== "undefined" && window.location.pathname === "/mobile") {
+    return <MobileTaskApp />;
+  }
+
+  return <DesktopConsoleApp />;
 }

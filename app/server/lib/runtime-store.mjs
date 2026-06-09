@@ -2152,6 +2152,7 @@ export async function exportMobileView(startDir = process.cwd()) {
       mergeTiming: "codex_completed",
       mergeTimingLabel: "等 Codex 完成后合并到下一条指令",
     },
+    codexConversation: snapshot.codexConversation,
     bindingNote,
     suggestedAction,
     latestPrompt: snapshot.thread.lastDispatchPrompt || "",
