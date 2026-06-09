@@ -247,7 +247,19 @@ async function readJsonLines(filePath, limit = 20) {
   }
 }
 
-function readableRuntimeEventTitle(type) {
+function readableRuntimeEventTitle(type, event = {}) {
+  if (type === "codex_followup_failed") {
+    return (
+      safeText(event.failureLabel, "") ||
+      classifyContinuationFailure({
+        message: event.message,
+        latestSummary: event.summary,
+        promptGenerationError: event.promptGenerationError,
+        promptGenerator: event.promptGenerator,
+      }).label
+    );
+  }
+
   const titles = {
     artifacts_verified: "运行文件已就绪",
     thread_binding_updated: "已绑定线程",
@@ -295,6 +307,21 @@ function readableRuntimeEventDetail(event = {}) {
         ? "循环已停止。"
         : event.reason,
       "循环已停止。",
+    );
+  }
+  if (type === "codex_followup_failed") {
+    const failure = classifyContinuationFailure({
+      message: event.message,
+      latestSummary: event.summary,
+      promptGenerationError: event.promptGenerationError,
+      promptGenerator: event.promptGenerator,
+    });
+    return firstNonEmpty(
+      event.failureAction,
+      event.failureLabel,
+      failure.nextAction,
+      failure.userMessage,
+      "查看最近记录并按提示修复后再重新开始循环。",
     );
   }
   return firstNonEmpty(
@@ -416,7 +443,7 @@ async function readReadableRuntimeEvents(logPath, limit = 12) {
       return {
         at: safeText(event.at, ""),
         type,
-        title: readableRuntimeEventTitle(type),
+        title: readableRuntimeEventTitle(type, event),
         detail: summarizeForFollowup(readableRuntimeEventDetail(event), 180),
         tone: /failed|error|stalled/i.test(type) ? "danger" : "normal",
       };

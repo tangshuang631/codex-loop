@@ -538,6 +538,48 @@ test("readLoopSnapshot keeps runtime records useful and removes low-signal repea
   assert.doesNotMatch(stopEvents[0].detail, /graceful/i);
 });
 
+test("readLoopSnapshot renders continuation failures as product recovery records", async () => {
+  const configRoot = await createWorkspace();
+  await ensureLoopArtifacts(configRoot);
+  await saveUserOverrides(configRoot, {
+    conversation: {
+      promptGenerator: {
+        enabled: true,
+        provider: "ollama",
+        model: "qwen2.5:7b",
+      },
+    },
+  });
+  await saveThreadBinding(configRoot, {
+    workspaceName: "demo",
+    threadTitle: "产品化失败记录线程",
+    threadId: "thread-readable-failure-event",
+    singleThreadMode: true,
+  });
+  await syncCodexThreadMirror(configRoot, {
+    latestCodexSummary: "上一轮已完成，等待下一条指令。",
+  });
+
+  await assert.rejects(
+    () =>
+      runLoopTurn(configRoot, {
+        generateFollowupPrompt: async () => {
+          throw new Error("ollama unavailable");
+        },
+      }),
+    /本地模型生成续跑指令失败/,
+  );
+
+  const snapshot = await readLoopSnapshot(configRoot);
+  const failureEvent = snapshot.runtimeEvents.find(
+    (event) => event.type === "codex_followup_failed",
+  );
+
+  assert.equal(failureEvent.title, "本地模型生成失败");
+  assert.match(failureEvent.detail, /Ollama|模型|设置|重新开始/);
+  assert.doesNotMatch(failureEvent.detail, /ollama unavailable/i);
+});
+
 test("startRun preserves an active Codex dispatch instead of reopening it as idle", async () => {
   const configRoot = await createWorkspace();
   const initialSnapshot = await ensureLoopArtifacts(configRoot);
