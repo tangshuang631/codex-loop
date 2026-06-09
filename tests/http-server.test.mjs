@@ -1423,6 +1423,7 @@ test("handler dispatches loop registry routes", async () => {
       saveUserOverrides: async () => ({}),
       listLoops: async () => ({ loops: [{ id: "a" }] }),
       createLoop: async () => ({ created: true }),
+      createProject: async () => ({ createdProject: { id: "p", name: "新项目" } }),
       selectLoop: async () => ({ selected: true }),
       deleteLoop: async () => ({ deleted: true }),
     },
@@ -1456,12 +1457,15 @@ test("handler dispatches loop registry routes", async () => {
   }
 
   const listResult = await request("GET", "/api/loops");
+  const projectResult = await request("POST", "/api/projects", { projectName: "新项目" });
   const createResult = await request("POST", "/api/loops", { loopName: "x" });
   const selectResult = await request("POST", "/api/loops/select", { loopId: "a" });
   const deleteResult = await request("POST", "/api/loops/delete", { loopId: "a" });
 
   assert.equal(listResult.statusCode, 200);
   assert.match(listResult.text, /"id":"a"/);
+  assert.equal(projectResult.statusCode, 200);
+  assert.match(projectResult.text, /"name":"新项目"/);
   assert.equal(createResult.statusCode, 200);
   assert.match(createResult.text, /"created":true/);
   assert.equal(selectResult.statusCode, 200);

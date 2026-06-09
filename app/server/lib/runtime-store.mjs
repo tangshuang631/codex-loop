@@ -774,6 +774,39 @@ function buildLoopRegistryPath(codexLoopRoot) {
   return path.join(codexLoopRoot, "settings", "loops.json");
 }
 
+function hashText(value) {
+  let hash = 0;
+  for (const character of safeText(value, "")) {
+    hash = (hash * 31 + character.charCodeAt(0)) >>> 0;
+  }
+  return hash.toString(36);
+}
+
+function buildSafeProjectId(projectName) {
+  const name = safeText(projectName, "project");
+  return buildSafeLoopId(name, "project-" + hashText(name), "project");
+}
+
+function buildProjectEntry({
+  id,
+  name,
+  projectName,
+  workspaceRoot = "",
+  projectAdapter = "generic",
+  createdAt = nowIso(),
+  updatedAt = nowIso(),
+} = {}) {
+  const resolvedName = safeText(name || projectName, "未分类项目");
+  return {
+    id: safeText(id, buildSafeProjectId(resolvedName)),
+    name: resolvedName,
+    workspaceRoot: safeText(workspaceRoot, ""),
+    projectAdapter: safeText(projectAdapter, "generic"),
+    createdAt,
+    updatedAt,
+  };
+}
+
 function buildLoopEntry({
   id,
   name,
@@ -832,15 +865,23 @@ function normalizeLoopContextPaths(startContextPaths = [], docs = null) {
 
 function buildDefaultRegistry(config, workspaceRoot) {
   const loopId = config.currentRunId || DEFAULT_LOOP_ID;
+  const projectName = config.projectName || "project";
   return {
     currentLoopId: loopId,
+    projects: [
+      buildProjectEntry({
+        name: projectName,
+        workspaceRoot: config.workspaceRoot || workspaceRoot,
+        projectAdapter: config.projectAdapter || config.projectName || "generic",
+      }),
+    ],
     loops: [
       buildLoopEntry({
         id: loopId,
         name: config.loopName || config.projectName || "default loop",
         threadTitle: config.threadTitle || config.loopName || "未绑定线程",
         branch: config.branch || "dev",
-        projectName: config.projectName || "project",
+        projectName,
         projectAdapter: config.projectAdapter || config.projectName || "generic",
         workspaceRoot: config.workspaceRoot || workspaceRoot,
         budgets: { ...config.budgets },
@@ -874,6 +915,42 @@ function isPlaceholderDefaultLoop(loop) {
   );
 }
 
+function normalizeRegistryProjects(registry) {
+  const byName = new Map();
+  const addProject = (source = {}) => {
+    const project = buildProjectEntry(source);
+    const key = project.name.toLocaleLowerCase();
+    const current = byName.get(key);
+    if (!current) {
+      byName.set(key, project);
+      return;
+    }
+
+    byName.set(key, {
+      ...current,
+      workspaceRoot: current.workspaceRoot || project.workspaceRoot,
+      projectAdapter: current.projectAdapter || project.projectAdapter,
+      updatedAt: current.updatedAt || project.updatedAt,
+    });
+  };
+
+  for (const project of Array.isArray(registry.projects) ? registry.projects : []) {
+    addProject(project);
+  }
+
+  for (const loop of Array.isArray(registry.loops) ? registry.loops : []) {
+    addProject({
+      name: loop.projectName || "未分类项目",
+      workspaceRoot: loop.workspaceRoot || "",
+      projectAdapter: loop.projectAdapter || "generic",
+      createdAt: loop.createdAt || nowIso(),
+      updatedAt: loop.updatedAt || nowIso(),
+    });
+  }
+
+  return Array.from(byName.values());
+}
+
 function pickRegistryCurrentLoop(registry) {
   const current =
     registry.loops.find((loop) => loop.id === registry.currentLoopId) ||
@@ -887,15 +964,24 @@ function pickRegistryCurrentLoop(registry) {
 
 function normalizeLoopRegistry(registry) {
   const selected = pickRegistryCurrentLoop(registry);
-  if (!selected || selected.id === registry.currentLoopId) {
+  const normalizedProjects = normalizeRegistryProjects(registry);
+  const projectsChanged =
+    JSON.stringify(Array.isArray(registry.projects) ? registry.projects : []) !==
+    JSON.stringify(normalizedProjects);
+
+  if (!projectsChanged && (!selected || selected.id === registry.currentLoopId)) {
     return registry;
   }
   return {
     ...registry,
-    currentLoopId: selected.id,
-    loops: registry.loops.map((loop) =>
-      loop.id === selected.id ? { ...loop, updatedAt: nowIso() } : loop,
-    ),
+    currentLoopId: selected?.id || registry.currentLoopId,
+    projects: normalizedProjects,
+    loops:
+      selected && selected.id !== registry.currentLoopId
+        ? registry.loops.map((loop) =>
+            loop.id === selected.id ? { ...loop, updatedAt: nowIso() } : loop,
+          )
+        : registry.loops,
   };
 }
 
@@ -968,8 +1054,24 @@ async function loadLoopRegistry(layout, config) {
 function summarizeLoopRegistry(registry) {
   const visibleLoops = registry.loops.filter((loop) => !isPlaceholderDefaultLoop(loop));
   const loops = visibleLoops.length ? visibleLoops : registry.loops;
+  const projectCounts = new Map();
+  for (const loop of loops) {
+    const projectName = loop.projectName || "未分类项目";
+    projectCounts.set(projectName, (projectCounts.get(projectName) || 0) + 1);
+  }
+
+  const projects = normalizeRegistryProjects(registry).map((project) => {
+    const taskCount = projectCounts.get(project.name) || 0;
+    return {
+      ...project,
+      taskCount,
+      isEmpty: taskCount === 0,
+    };
+  });
+
   return {
     currentLoopId: registry.currentLoopId,
+    projects,
     loops: loops.map((loop) => ({
       ...loop,
       threadBinding: undefined,
@@ -3727,6 +3829,51 @@ export async function listLoops(startDir = process.cwd()) {
   return summarizeLoopRegistry(registry);
 }
 
+export async function createProject(startDir = process.cwd(), payload = {}) {
+  const layout = await resolveProjectLayout(startDir);
+  const config = await readConfig(layout);
+  const { registry, registryPath } = await loadLoopRegistry(layout, config);
+  const projectName = safeText(payload.projectName || payload.name, "");
+  if (!projectName) {
+    throw new Error("projectName is required");
+  }
+
+  const normalizedProjects = normalizeRegistryProjects(registry);
+  const existingProject = normalizedProjects.find(
+    (project) => project.name.toLocaleLowerCase() === projectName.toLocaleLowerCase(),
+  );
+  if (existingProject) {
+    return {
+      ...summarizeLoopRegistry({
+        ...registry,
+        projects: normalizedProjects,
+      }),
+      createdProject: existingProject,
+      alreadyExists: true,
+    };
+  }
+
+  const nextProject = buildProjectEntry({
+    name: projectName,
+    workspaceRoot: payload.workspaceRoot || "",
+    projectAdapter: payload.projectAdapter || config.projectAdapter || "generic",
+  });
+  const nextRegistry = {
+    ...registry,
+    projects: [...normalizedProjects, nextProject],
+  };
+  await writeJson(registryPath, nextRegistry);
+
+  return {
+    ...summarizeLoopRegistry(nextRegistry),
+    createdProject: {
+      ...nextProject,
+      taskCount: 0,
+      isEmpty: true,
+    },
+  };
+}
+
 export async function createLoop(startDir = process.cwd(), payload = {}) {
   const layout = await resolveProjectLayout(startDir);
   const config = await readConfig(layout);
@@ -3784,6 +3931,11 @@ export async function createLoop(startDir = process.cwd(), payload = {}) {
 
   const nextRegistry = {
     ...registry,
+    projects: normalizeRegistryProjects({
+      ...registry,
+      projects: registry.projects || [],
+      loops: [...registry.loops, nextLoop],
+    }),
     loops: [...registry.loops, nextLoop],
   };
   await writeJson(registryPath, nextRegistry);

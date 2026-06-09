@@ -1,5 +1,6 @@
 import {
   createLoop,
+  createProject,
   deleteLoop,
   exportMobileView,
   exportLoopSummary,
@@ -136,6 +137,7 @@ export function buildHandler({
       renameLoop,
       listLoops,
       createLoop,
+      createProject,
       getLoopCreationAssistantState,
       goBackLoopCreationAssistant,
       restartLoopCreationAssistant,
@@ -366,6 +368,16 @@ export function buildHandler({
           response,
           200,
           await operations.createLoop(process.cwd(), body),
+        );
+        return;
+      }
+
+      if (request.method === "POST" && request.url === "/api/projects") {
+        const body = await readBody(request);
+        sendJson(
+          response,
+          200,
+          await operations.createProject(process.cwd(), body),
         );
         return;
       }

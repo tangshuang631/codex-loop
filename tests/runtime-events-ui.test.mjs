@@ -303,6 +303,41 @@ test("sidebar uses compact project navigation instead of task tab cards", async 
   assert.match(stylesSource, /\.sidebar-loop-name/);
 });
 
+test("sidebar groups tasks from persisted projects so empty projects remain visible", async () => {
+  const appSource = await fs.readFile("app/web/src/App.jsx", "utf8");
+  const sidebarStart = appSource.indexOf("<aside className={`workspace-sidebar");
+  const sidebarEnd = appSource.indexOf("</aside>", sidebarStart);
+  const sidebarSource = appSource.slice(sidebarStart, sidebarEnd);
+
+  assert.match(appSource, /function groupLoopsByProject\(loops = \[\], projects = \[\]\)/);
+  assert.match(appSource, /loopRegistry\.projects/);
+  assert.match(sidebarSource, /project\.isEmpty/);
+  assert.match(sidebarSource, /还没有任务/);
+});
+
+test("create project entry submits a real project before tasks are added", async () => {
+  const appSource = await fs.readFile("app/web/src/App.jsx", "utf8");
+
+  assert.match(appSource, /function ProjectCreationPanel/);
+  assert.match(appSource, /requestJson\("\/projects"/);
+  assert.match(appSource, /项目名称/);
+  assert.match(appSource, /创建项目/);
+});
+
+test("create task entry resets stale completed assistant state before opening", async () => {
+  const appSource = await fs.readFile("app/web/src/App.jsx", "utf8");
+  const openCreatePaneStart = appSource.indexOf("async function openCreatePane");
+  const openCreatePaneEnd = appSource.indexOf("async function handleDashboardAction", openCreatePaneStart);
+  const openCreatePaneSource = appSource.slice(openCreatePaneStart, openCreatePaneEnd);
+
+  assert.notEqual(openCreatePaneStart, -1);
+  assert.match(openCreatePaneSource, /nextCreationMode === "task"/);
+  assert.match(openCreatePaneSource, /requestJson\("\/loop-creation-assistant\/reset"/);
+  assert.match(openCreatePaneSource, /setAssistantAnswer\(""\)/);
+  assert.match(appSource, /onClick=\{\(\) => void openCreatePane\("task"\)\}/);
+  assert.match(appSource, /onClick=\{\(\) => void openCreatePane\("project"\)\}/);
+});
+
 test("dashboard avoids long thread ids stretching the mobile home header", async () => {
   const appSource = await fs.readFile("app/web/src/App.jsx", "utf8");
   const stylesSource = await fs.readFile("app/web/src/styles.css", "utf8");

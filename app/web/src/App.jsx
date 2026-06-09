@@ -88,15 +88,44 @@ function shortThreadId(threadId = "") {
   return `${value.slice(0, 8)}...${value.slice(-6)}`;
 }
 
-function groupLoopsByProject(loops = []) {
-  return loops.reduce((groups, loop) => {
-    const projectName = loop.projectName || "未分类项目";
-    if (!groups[projectName]) {
-      groups[projectName] = [];
+function groupLoopsByProject(loops = [], projects = []) {
+  const groupedProjects = [];
+  const byName = new Map();
+
+  const ensureProject = (project) => {
+    const name = formatValue(project?.name || project?.projectName, "未分类项目");
+    const key = name.toLocaleLowerCase();
+    if (!byName.has(key)) {
+      const nextProject = {
+        id: project?.id || key,
+        name,
+        workspaceRoot: project?.workspaceRoot || "",
+        isEmpty: Boolean(project?.isEmpty),
+        loops: [],
+      };
+      byName.set(key, nextProject);
+      groupedProjects.push(nextProject);
     }
-    groups[projectName].push(loop);
-    return groups;
-  }, {});
+    return byName.get(key);
+  };
+
+  for (const project of projects) {
+    ensureProject(project);
+  }
+
+  for (const loop of loops) {
+    const project = ensureProject({
+      name: loop.projectName || "未分类项目",
+      workspaceRoot: loop.workspaceRoot || "",
+    });
+    project.loops.push(loop);
+    project.isEmpty = false;
+  }
+
+  return groupedProjects.map((project) => ({
+    ...project,
+    isEmpty: project.loops.length === 0,
+  }));
 }
 function filterVisibleLoops(loops = []) {
   return loops.filter((loop) => {
@@ -2532,6 +2561,9 @@ function CreateWorkspaceView({
   assistantAnswer,
   setAssistantAnswer,
   submitting,
+  projectForm,
+  setProjectForm,
+  onCreateProject,
   onSubmit,
   onBack,
   onReset,
@@ -2550,17 +2582,71 @@ function CreateWorkspaceView({
         </p>
       </div>
 
-      <LoopCreationAssistantPane
-        assistantState={assistantState}
-        assistantAnswer={assistantAnswer}
-        setAssistantAnswer={setAssistantAnswer}
-        submitting={submitting}
-        onSubmit={onSubmit}
-        onBack={onBack}
-        onReset={onReset}
-        creationMode={creationMode}
-      />
+      {projectMode ? (
+        <ProjectCreationPanel
+          projectForm={projectForm}
+          setProjectForm={setProjectForm}
+          submitting={submitting}
+          onCreateProject={onCreateProject}
+        />
+      ) : (
+        <LoopCreationAssistantPane
+          assistantState={assistantState}
+          assistantAnswer={assistantAnswer}
+          setAssistantAnswer={setAssistantAnswer}
+          submitting={submitting}
+          onSubmit={onSubmit}
+          onBack={onBack}
+          onReset={onReset}
+          creationMode={creationMode}
+        />
+      )}
     </section>
+  );
+}
+
+function ProjectCreationPanel({
+  projectForm,
+  setProjectForm,
+  submitting,
+  onCreateProject,
+}) {
+  return (
+    <form className="sidebar-form project-creation-panel" onSubmit={onCreateProject}>
+      <h3>创建项目</h3>
+      <p className="sidebar-help">
+        项目用于收纳同一工作区下的多个任务。先创建项目，之后可以继续在这个项目下创建任务。
+      </p>
+      <label>
+        <span>项目名称</span>
+        <input
+          value={projectForm.projectName}
+          onChange={(event) =>
+            setProjectForm((current) => ({
+              ...current,
+              projectName: event.target.value,
+            }))
+          }
+          placeholder="例如 codex-loop"
+        />
+      </label>
+      <label>
+        <span>项目路径</span>
+        <input
+          value={projectForm.workspaceRoot}
+          onChange={(event) =>
+            setProjectForm((current) => ({
+              ...current,
+              workspaceRoot: event.target.value,
+            }))
+          }
+          placeholder="例如 E:\\2026\\codex-loop"
+        />
+      </label>
+      <button type="submit" className="primary-button" disabled={submitting || !projectForm.projectName.trim()}>
+        {submitting ? "正在创建" : "创建项目"}
+      </button>
+    </form>
   );
 }
 
@@ -2885,7 +2971,8 @@ function DesktopConsoleApp() {
   const [ollamaModels, setOllamaModels] = useState([]);
   const [assistantState, setAssistantState] = useState(null);
   const [assistantAnswer, setAssistantAnswer] = useState("");
-  const [loopRegistry, setLoopRegistry] = useState({ currentLoopId: "", loops: [] });
+  const [projectForm, setProjectForm] = useState({ projectName: "", workspaceRoot: "" });
+  const [loopRegistry, setLoopRegistry] = useState({ currentLoopId: "", projects: [], loops: [] });
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [uiError, setUiError] = useState("");
@@ -3195,8 +3282,29 @@ function DesktopConsoleApp() {
     }
   }
 
+  async function createProjectFromForm(event) {
+    event.preventDefault();
+    const projectName = formatValue(projectForm.projectName, "").trim();
+    const workspaceRoot = formatValue(projectForm.workspaceRoot, "").trim();
+    if (!projectName) {
+      return;
+    }
+
+    await withSubmit(async () => {
+      await requestJson("/projects", {
+        method: "POST",
+        body: JSON.stringify({
+          projectName,
+          workspaceRoot,
+        }),
+      });
+      setProjectForm({ projectName: "", workspaceRoot: "" });
+      setActiveSidebarPane("loops");
+    });
+  }
+
   const loopGroups = useMemo(
-    () => groupLoopsByProject(filterVisibleLoops(loopRegistry.loops || [])),
+    () => groupLoopsByProject(filterVisibleLoops(loopRegistry.loops || []), loopRegistry.projects || []),
     [loopRegistry],
   );
 
@@ -3271,10 +3379,21 @@ function DesktopConsoleApp() {
     pollStatus,
   });
 
-  function openCreatePane(nextCreationMode = "task") {
+  async function openCreatePane(nextCreationMode = "task") {
     setCreationMode(nextCreationMode);
     setActiveSidebarPane("create");
     setLoopMenuOpenId("");
+
+    if (nextCreationMode === "task") {
+      setAssistantState(null);
+      await withSubmit(async () => {
+        const nextAssistantState = await requestJson("/loop-creation-assistant/reset", {
+          method: "POST",
+        });
+        setAssistantState(nextAssistantState);
+        setAssistantAnswer("");
+      });
+    }
   }
 
   async function handleDashboardAction(actionId) {
@@ -3284,7 +3403,7 @@ function DesktopConsoleApp() {
     }
 
     if (actionId === "open-create") {
-      openCreatePane("task");
+      await openCreatePane("task");
       return;
     }
 
@@ -3334,7 +3453,7 @@ function DesktopConsoleApp() {
                 className={`sidebar-action-button ${
                   activeSidebarPane === "create" && creationMode === "project" ? "is-active" : ""
                 }`}
-                onClick={() => openCreatePane("project")}
+                onClick={() => void openCreatePane("project")}
               >
                 创建项目
               </button>
@@ -3343,7 +3462,7 @@ function DesktopConsoleApp() {
                 className={`sidebar-action-button ${
                   activeSidebarPane === "create" && creationMode === "task" ? "is-active" : ""
                 }`}
-                onClick={() => openCreatePane("task")}
+                onClick={() => void openCreatePane("task")}
               >
                 创建任务
               </button>
@@ -3355,7 +3474,9 @@ function DesktopConsoleApp() {
                 <span>{visibleLoops.length} 个任务</span>
               </div>
               <div className="sidebar-loop-groups">
-                {Object.entries(loopGroups).map(([projectName, loops]) => {
+                {loopGroups.map((project) => {
+                  const projectName = project.name;
+                  const loops = project.loops || [];
                   const collapsed = collapsedProjects[projectName];
                   return (
                     <div key={projectName} className="sidebar-group">
@@ -3379,6 +3500,9 @@ function DesktopConsoleApp() {
 
                       {!collapsed ? (
                         <div className="sidebar-loop-list">
+                          {project.isEmpty ? (
+                            <div className="sidebar-empty-project">还没有任务</div>
+                          ) : null}
                           {loops.map((loop) => {
                             const isActive = loop.id === (currentLoop?.id || loopRegistry.currentLoopId);
                             return (
@@ -3550,6 +3674,9 @@ function DesktopConsoleApp() {
             assistantAnswer={assistantAnswer}
             setAssistantAnswer={setAssistantAnswer}
             submitting={submitting}
+            projectForm={projectForm}
+            setProjectForm={setProjectForm}
+            onCreateProject={createProjectFromForm}
             onSubmit={() =>
               withSubmit(async () => {
                 await requestJson("/loop-creation-assistant/reply", {

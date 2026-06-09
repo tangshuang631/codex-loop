@@ -5,6 +5,7 @@ import path from "node:path";
 import os from "node:os";
 
 import {
+  createProject,
   createLoop,
   deleteLoop,
   exportLoopSummary,
@@ -3043,6 +3044,27 @@ test("listLoops seeds a generic default loop for the workspace", async () => {
   assert.equal(loops.loops[0].name, "demo");
   assert.equal(loops.loops[0].threadTitle, "未绑定线程");
   assert.equal(loops.loops[0].budgets.maxMinutes, 120);
+});
+
+test("createProject persists an empty project for sidebar task grouping", async () => {
+  const configRoot = await createWorkspace();
+  const workspaceRoot = path.join(configRoot, "empty-project");
+  await fs.mkdir(workspaceRoot, { recursive: true });
+
+  const result = await createProject(configRoot, {
+    projectName: "移动端监控",
+    workspaceRoot,
+  });
+  const loops = await listLoops(configRoot);
+  const registryPath = path.join(configRoot, "codex_loop", "settings", "loops.json");
+  const registry = JSON.parse(await fs.readFile(registryPath, "utf8"));
+  const project = loops.projects.find((item) => item.name === "移动端监控");
+
+  assert.equal(result.createdProject.name, "移动端监控");
+  assert.equal(project.workspaceRoot, workspaceRoot);
+  assert.equal(project.taskCount, 0);
+  assert.equal(project.isEmpty, true);
+  assert.equal(registry.projects.some((item) => item.name === "移动端监控"), true);
 });
 
 test("createLoop persists a new loop and selectLoop switches active config", async () => {

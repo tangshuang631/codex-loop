@@ -244,6 +244,13 @@ select {
   padding: 0 0 4px 10px;
 }
 
+.sidebar-empty-project {
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.5;
+  padding: 6px 8px;
+}
+
 .sidebar-loop-item {
   position: relative;
   display: grid;
