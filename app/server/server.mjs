@@ -67,6 +67,22 @@ async function readBody(request) {
   return JSON.parse(Buffer.concat(chunks).toString("utf8"));
 }
 
+function isMobileGuidanceWaitError(error) {
+  const message = error?.message || "";
+  return (
+    message.includes("Codex 正在处理当前轮") ||
+    message.includes("本地模型正在复盘")
+  );
+}
+
+function shouldDispatchMobileGuidanceOnce(snapshot) {
+  if (!snapshot?.state) {
+    return true;
+  }
+
+  return snapshot.state.mode !== "running" || snapshot.state.monitorOnly === true;
+}
+
 export function buildHandler({
   loopController = createLoopController(),
   operations = {
@@ -233,10 +249,41 @@ export function buildHandler({
           source: "mobile",
           deviceId: body.deviceId,
         });
+
+        let dispatch = "queued";
+        let dispatchResult = null;
+        let dispatchMessage = "已保存补充引导，会等 Codex 完成后合并。";
+
+        const latestSnapshot =
+          typeof operations.readLoopSnapshot === "function"
+            ? await operations.readLoopSnapshot(process.cwd())
+            : null;
+
+        if (shouldDispatchMobileGuidanceOnce(latestSnapshot)) {
+          try {
+            dispatchResult = await operations.sendPendingGuidanceOnce(process.cwd());
+            dispatch = "sent";
+            dispatchMessage = "已发送引导，正在等待 Codex 完成当前轮。";
+          } catch (error) {
+            if (!isMobileGuidanceWaitError(error)) {
+              throw error;
+            }
+            dispatchMessage =
+              error?.message ||
+              "已保存补充引导；当前不能发送，会等 Codex 可以接收下一轮时再处理。";
+          }
+        } else {
+          dispatchMessage =
+            "自动循环正在运行，已保存补充引导，会在下一轮安全时机合并。";
+        }
+
         sendJson(response, 200, {
           valid: true,
           device: verification.device,
+          dispatch,
+          message: dispatchMessage,
           result,
+          dispatchResult,
         });
         return;
       }

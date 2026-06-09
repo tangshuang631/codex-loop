@@ -408,3 +408,16 @@ test("mobile route renders a protected task app with durable pairing credentials
   assert.match(stylesSource, /\.mobile-task-composer/);
   assert.match(stylesSource, /\.mobile-task-pairing/);
 });
+
+test("mobile guidance uses server dispatch result instead of a fixed saved message", async () => {
+  const appSource = await fs.readFile("app/web/src/App.jsx", "utf8");
+  const mobileStart = appSource.indexOf("function MobileTaskApp");
+  const mobileEnd = appSource.indexOf("function DesktopConsoleApp", mobileStart);
+  const mobileSource = appSource.slice(mobileStart, mobileEnd);
+
+  assert.notEqual(mobileStart, -1);
+  assert.match(mobileSource, /const guidanceResult = await requestJson\("\/mobile\/guidance"/);
+  assert.match(mobileSource, /guidanceResult\?\.message/);
+  assert.match(mobileSource, /guidanceResult\?\.dispatch === "sent"/);
+  assert.doesNotMatch(mobileSource, /setStatusText\("已保存补充引导，会等 Codex 完成后合并。"\)/);
+});

@@ -1252,7 +1252,7 @@ function MobileTaskApp() {
     setSubmitting(true);
     setErrorText("");
     try {
-      await requestJson("/mobile/guidance", {
+      const guidanceResult = await requestJson("/mobile/guidance", {
         method: "POST",
         body: JSON.stringify({
           deviceId: mobileDevice?.deviceId,
@@ -1261,7 +1261,12 @@ function MobileTaskApp() {
         }),
       });
       setGuidanceText("");
-      setStatusText("已保存补充引导，会等 Codex 完成后合并。");
+      setStatusText(
+        guidanceResult?.message ||
+          (guidanceResult?.dispatch === "sent"
+            ? "已发送引导，正在等待 Codex 完成当前轮。"
+            : "已保存补充引导，会等 Codex 完成后合并。"),
+      );
       await loadProtectedMobileView({ silent: true });
     } catch (error) {
       setErrorText(error?.message || "发送引导失败，请稍后重试。");

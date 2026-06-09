@@ -332,11 +332,16 @@ test("handler rejects paired mobile view when device credentials are invalid", a
 test("handler lets paired mobile devices save next-turn guidance", async () => {
   let verificationPayload = null;
   let savedPayload = null;
+  let sentOnce = false;
   const handler = buildHandler({
     operations: {
       savePendingGuidance: async (_cwd, body) => {
         savedPayload = body;
         return { thread: { pendingUserGuidance: body.text } };
+      },
+      sendPendingGuidanceOnce: async () => {
+        sentOnce = true;
+        return { thread: { continuationStatus: "dispatching" } };
       },
       verifyPairedDevice: async (_cwd, body) => {
         verificationPayload = body;
@@ -384,7 +389,186 @@ test("handler lets paired mobile devices save next-turn guidance", async () => {
   assert.equal(response.statusCode, 200);
   assert.equal(verificationPayload.deviceToken, "stored-token");
   assert.equal(savedPayload.text, "下一轮先检查移动端历史记录是否清晰。");
+  assert.equal(sentOnce, true);
   assert.match(chunks.join(""), /移动端历史记录/);
+  assert.match(chunks.join(""), /"dispatch":"sent"/);
+});
+
+test("handler keeps mobile guidance queued when Codex is still working", async () => {
+  let savedPayload = null;
+  let sendAttempts = 0;
+  const handler = buildHandler({
+    operations: {
+      savePendingGuidance: async (_cwd, body) => {
+        savedPayload = body;
+        return { thread: { pendingUserGuidance: body.text } };
+      },
+      sendPendingGuidanceOnce: async () => {
+        sendAttempts += 1;
+        throw new Error("Codex 正在处理当前轮，请等完成后再发送引导。");
+      },
+      verifyPairedDevice: async (_cwd, body) => ({
+        valid: true,
+        device: {
+          id: body.deviceId,
+          name: "iPhone",
+        },
+      }),
+    },
+  });
+
+  const chunks = [];
+  const response = {
+    writeHead(statusCode, headers) {
+      this.statusCode = statusCode;
+      this.headers = headers;
+    },
+    end(text) {
+      chunks.push(text);
+    },
+  };
+
+  await handler(
+    {
+      method: "POST",
+      url: "/api/mobile/guidance",
+      [Symbol.asyncIterator]: async function* iterator() {
+        yield Buffer.from(
+          JSON.stringify({
+            deviceId: "device-1",
+            deviceToken: "stored-token",
+            text: "等 Codex 完成后补一轮移动端验收。",
+          }),
+          "utf8",
+        );
+      },
+    },
+    response,
+  );
+
+  assert.equal(response.statusCode, 200);
+  assert.equal(sendAttempts, 1);
+  assert.equal(savedPayload.text, "等 Codex 完成后补一轮移动端验收。");
+  assert.match(chunks.join(""), /"dispatch":"queued"/);
+  assert.match(chunks.join(""), /Codex 正在处理当前轮/);
+});
+
+test("handler keeps mobile guidance queued during automatic loop runs", async () => {
+  let sendAttempts = 0;
+  const handler = buildHandler({
+    operations: {
+      readLoopSnapshot: async () => ({
+        state: {
+          mode: "running",
+          monitorOnly: false,
+        },
+        thread: {
+          continuationStatus: "idle",
+        },
+      }),
+      savePendingGuidance: async (_cwd, body) => ({
+        thread: { pendingUserGuidance: body.text },
+      }),
+      sendPendingGuidanceOnce: async () => {
+        sendAttempts += 1;
+        return {};
+      },
+      verifyPairedDevice: async (_cwd, body) => ({
+        valid: true,
+        device: {
+          id: body.deviceId,
+          name: "iPhone",
+        },
+      }),
+    },
+  });
+
+  const chunks = [];
+  const response = {
+    writeHead(statusCode, headers) {
+      this.statusCode = statusCode;
+      this.headers = headers;
+    },
+    end(text) {
+      chunks.push(text);
+    },
+  };
+
+  await handler(
+    {
+      method: "POST",
+      url: "/api/mobile/guidance",
+      [Symbol.asyncIterator]: async function* iterator() {
+        yield Buffer.from(
+          JSON.stringify({
+            deviceId: "device-1",
+            deviceToken: "stored-token",
+            text: "下一轮把用户补充合并进去。",
+          }),
+          "utf8",
+        );
+      },
+    },
+    response,
+  );
+
+  assert.equal(response.statusCode, 200);
+  assert.equal(sendAttempts, 0);
+  assert.match(chunks.join(""), /"dispatch":"queued"/);
+  assert.match(chunks.join(""), /自动循环正在运行/);
+});
+
+test("handler reports mobile guidance dispatch failures instead of pretending they are queued", async () => {
+  const handler = buildHandler({
+    operations: {
+      savePendingGuidance: async (_cwd, body) => ({
+        thread: { pendingUserGuidance: body.text },
+      }),
+      sendPendingGuidanceOnce: async () => {
+        throw new Error("向 Codex 线程发送引导失败，请检查线程绑定。");
+      },
+      verifyPairedDevice: async (_cwd, body) => ({
+        valid: true,
+        device: {
+          id: body.deviceId,
+          name: "iPhone",
+        },
+      }),
+    },
+  });
+
+  const chunks = [];
+  const response = {
+    writeHead(statusCode, headers) {
+      this.statusCode = statusCode;
+      this.headers = headers;
+    },
+    end(text) {
+      chunks.push(text);
+    },
+  };
+
+  await handler(
+    {
+      method: "POST",
+      url: "/api/mobile/guidance",
+      [Symbol.asyncIterator]: async function* iterator() {
+        yield Buffer.from(
+          JSON.stringify({
+            deviceId: "device-1",
+            deviceToken: "stored-token",
+            text: "请继续推进核心链路。",
+          }),
+          "utf8",
+        );
+      },
+    },
+    response,
+  );
+
+  assert.equal(response.statusCode, 500);
+  assert.match(chunks.join(""), /向 Codex 线程发送引导失败/);
+  assert.doesNotMatch(chunks.join(""), /"dispatch":"queued"/);
 });
 
 test("handler rejects mobile guidance when device credentials are invalid", async () => {
