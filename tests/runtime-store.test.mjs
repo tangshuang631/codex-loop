@@ -1579,9 +1579,13 @@ test("sendPendingGuidanceOnce sends queued guidance from monitor mode without st
   assert.match(dispatchedPrompt, /真实用户角度/);
   assert.equal(snapshot.state.mode, "running");
   assert.equal(snapshot.state.monitorOnly, true);
+  assert.match(snapshot.state.recentSummary, /监控模式|只推进一次|不会启动自动循环/);
   assert.equal(snapshot.thread.pendingUserGuidance, "");
   assert.equal(snapshot.thread.continuationStatus, "dispatching");
   assert.equal(snapshot.thread.latestEventType, "codex_followup_sent_waiting");
+  assert.match(snapshot.thread.latestSummary, /监控模式|只发送这一条|不会开启自动循环/);
+  assert.equal(snapshot.runtimeEvents[0].type, "codex_followup_sent_waiting");
+  assert.match(snapshot.runtimeEvents[0].detail, /监控模式|只发送这一条|不会开启自动循环/);
 });
 
 test("savePendingGuidance appends multiple user notes instead of replacing earlier guidance", async () => {

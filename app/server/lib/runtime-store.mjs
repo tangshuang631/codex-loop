@@ -279,6 +279,7 @@ function readableRuntimeEventTitle(type, event = {}) {
     heartbeat: "已同步进展",
     pending_guidance_saved: "已记录下一轮补充",
     pending_guidance_cleared: "已清空补充引导",
+    monitor_guidance_send_requested: "监控模式发送引导",
     codex_followup_dispatching: "正在发送下一轮指令",
     codex_followup_dispatched: "正在等待 Codex 回复",
     codex_followup_sent_waiting: "指令已送达，等待 Codex",
@@ -517,6 +518,10 @@ async function markDispatchWaiting(
     promptGenerationWarning = "",
   },
 ) {
+  const monitorOnlyDispatch = Boolean(snapshot.state.monitorOnly);
+  const dispatchingSummary = monitorOnlyDispatch
+    ? "监控模式正在发送这条引导；只发送这一条，不会开启自动循环。"
+    : "正在通过 Codex 桌面端原生链路发送指令，等待确认送达。";
   const dispatchingThread = await persistThreadMirror(
     snapshot.paths.threadPath,
     snapshot.thread,
@@ -528,7 +533,7 @@ async function markDispatchWaiting(
       lastDispatchPrompt: prompt,
       lastContinuationError: promptGenerationError,
       promptGenerationWarning,
-      latestSummary: "正在通过 Codex 桌面端原生链路发送指令，等待确认送达。",
+      latestSummary: dispatchingSummary,
       latestEventType: "codex_followup_dispatching",
       lastUpdatedAt: dispatchAt,
     },
@@ -547,6 +552,7 @@ async function markDispatchWaiting(
     promptGenerator,
     promptGenerationError,
     promptGenerationWarning,
+    summary: dispatchingSummary,
     promptPreview: buildPromptPreview(prompt),
   });
   await appendTranscriptEntry(snapshot.paths.transcriptPath, {
@@ -554,7 +560,8 @@ async function markDispatchWaiting(
     activeTask: snapshot.state.activeTask,
     note: "codex-loop 正在发送指令",
     summary:
-      "发送目标：" +
+      dispatchingSummary +
+      " 发送目标：" +
       (snapshot.thread.threadTitle || snapshot.thread.threadId) +
       "。指令预览：" +
       buildPromptPreview(prompt),
@@ -578,6 +585,10 @@ async function markDispatchSentWithoutCompletion(
     refreshed.thread,
     consumedPendingGuidance,
   );
+  const monitorOnlyDispatch = Boolean(refreshed.state.monitorOnly);
+  const sentSummary = monitorOnlyDispatch
+    ? "监控模式引导已送达绑定线程，正在等待 Codex 完成这一轮；只发送这一条，不会开启自动循环。"
+    : "消息已送达绑定线程，正在等待 Codex 完成这一轮回复。";
   const sentThread = await persistThreadMirror(
     refreshed.paths.threadPath,
     refreshed.thread,
@@ -588,7 +599,7 @@ async function markDispatchSentWithoutCompletion(
       ...nextPendingGuidance,
       lastContinuationError: promptGenerationError,
       promptGenerationWarning,
-      latestSummary: "消息已送达绑定线程，正在等待 Codex 完成这一轮回复。",
+      latestSummary: sentSummary,
       latestEventType: "codex_followup_sent_waiting",
       lastUpdatedAt: sentAt,
     },
@@ -606,12 +617,15 @@ async function markDispatchSentWithoutCompletion(
     promptGenerator,
     promptGenerationError,
     promptGenerationWarning,
+    summary: sentSummary,
   });
   await appendTranscriptEntry(refreshed.paths.transcriptPath, {
     at: sentAt,
     activeTask: refreshed.state.activeTask,
     note: "等待 Codex 回复",
-    summary: "已确认目标线程收到本次指令，但这一轮还没有可同步的回复内容。",
+    summary: monitorOnlyDispatch
+      ? "已确认目标线程收到这条监控模式引导；只发送这一条，不会开启自动循环。"
+      : "已确认目标线程收到本次指令，但这一轮还没有可同步的回复内容。",
     mode: refreshed.state.mode,
   });
   return readLoopSnapshot(startDir);
