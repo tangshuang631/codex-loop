@@ -356,7 +356,7 @@ test("create task view does not show previously created tasks as the creation en
   assert.match(workspaceSource, /setActiveSidebarPane\("loops"\)/);
 });
 
-test("create task mode hides historical task navigation and keeps creation entry available", async () => {
+test("create pane hides historical task navigation and keeps creation entry available", async () => {
   const appSource = await fs.readFile("app/web/src/App.jsx", "utf8");
   const sidebarStart = appSource.indexOf("<aside className={`workspace-sidebar");
   const sidebarEnd = appSource.indexOf("</aside>", sidebarStart);
@@ -366,11 +366,14 @@ test("create task mode hides historical task navigation and keeps creation entry
 
   assert.notEqual(sidebarStart, -1);
   assert.notEqual(collapsedStart, -1);
-  assert.match(appSource, /const showingTaskCreation/);
-  assert.match(sidebarSource, /\{!showingTaskCreation \? \(/);
+  assert.match(appSource, /const showingCreationPane\s*=\s*activeSidebarPane === "create"/);
+  assert.match(sidebarSource, /\{!showingCreationPane \? \(/);
   assert.match(sidebarSource, /创建新任务/);
+  assert.match(collapsedSource, /\{!showingCreationPane \? \(\s*<>\s*\{visibleLoops\.map/);
   assert.match(collapsedSource, /openCreatePane\("project"\)/);
   assert.match(collapsedSource, /openCreatePane\("task"\)/);
+  assert.match(collapsedSource, />项目</);
+  assert.match(collapsedSource, />任务</);
 });
 
 test("dashboard avoids long thread ids stretching the mobile home header", async () => {

@@ -3396,7 +3396,7 @@ function DesktopConsoleApp() {
     mobileView,
     pollStatus,
   });
-  const showingTaskCreation = activeSidebarPane === "create" && creationMode === "task";
+  const showingCreationPane = activeSidebarPane === "create";
 
   async function openCreatePane(nextCreationMode = "task") {
     setCreationMode(nextCreationMode);
@@ -3487,7 +3487,7 @@ function DesktopConsoleApp() {
               </button>
             </div>
 
-            {!showingTaskCreation ? (
+            {!showingCreationPane ? (
               <div className="sidebar-projects" aria-label="项目任务导航">
                 <div className="sidebar-projects-head">
                   <span>项目</span>
@@ -3615,8 +3615,8 @@ function DesktopConsoleApp() {
               </div>
             ) : (
               <div className="sidebar-create-focus">
-                <strong>创建新任务</strong>
-                <p>这里不会展示已经创建的任务。历史任务在创建完成后回到项目列表查看。</p>
+                <strong>{creationMode === "project" ? "创建新项目" : "创建新任务"}</strong>
+                <p>这里不会展示已经创建的任务。创建完成后再回到项目列表查看。</p>
               </div>
             )}
 
@@ -3656,7 +3656,7 @@ function DesktopConsoleApp() {
               onClick={() => void openCreatePane("project")}
               title="创建项目"
             >
-              <span>项</span>
+              <span>项目</span>
               <span className="mobile-only-label">创建项目</span>
             </button>
             <button
@@ -3667,29 +3667,33 @@ function DesktopConsoleApp() {
               onClick={() => void openCreatePane("task")}
               title="创建任务"
             >
-              <span>新</span>
+              <span>任务</span>
               <span className="mobile-only-label">创建任务</span>
             </button>
-            {visibleLoops.map((loop) => (
-              <button
-                key={loop.id}
-                type="button"
-                className={`collapsed-loop-pill ${loop.id === currentLoop?.id ? "is-active" : ""}`}
-                onClick={() =>
-                  withSubmit(async () => {
-                    setSelectedLoopId(loop.id);
-                    await requestJson("/loops/select", {
-                      method: "POST",
-                      body: JSON.stringify({ loopId: loop.id }),
-                    });
-                  })
-                }
-                title={loop.name}
-              >
-                <span>{loop.name.slice(0, 2)}</span>
-                <span className="mobile-only-label">{loop.name}</span>
-              </button>
-            ))}
+            {!showingCreationPane ? (
+              <>
+                {visibleLoops.map((loop) => (
+                  <button
+                    key={loop.id}
+                    type="button"
+                    className={`collapsed-loop-pill ${loop.id === currentLoop?.id ? "is-active" : ""}`}
+                    onClick={() =>
+                      withSubmit(async () => {
+                        setSelectedLoopId(loop.id);
+                        await requestJson("/loops/select", {
+                          method: "POST",
+                          body: JSON.stringify({ loopId: loop.id }),
+                        });
+                      })
+                    }
+                    title={loop.name}
+                  >
+                    <span>{loop.name.slice(0, 2)}</span>
+                    <span className="mobile-only-label">{loop.name}</span>
+                  </button>
+                ))}
+              </>
+            ) : null}
             <button
               type="button"
               className={`collapsed-loop-pill ${activeSidebarPane === "help" ? "is-active" : ""}`}
