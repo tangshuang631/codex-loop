@@ -237,6 +237,21 @@ test("dashboard can create a reusable mobile app pairing session from the mobile
   assert.match(stylesSource, /\.mobile-pairing-code/);
 });
 
+test("dashboard lets users revoke paired phones and see pairing audit hints", async () => {
+  const appSource = await fs.readFile("app/web/src/App.jsx", "utf8");
+  const stylesSource = await fs.readFile("app/web/src/styles.css", "utf8");
+
+  assert.match(appSource, /async function revokePairedDevice/);
+  assert.match(appSource, /requestJson\("\/device-pairing\/device",\s*\{\s*method:\s*"DELETE"/);
+  assert.match(appSource, /devicePairing\.devices/);
+  assert.match(appSource, /devicePairing\.auditEvents/);
+  assert.match(appSource, /撤销绑定/);
+  assert.match(appSource, /最近绑定记录/);
+  assert.match(appSource, /onRevokePairedDevice=\{revokePairedDevice\}/);
+  assert.match(stylesSource, /\.mobile-pairing-devices/);
+  assert.match(stylesSource, /\.mobile-pairing-audit/);
+});
+
 test("dashboard labels default ollama auto mode without turning it into strict mode", async () => {
   const appSource = await fs.readFile("app/web/src/App.jsx", "utf8");
 

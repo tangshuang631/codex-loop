@@ -8,6 +8,7 @@ import {
   confirmDevicePairing,
   createDevicePairingSession,
   readDevicePairingStatus,
+  revokePairedDevice,
   verifyPairedDevice,
 } from "../app/server/lib/runtime-governance/device-pairing.mjs";
 
@@ -127,4 +128,56 @@ test("device pairing rejects expired or mismatched scan confirmations", async ()
       }),
     /已过期|重新扫码/,
   );
+});
+
+test("device pairing can revoke a trusted phone and keeps an audit trail", async () => {
+  const configRoot = await createWorkspace();
+  const session = await createDevicePairingSession(
+    configRoot,
+    {},
+    {
+      now: () => new Date("2026-06-09T07:00:00.000Z"),
+      randomToken: () => "revoke-random",
+    },
+  );
+  const paired = await confirmDevicePairing(
+    configRoot,
+    {
+      sessionId: session.sessionId,
+      pairingCode: session.pairingCode,
+      deviceName: "产品经理手机",
+    },
+    {
+      now: () => new Date("2026-06-09T07:01:00.000Z"),
+      randomToken: () => "revoke-device-token",
+    },
+  );
+
+  const revoked = await revokePairedDevice(
+    configRoot,
+    {
+      deviceId: paired.device.id,
+      reason: "手机丢失",
+    },
+    {
+      now: () => new Date("2026-06-09T07:05:00.000Z"),
+    },
+  );
+
+  assert.equal(revoked.revoked, true);
+  assert.equal(revoked.device.id, paired.device.id);
+  assert.match(revoked.summary, /已撤销|手机/);
+
+  const verified = await verifyPairedDevice(configRoot, {
+    deviceId: paired.device.id,
+    deviceToken: paired.deviceToken,
+  });
+  assert.equal(verified.valid, false);
+  assert.match(verified.reason, /重新扫码|失效/);
+
+  const status = await readDevicePairingStatus(configRoot);
+  assert.equal(status.pairedDeviceCount, 0);
+  assert.equal(status.hasReusablePairing, false);
+  assert.equal(status.auditEvents.some((event) => event.type === "device_revoked"), true);
+  assert.equal(status.auditEvents.some((event) => event.reason === "手机丢失"), true);
 });

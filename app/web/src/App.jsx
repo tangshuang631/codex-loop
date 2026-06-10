@@ -748,6 +748,7 @@ function MobileAccessFold({
   pairingLoading,
   pairingError,
   onCreatePairingSession,
+  onRevokePairedDevice,
 }) {
   const [pairingQrDataUrl, setPairingQrDataUrl] = useState("");
   const mobileUrl = remoteAccessStatus?.url || remoteAccessStatus?.publicBaseUrl || launcherWebUrl || "";
@@ -775,6 +776,10 @@ function MobileAccessFold({
     remoteAccessStatus?.pairingAction ||
     devicePairing.nextAction ||
     "生成扫码绑定后，移动端 App 可以长期访问这台电脑。";
+  const pairedDevices = Array.isArray(devicePairing.devices) ? devicePairing.devices : [];
+  const pairingAuditEvents = Array.isArray(devicePairing.auditEvents)
+    ? devicePairing.auditEvents.slice(-3).reverse()
+    : [];
 
   useEffect(() => {
     let cancelled = false;
@@ -859,6 +864,38 @@ function MobileAccessFold({
         <p>{pairingAction}</p>
         <p>长期绑定后，codex-loop 重启后不用重复扫码。</p>
         {pairingError ? <p className="mobile-access-warning">{pairingError}</p> : null}
+        {pairedDevices.length ? (
+          <div className="mobile-pairing-devices">
+            {pairedDevices.map((device) => (
+              <div className="mobile-pairing-device" key={device.id}>
+                <div>
+                  <strong>{device.name || "已绑定手机"}</strong>
+                  <p>最近连接 {formatTime(device.lastSeenAt || device.pairedAt)}</p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => onRevokePairedDevice(device)}
+                >
+                  撤销绑定
+                </button>
+              </div>
+            ))}
+          </div>
+        ) : null}
+        {pairingAuditEvents.length ? (
+          <details className="mobile-pairing-audit">
+            <summary>最近绑定记录</summary>
+            {pairingAuditEvents.map((event, index) => (
+              <p key={`${event.type}-${event.deviceId}-${event.at}-${index}`}>
+                {event.type === "device_revoked" ? "撤销" : event.type === "device_paired" ? "绑定" : "验证"}
+                {" · "}
+                {event.deviceName || event.deviceId || "手机"}
+                {" · "}
+                {formatTime(event.at)}
+              </p>
+            ))}
+          </details>
+        ) : null}
         {pairingSession?.pairingCode ? (
           <div className="mobile-pairing-session">
             <div className="mobile-pairing-code">
@@ -2860,6 +2897,7 @@ function DashboardHome({
   devicePairingLoading,
   devicePairingError,
   onCreateDevicePairingSession,
+  onRevokePairedDevice,
 }) {
   const projectTitle = formatValue(
     currentLoop?.projectName || snapshot?.config?.projectName,
@@ -3022,6 +3060,7 @@ function DashboardHome({
             pairingLoading={devicePairingLoading}
             pairingError={devicePairingError}
             onCreatePairingSession={onCreateDevicePairingSession}
+            onRevokePairedDevice={onRevokePairedDevice}
           />
         </div>
       </section>
@@ -3424,6 +3463,28 @@ function DesktopConsoleApp() {
     } finally {
       setDevicePairingLoading(false);
     }
+  }
+
+  async function revokePairedDevice(device) {
+    const deviceName = device?.name || "这台手机";
+    const confirmed = window.confirm(
+      `确认撤销 ${deviceName} 的长期绑定吗？撤销后这台手机需要重新扫码才能访问。`,
+    );
+    if (!confirmed) {
+      return;
+    }
+
+    setDevicePairingError("");
+    await withSubmit(async () => {
+      await requestJson("/device-pairing/device", {
+        method: "DELETE",
+        body: JSON.stringify({
+          deviceId: device?.id,
+          reason: "用户在控制台撤销绑定",
+        }),
+      });
+      setDevicePairingSession(null);
+    });
   }
 
   async function createProjectFromForm(event) {
@@ -3968,6 +4029,7 @@ function DesktopConsoleApp() {
             devicePairingLoading={devicePairingLoading}
             devicePairingError={devicePairingError}
             onCreateDevicePairingSession={createDevicePairingSession}
+            onRevokePairedDevice={revokePairedDevice}
           />
         ) : null}
 

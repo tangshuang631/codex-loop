@@ -1014,6 +1014,70 @@ test("handler dispatches reusable device pairing verification route", async () =
   assert.match(chunks.join(""), /"name":"iPhone"/);
 });
 
+test("handler dispatches device pairing revoke route for trusted phone governance", async () => {
+  let revokePayload = null;
+  const handler = buildHandler({
+    operations: {
+      readLoopSnapshot: async () => ({}),
+      exportLoopSummary: async () => ({}),
+      exportMobileView: async () => ({}),
+      readLauncherStatus: async () => ({}),
+      readRemoteAccessStatus: async () => ({}),
+      readAutomationStatus: async () => ({}),
+      revokePairedDevice: async (_cwd, body) => {
+        revokePayload = body;
+        return {
+          revoked: true,
+          device: { id: body.deviceId, name: "iPhone" },
+          summary: "已撤销 iPhone 的长期绑定。",
+        };
+      },
+      startRun: async () => ({}),
+      renameLoop: async () => ({}),
+      requestGracefulStop: async () => ({}),
+      updateBudgets: async () => ({}),
+      saveThreadBinding: async () => ({}),
+      syncCodexThreadMirror: async () => ({}),
+      recordHeartbeat: async () => ({}),
+      recordError: async () => ({}),
+      saveUserOverrides: async () => ({}),
+    },
+  });
+
+  const chunks = [];
+  const response = {
+    writeHead(statusCode) {
+      this.statusCode = statusCode;
+    },
+    end(text) {
+      chunks.push(text);
+    },
+  };
+
+  await handler(
+    {
+      method: "DELETE",
+      url: "/api/device-pairing/device",
+      [Symbol.asyncIterator]: async function* iterator() {
+        yield Buffer.from(
+          JSON.stringify({
+            deviceId: "device-1",
+            reason: "手机丢失",
+          }),
+          "utf8",
+        );
+      },
+    },
+    response,
+  );
+
+  assert.equal(response.statusCode, 200);
+  assert.equal(revokePayload.deviceId, "device-1");
+  assert.equal(revokePayload.reason, "手机丢失");
+  assert.match(chunks.join(""), /"revoked":true/);
+  assert.match(chunks.join(""), /已撤销/);
+});
+
 test("handler dispatches ollama model list route", async () => {
   const handler = buildHandler({
     operations: {

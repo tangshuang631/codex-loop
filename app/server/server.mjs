@@ -35,6 +35,7 @@ import {
   confirmDevicePairing,
   createDevicePairingSession,
   readDevicePairingStatus,
+  revokePairedDevice,
   verifyPairedDevice,
 } from "./lib/runtime-governance/device-pairing.mjs";
 import { listOllamaModels as defaultListOllamaModels } from "./lib/ollama-model-store.mjs";
@@ -107,6 +108,7 @@ export function buildHandler({
       readDevicePairingStatus,
       createDevicePairingSession,
       confirmDevicePairing,
+      revokePairedDevice,
       verifyPairedDevice,
       readAutomationStatus: async (startDir = process.cwd()) => {
         const snapshot = await readLoopSnapshot(startDir);
@@ -365,6 +367,19 @@ export function buildHandler({
           response,
           200,
           await operations.verifyPairedDevice(process.cwd(), body),
+        );
+        return;
+      }
+
+      if (
+        request.method === "DELETE" &&
+        request.url === "/api/device-pairing/device"
+      ) {
+        const body = await readBody(request);
+        sendJson(
+          response,
+          200,
+          await operations.revokePairedDevice(process.cwd(), body),
         );
         return;
       }

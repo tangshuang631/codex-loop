@@ -1502,6 +1502,58 @@ select {
   border-top: 1px solid #eeeeea;
 }
 
+.mobile-pairing-devices,
+.mobile-pairing-audit {
+  display: grid;
+  gap: 0;
+  border-top: 1px solid #eeeeea;
+}
+
+.mobile-pairing-device {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: center;
+  padding: 9px 0;
+  border-bottom: 1px solid #f2f1ec;
+}
+
+.mobile-pairing-device strong {
+  color: var(--text);
+  font-size: 12px;
+}
+
+.mobile-pairing-device p,
+.mobile-pairing-audit p {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.mobile-pairing-device button {
+  border: 0;
+  border-radius: 999px;
+  padding: 6px 10px;
+  color: var(--danger);
+  background: #fff2ef;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.mobile-pairing-audit {
+  padding-top: 8px;
+}
+
+.mobile-pairing-audit summary {
+  color: var(--muted);
+  cursor: pointer;
+  font-size: 12px;
+  list-style: none;
+}
+
+.mobile-pairing-audit summary::-webkit-details-marker {
+  display: none;
+}
+
 .mobile-pairing-code,
 .mobile-pairing-qr {
   grid-template-columns: 56px minmax(0, 1fr) auto;

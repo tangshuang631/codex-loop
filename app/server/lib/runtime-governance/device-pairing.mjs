@@ -49,6 +49,7 @@ function createEmptyStore() {
     version: 1,
     activeSessions: [],
     pairedDevices: [],
+    auditEvents: [],
     updatedAt: "",
   };
 }
@@ -90,6 +91,7 @@ function withoutExpiredSessions(sessions = [], at = new Date()) {
 function summarizeStatus(store = {}) {
   const devices = Array.isArray(store.pairedDevices) ? store.pairedDevices : [];
   const activeSessions = Array.isArray(store.activeSessions) ? store.activeSessions : [];
+  const auditEvents = Array.isArray(store.auditEvents) ? store.auditEvents : [];
   return {
     hasReusablePairing: devices.length > 0,
     pairedDeviceCount: devices.length,
@@ -99,6 +101,13 @@ function summarizeStatus(store = {}) {
       name: device.name,
       pairedAt: device.pairedAt,
       lastSeenAt: device.lastSeenAt || "",
+    })),
+    auditEvents: auditEvents.slice(-20).map((event) => ({
+      type: event.type,
+      deviceId: event.deviceId || "",
+      deviceName: event.deviceName || "",
+      reason: event.reason || "",
+      at: event.at || "",
     })),
     summary: devices.length
       ? `已绑定 ${devices.length} 台手机，codex-loop 重启后可以自动重连。`
@@ -209,11 +218,21 @@ export async function confirmDevicePairing(
     ...(store.pairedDevices || []).filter((item) => item.id !== deviceId),
     device,
   ];
+  const auditEvents = [
+    ...(Array.isArray(store.auditEvents) ? store.auditEvents : []),
+    {
+      type: "device_paired",
+      deviceId: device.id,
+      deviceName: device.name,
+      at: at.toISOString(),
+    },
+  ];
 
   await writeStore(pairingPath, {
     ...store,
     activeSessions: activeSessions.filter((item) => item.id !== sessionId),
     pairedDevices,
+    auditEvents,
     updatedAt: at.toISOString(),
   });
 
@@ -261,6 +280,15 @@ export async function verifyPairedDevice(
     pairedDevices: pairedDevices.map((item) =>
       item.id === device.id ? nextDevice : item,
     ),
+    auditEvents: [
+      ...(Array.isArray(store.auditEvents) ? store.auditEvents : []),
+      {
+        type: "device_verified",
+        deviceId: nextDevice.id,
+        deviceName: nextDevice.name,
+        at: at.toISOString(),
+      },
+    ],
     updatedAt: at.toISOString(),
   });
 
@@ -272,5 +300,53 @@ export async function verifyPairedDevice(
       pairedAt: nextDevice.pairedAt,
       lastSeenAt: nextDevice.lastSeenAt,
     },
+  };
+}
+
+export async function revokePairedDevice(
+  startDir = process.cwd(),
+  payload = {},
+  tools = {},
+) {
+  const at = nowDate(tools);
+  const { pairingPath, store } = await readStore(startDir);
+  const deviceId = safeText(payload.deviceId, "");
+  const pairedDevices = Array.isArray(store.pairedDevices) ? store.pairedDevices : [];
+  const device = pairedDevices.find((item) => item.id === deviceId);
+
+  if (!device) {
+    return {
+      revoked: false,
+      reason: "没有找到这台已绑定手机，可能已经撤销或需要重新扫码。",
+    };
+  }
+
+  const reason = safeText(payload.reason, "用户在控制台撤销绑定");
+  await writeStore(pairingPath, {
+    ...store,
+    pairedDevices: pairedDevices.filter((item) => item.id !== device.id),
+    auditEvents: [
+      ...(Array.isArray(store.auditEvents) ? store.auditEvents : []),
+      {
+        type: "device_revoked",
+        deviceId: device.id,
+        deviceName: device.name,
+        reason,
+        at: at.toISOString(),
+      },
+    ],
+    updatedAt: at.toISOString(),
+  });
+
+  return {
+    revoked: true,
+    device: {
+      id: device.id,
+      name: device.name,
+      pairedAt: device.pairedAt,
+      lastSeenAt: device.lastSeenAt || "",
+    },
+    summary: `已撤销 ${device.name || "这台手机"} 的长期绑定。`,
+    nextAction: "这台手机需要重新扫码后才能访问 codex-loop。",
   };
 }
