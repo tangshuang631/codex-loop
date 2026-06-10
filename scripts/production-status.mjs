@@ -42,8 +42,10 @@ function resolveLabel(label, root = currentRoot()) {
   return path.join(root, ...label.split("/"));
 }
 
-async function readLatestReport(kind) {
-  const root = currentRoot();
+async function readLatestReport(kind, {
+  root = currentRoot(),
+  now = new Date(),
+} = {}) {
   const dir = resolveLabel(kind.dirLabel, root);
   let entries = [];
 
@@ -82,7 +84,7 @@ async function readLatestReport(kind) {
   const report = JSON.parse(await fs.readFile(latest.file, "utf8"));
   const relativePath = path.relative(root, latest.file).replace(/\\/g, "/");
   const finishedAt = report.finishedAt || "";
-  const ageHours = getReportAgeHours(finishedAt, latest.stat.mtimeMs);
+  const ageHours = getReportAgeHours(finishedAt, latest.stat.mtimeMs, now);
   const isStale = ageHours > MAX_REPORT_AGE_HOURS;
   const summary = summarizeReport(kind, report);
 
@@ -121,7 +123,7 @@ async function readLiveProductionObservation(kind, {
   const nowMs = now instanceof Date ? now.getTime() : Date.parse(String(now || ""));
   const ageHours = Number.isFinite(nowMs)
     ? Math.max(0, (nowMs - stat.mtimeMs) / 36e5)
-    : getReportAgeHours(report.finishedAt || "", stat.mtimeMs);
+    : getReportAgeHours(report.finishedAt || "", stat.mtimeMs, now);
   const isStale = ageHours > MAX_REPORT_AGE_HOURS;
   const summary = summarizeReport(kind, report);
   return {
@@ -143,10 +145,11 @@ async function readLiveProductionObservation(kind, {
   };
 }
 
-function getReportAgeHours(finishedAt, fallbackMtimeMs) {
+function getReportAgeHours(finishedAt, fallbackMtimeMs, now = new Date()) {
   const finishedMs = Date.parse(finishedAt);
   const baseMs = Number.isFinite(finishedMs) ? finishedMs : fallbackMtimeMs;
-  return Math.max(0, (Date.now() - baseMs) / 36e5);
+  const nowMs = now instanceof Date ? now.getTime() : Date.parse(String(now || ""));
+  return Math.max(0, ((Number.isFinite(nowMs) ? nowMs : Date.now()) - baseMs) / 36e5);
 }
 
 function summarizeReport(kind, report) {
@@ -298,10 +301,17 @@ export async function readProductionStatusSummary({
   for (const kind of reportKinds) {
     if (refreshObservation && kind.key === "productionObservation") {
       const liveObservation = await readLiveProductionObservation(kind, { runId, now });
-      items.push(liveObservation || await readLatestReport(kind));
+      if (liveObservation?.status === "stale") {
+        const latestReport = await readLatestReport(kind, { now });
+        items.push(latestReport.status && !["missing", "stale"].includes(latestReport.status)
+          ? latestReport
+          : liveObservation);
+        continue;
+      }
+      items.push(liveObservation || await readLatestReport(kind, { now }));
       continue;
     }
-    items.push(await readLatestReport(kind));
+    items.push(await readLatestReport(kind, { now }));
   }
 
   const status = deriveOverallStatus(items);
