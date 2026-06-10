@@ -157,3 +157,58 @@ test("production observer dedupes repeated stop noise and repairs unreadable leg
   assert.match(report.timeline[0].detail, /旧日志详情不可读/);
   assert.doesNotMatch(report.timeline.map((item) => item.detail).join("\n"), /\?{4,}/);
 });
+
+test("production observer judges the latest run cycle while preserving historical failures", async () => {
+  const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), "codex-loop-observer-"));
+  const logDir = path.join(tempRoot, "runtime", "recovered-loop", "logs");
+  await fs.mkdir(logDir, { recursive: true });
+  await fs.writeFile(
+    path.join(logDir, "events.jsonl"),
+    [
+      {
+        type: "run_started_from_console",
+        at: "2026-06-10T08:00:00.000Z",
+      },
+      {
+        type: "codex_followup_failed",
+        at: "2026-06-10T08:01:00.000Z",
+        message: "旧窗口不可接收新指令。",
+      },
+      {
+        type: "run_started_from_console",
+        at: "2026-06-10T09:00:00.000Z",
+      },
+      {
+        type: "codex_followup_dispatching",
+        at: "2026-06-10T09:01:00.000Z",
+        promptGenerator: "ollama",
+        promptPreview: "继续推进真实长跑验证。",
+      },
+      {
+        type: "codex_followup_completed",
+        at: "2026-06-10T09:08:00.000Z",
+        latestAssistantPreview: "Codex 已完成一轮真实验证。",
+      },
+      {
+        type: "supervisor_review_completed",
+        at: "2026-06-10T09:10:00.000Z",
+        summary: "NPC 复盘认为当前轮可以继续。",
+      },
+    ]
+      .map((event) => JSON.stringify(event))
+      .join("\n") + "\n",
+    "utf8",
+  );
+
+  const report = await buildProductionObservation({
+    root: tempRoot,
+    runId: "recovered-loop",
+  });
+
+  assert.equal(report.status, "passed");
+  assert.equal(report.counters.failures, 0);
+  assert.equal(report.history.failureCount, 1);
+  assert.equal(report.history.totalTimelineEvents, 6);
+  assert.match(report.summary, /最近一次运行周期/);
+  assert.doesNotMatch(report.timeline.map((item) => item.detail).join("\n"), /旧窗口不可接收/);
+});

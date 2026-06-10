@@ -110,6 +110,22 @@ function buildCounters(events) {
   };
 }
 
+function latestRunCycle(timeline) {
+  const latestStartIndex = timeline
+    .map((event) => event.type)
+    .lastIndexOf("run_started_from_console");
+  if (latestStartIndex < 0) {
+    return {
+      current: timeline,
+      previous: [],
+    };
+  }
+  return {
+    current: timeline.slice(latestStartIndex),
+    previous: timeline.slice(0, latestStartIndex),
+  };
+}
+
 function deriveStatusAndAdvice(counters, timeline) {
   if (!timeline.length) {
     return {
@@ -130,7 +146,7 @@ function deriveStatusAndAdvice(counters, timeline) {
   if (counters.dispatches > 0 && counters.completions > 0 && counters.supervisorReviews > 0) {
     return {
       status: "passed",
-      summary: "已观察到发送、等待、Codex 完成和 NPC 复盘，具备继续真实长跑的基本证据。",
+      summary: "最近一次运行周期已观察到发送、等待、Codex 完成和 NPC 复盘，具备继续真实长跑的基本证据。",
       nextAction: "可以继续真实任务；建议继续保留人工观察，并在多轮完成后再提高自动化时长。",
     };
   }
@@ -159,8 +175,10 @@ export async function buildProductionObservation({
       promptGenerator: safeText(event.promptGenerator),
     })),
   );
-  const counters = buildCounters(timeline);
-  const advice = deriveStatusAndAdvice(counters, timeline);
+  const cycles = latestRunCycle(timeline);
+  const counters = buildCounters(cycles.current);
+  const historyCounters = buildCounters(cycles.previous);
+  const advice = deriveStatusAndAdvice(counters, cycles.current);
 
   return {
     title: "codex-loop 真实运行观测报告",
@@ -174,9 +192,14 @@ export async function buildProductionObservation({
       logPath: path.relative(root, logPath).replace(/\\/g, "/"),
     },
     counters,
+    history: {
+      failureCount: historyCounters.failures,
+      totalTimelineEvents: timeline.length,
+      previousTimelineEvents: cycles.previous.length,
+    },
     summary: advice.summary,
     nextAction: advice.nextAction,
-    timeline,
+    timeline: cycles.current,
   };
 }
 
