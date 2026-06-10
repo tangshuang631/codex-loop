@@ -104,7 +104,7 @@ test("dashboard folds low-frequency status details by default", async () => {
   const stylesSource = await fs.readFile("app/web/src/styles.css", "utf8");
 
   assert.match(appSource, /primaryRows/);
-  assert.match(appSource, /const primaryLabels = new Set\(\["当前", "说明", "下一步"\]\)/);
+  assert.match(appSource, /const primaryLabels = new Set\(\["当前", "说明", "下一步", "生产观测"\]\)/);
   assert.match(appSource, /rows\.filter\(\(\[label\]\) => primaryLabels\.has\(label\)\)/);
   assert.match(appSource, /detailRows/);
   assert.match(appSource, /status-detail-fold/);
@@ -119,6 +119,9 @@ test("dashboard keeps production status inside folded status details", async () 
 
   assert.match(appSource, /productionStatus/);
   assert.match(appSource, /requestJson\("\/production-status"\)\.catch/);
+  assert.match(appSource, /生产观测/);
+  assert.match(appSource, /真实运行观测/);
+  assert.match(appSource, /真实闭环|长期运行基本证据/);
   assert.match(appSource, /生产状态摘要/);
   assert.match(appSource, /最近生产检查/);
   assert.match(appSource, /下一步建议/);
@@ -152,8 +155,9 @@ test("dashboard keeps next action primary and folds independent verification det
   const verificationRowIndex = appSource.indexOf('verificationText ? ["独立验收"');
   const holdReasonRowIndex = appSource.indexOf("processStatus?.holdReason");
   const nextActionRowIndex = appSource.indexOf("processStatus?.nextAction");
-  const primaryLabelsIndex = appSource.indexOf('const primaryLabels = new Set(["当前", "说明", "下一步"])');
+  const primaryLabelsIndex = appSource.indexOf('const primaryLabels = new Set(["当前", "说明", "下一步", "生产观测"])');
   const detailRowsIndex = appSource.indexOf("const detailRows = [");
+  const productionRowIndex = appSource.indexOf('productionStatus ? ["生产观测"');
   const primaryRowsIndex = appSource.indexOf("rows.filter(([label]) => primaryLabels.has(label))");
 
   assert.notEqual(verificationRowIndex, -1);
@@ -161,10 +165,15 @@ test("dashboard keeps next action primary and folds independent verification det
   assert.notEqual(nextActionRowIndex, -1);
   assert.notEqual(primaryLabelsIndex, -1);
   assert.notEqual(detailRowsIndex, -1);
+  assert.notEqual(productionRowIndex, -1);
   assert.notEqual(primaryRowsIndex, -1);
   assert.ok(
     nextActionRowIndex < primaryLabelsIndex,
     "下一步要留在主要状态来源里，避免用户看不到下一步动作。",
+  );
+  assert.ok(
+    productionRowIndex < primaryLabelsIndex,
+    "生产观测是长期运行判断，应在主要状态里直接可见。",
   );
   assert.ok(
     detailRowsIndex < verificationRowIndex && verificationRowIndex < holdReasonRowIndex,

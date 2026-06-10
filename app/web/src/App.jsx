@@ -1509,6 +1509,23 @@ function StatusSummaryPanel({
 }) {
   const processDetail = processStatus?.detail || codexWorkStatus;
   const monitorText = processStatus?.monitorLabel || processStatus?.headline || continuationStatus;
+  const productionObservation = productionStatus?.sections?.find(
+    (section) => section.label === "真实运行观测",
+  );
+  const productionLabel =
+    productionStatus?.status === "passed"
+      ? "可继续"
+      : productionStatus?.status === "waiting"
+        ? "等待中"
+        : productionStatus?.status
+          ? "需留意"
+          : "";
+  const productionDetail =
+    productionObservation?.status === "stale"
+      ? "真实运行观测已过期，需要重新生成运行记录后再判断长期稳定性。"
+      : productionObservation?.summary ||
+        productionStatus?.nextAction ||
+        "等待形成 2 轮真实闭环后，再作为长期运行基本证据。";
   const verificationStatus = processStatus?.supervisorVerificationStatus || "";
   const verificationLabel =
     processStatus?.supervisorVerificationLabel ||
@@ -1531,8 +1548,9 @@ function StatusSummaryPanel({
     ["当前", `${modeText} · ${monitorText}`],
     ["说明", processDetail],
     processStatus?.nextAction ? ["下一步", processStatus.nextAction] : null,
+    productionStatus ? ["生产观测", `${productionLabel} · ${productionDetail}`] : null,
   ].filter(Boolean);
-  const primaryLabels = new Set(["当前", "说明", "下一步"]);
+  const primaryLabels = new Set(["当前", "说明", "下一步", "生产观测"]);
   const detailRows = [
     controllerStatus?.label
       ? [
@@ -1596,6 +1614,17 @@ function StatusSummaryPanel({
               [section.label, section.summary].filter(Boolean).join("："),
             )
             .join(" · "),
+        ]
+      : null,
+    productionObservation
+      ? [
+          "真实运行观测",
+          [
+            productionObservation.status === "stale" ? "已过期" : productionObservation.summary,
+            productionObservation.nextAction,
+          ]
+            .filter(Boolean)
+            .join("："),
         ]
       : null,
     processStatus?.supervisorVerificationEvidenceCount
