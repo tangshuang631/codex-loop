@@ -30,9 +30,11 @@ The current top priority is the core local loop business:
 后续进度不按“prompt 写得更聪明”判断，而按 loop 是否更可靠判断。优先建设 loop，而不是堆 prompt。
 
 - P0 可运行闭环：用户能新建任务、绑定线程、开始循环、停止收尾，并在控制台看到 Codex 回复和 codex-loop 指令。
+- P0 远程联动：安卓 App / PWA 必须能作为核心入口查看循环进程、历史对话、待合并引导，并远程发送引导；它不是 P3 之后的附属查看页。
+- P0 Codex 风格对话：桌面端和移动端必须共用接近 Codex 桌面端的历史渲染规则。普通回复按连续对话流呈现；文件改动、命令输出、脚本内容、测试日志、截图证据等大块信息默认折叠，点击后展开详情。
 - P1 可控闭环：系统能识别 Codex 是否仍在工作，用户补充会排队等待当前轮完成，停止条件和预算会阻止下一轮派发。
 - P2 可验证闭环：NPC 会结合项目文档、用户规则和 Codex 最新回复生成下一步；测试、构建、日志或截图验收能写回状态。
-- P3 可长期监控闭环：运行日志可读，失败可恢复，移动端可查看当前状态和历史，用户能远程补充下一轮引导。
+- P3 可长期监控闭环：运行日志可读，失败可恢复，多设备长期授权、重连、撤销和审计稳定。
 - P4 企业级治理闭环：多项目多 loop 稳定运行，角色规则可定制，权限边界可审计，长期任务有成本、失败率和质量趋势。
 
 ## Task-first product model
@@ -103,11 +105,12 @@ Mobile support is valuable because it helps users check progress away from the d
 
 Mobile is now part of the production monitoring target. It should be treated as a 移动端 App experience, not just a small responsive web page.
 
-The correct ordering is:
+The correct ordering is now:
 
 1. make the core loop trustworthy
 2. make Codex linkage feel seamless
-3. add lightweight phone access for status and summaries
+3. make Android App / PWA remote monitoring and guidance a P0 usage path
+4. make desktop and mobile history rendering match the Codex desktop conversation model
 
 The first mobile App capability should be:
 
@@ -116,6 +119,8 @@ The first mobile App capability should be:
 - send-guidance composer
 - safe by default
 - consistent with the web task detail content
+- collapsible detail blocks for edited files, command output, scripts, tests, screenshots, and verification logs
+- a Codex-like conversation flow instead of separated dashboard cards
 
 Not:
 

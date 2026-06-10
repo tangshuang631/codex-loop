@@ -77,6 +77,24 @@ test("roadmap names enterprise maturity milestones instead of vague prompt work"
   assert.match(checklistSource, /优先建设 loop，而不是堆 prompt/);
 });
 
+test("docs make mobile remote control and Codex-like history rendering P0", async () => {
+  const readmeSource = await fs.readFile("README.md", "utf8");
+  const roadmapSource = await fs.readFile("docs/product-roadmap.md", "utf8");
+  const architectureSource = await fs.readFile("docs/enterprise-loop-architecture.md", "utf8");
+  const checklistSource = await fs.readFile("codex-loop6.7-13-29开发清单.md", "utf8");
+
+  for (const source of [readmeSource, roadmapSource, architectureSource, checklistSource]) {
+    assert.match(source, /P0/);
+    assert.match(source, /安卓 App|App \/ PWA|App\/PWA|移动端 App/);
+    assert.match(source, /远程.*发送引导|发送引导.*远程|远程操控/);
+    assert.match(source, /Codex.*历史|历史.*Codex/);
+    assert.match(source, /文件改动/);
+    assert.match(source, /命令输出/);
+    assert.match(source, /默认.*折叠|默认.*收纳/);
+    assert.match(source, /展开.*详情|详情.*展开/);
+  }
+});
+
 test("architecture map documents current files and target enterprise boundaries", async () => {
   const readmeSource = await fs.readFile("README.md", "utf8");
   const architectureSource = await fs.readFile("docs/enterprise-loop-architecture.md", "utf8");
