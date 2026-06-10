@@ -164,6 +164,7 @@ test("dashboard shows closed-loop evidence progress before long-running use", as
   assert.notEqual(statusStart, -1);
   assert.match(statusSource, /closedLoopCount/);
   assert.match(statusSource, /closedLoopTarget/);
+  assert.match(statusSource, /productionStatus\?\.closedLoopEvidence/);
   assert.match(statusSource, /闭环证据/);
   assert.match(statusSource, /closed-loop-evidence/);
   assert.match(statusSource, /还差.*轮|已达到长期运行基本证据/);

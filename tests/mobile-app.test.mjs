@@ -108,6 +108,7 @@ test("mobile app shows closed-loop evidence progress for remote supervision", as
 
   assert.match(source, /closedLoopCount/);
   assert.match(source, /closedLoopTarget/);
+  assert.match(source, /productionStatus\?\.closedLoopEvidence/);
   assert.match(source, /闭环证据/);
   assert.match(source, /closed-loop-evidence/);
   assert.match(source, /还差.*轮|已达到长期运行基本证据/);

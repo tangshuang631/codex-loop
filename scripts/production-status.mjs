@@ -506,6 +506,29 @@ function deriveMaturity(items, readiness = {}) {
   };
 }
 
+function deriveClosedLoopEvidence(items, maturity = {}) {
+  const observation = items.find((item) => item.label === "真实运行观测") || {};
+  const target = 2;
+  const current = Math.max(0, Number(observation.counters?.closedLoops || 0));
+  const remaining = Math.max(0, target - current);
+  const canLongRun = Boolean(maturity.canLongRun || current >= target);
+  const label = canLongRun
+    ? "已达到长期运行基本证据"
+    : `还差 ${remaining} 轮真实闭环`;
+  const summary = canLongRun
+    ? `已观察到 ${current} 轮真实闭环，达到长期运行基本证据。`
+    : `已观察到 ${current} 轮真实闭环，还差 ${remaining} 轮真实闭环才能进入长期运行基本证据。`;
+
+  return {
+    current,
+    target,
+    remaining,
+    canLongRun,
+    label,
+    summary,
+  };
+}
+
 export async function readProductionStatusSummary({
   refreshObservation = true,
   runId = null,
@@ -534,6 +557,7 @@ export async function readProductionStatusSummary({
 
   const status = deriveOverallStatus(items);
   const readiness = deriveReadiness(items, target);
+  const maturity = deriveMaturity(items, readiness);
   return {
     title: "codex-loop 生产状态摘要",
     status,
@@ -541,7 +565,8 @@ export async function readProductionStatusSummary({
     finishedAt: new Date().toISOString(),
     target,
     readiness,
-    maturity: deriveMaturity(items, readiness),
+    maturity,
+    closedLoopEvidence: deriveClosedLoopEvidence(items, maturity),
     sections: items,
     nextActionLabel: "下一步建议",
     nextAction: deriveNextAction(items, target),
