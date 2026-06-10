@@ -167,5 +167,7 @@ test("docs expose production status summary for long-running operation", async (
     assert.match(source, /前端证据/);
     assert.match(source, /长跑节奏/);
     assert.match(source, /下一步建议/);
+    assert.match(source, /12 小时/);
+    assert.match(source, /重新运行 npm run production:check/);
   }
 });

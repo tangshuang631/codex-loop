@@ -2,6 +2,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 
 const root = process.cwd();
+const MAX_REPORT_AGE_HOURS = Number(process.env.CODEX_LOOP_STATUS_MAX_REPORT_AGE_HOURS || 12);
 
 const reportKinds = [
   {
@@ -66,15 +67,28 @@ async function readLatestReport(kind) {
   const latest = withStats[0];
   const report = JSON.parse(await fs.readFile(latest.file, "utf8"));
   const relativePath = path.relative(root, latest.file).replace(/\\/g, "/");
+  const finishedAt = report.finishedAt || "";
+  const ageHours = getReportAgeHours(finishedAt, latest.stat.mtimeMs);
+  const isStale = ageHours > MAX_REPORT_AGE_HOURS;
+  const summary = summarizeReport(kind, report);
 
   return {
     label: kind.label,
-    status: report.status || "unknown",
+    status: isStale ? "stale" : report.status || "unknown",
+    rawStatus: report.status || "unknown",
     path: relativePath,
-    finishedAt: report.finishedAt || "",
+    finishedAt,
+    ageHours: Number(ageHours.toFixed(2)),
+    isStale,
     durationMs: report.durationMs || 0,
-    summary: summarizeReport(kind, report),
+    summary: isStale ? `${summary}，但报告已过期` : summary,
   };
+}
+
+function getReportAgeHours(finishedAt, fallbackMtimeMs) {
+  const finishedMs = Date.parse(finishedAt);
+  const baseMs = Number.isFinite(finishedMs) ? finishedMs : fallbackMtimeMs;
+  return Math.max(0, (Date.now() - baseMs) / 36e5);
 }
 
 function summarizeReport(kind, report) {
@@ -105,6 +119,10 @@ function summarizeReport(kind, report) {
 }
 
 function deriveNextAction(items) {
+  const stale = items.find((item) => item.status === "stale");
+  if (stale) {
+    return `${stale.label}已过期，请重新运行 npm run production:check 后再判断是否适合继续长期运行。`;
+  }
   const failed = items.find((item) => item.status && item.status !== "passed");
   if (failed) {
     return `先处理${failed.label}：${failed.summary}`;

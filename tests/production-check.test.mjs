@@ -77,6 +77,15 @@ test("production status summarizes recent production evidence for long-running u
   assert.match(source, /下一步建议/);
 });
 
+test("production status treats stale reports as attention instead of current health", async () => {
+  const source = await read("scripts/production-status.mjs");
+
+  assert.match(source, /MAX_REPORT_AGE_HOURS/);
+  assert.match(source, /isStale/);
+  assert.match(source, /已过期/);
+  assert.match(source, /重新运行 npm run production:check/);
+});
+
 test("docs make production readiness check the pre-use gate", async () => {
   const readme = await read("README.md");
   const checklist = await read("codex-loop6.7-13-29开发清单.md");
