@@ -58,6 +58,16 @@ test("mobile app surfaces production monitoring signals in one compact status bl
   assert.match(styleSource, /\.status-detail-grid/);
 });
 
+test("mobile app shows production status and stale observation guidance", async () => {
+  const source = await read("app/mobile/src/main.jsx");
+
+  assert.match(source, /\/production-status/);
+  assert.match(source, /productionStatus/);
+  assert.match(source, /生产观测|生产状态/);
+  assert.match(source, /真实运行观测/);
+  assert.match(source, /已过期|重新启动一次真实任务|重新运行 npm run production:observe/);
+});
+
 test("mobile app shows supervisor screenshot evidence without adding noisy cards", async () => {
   const source = await read("app/mobile/src/main.jsx");
   const styleSource = await read("app/mobile/src/styles.css");

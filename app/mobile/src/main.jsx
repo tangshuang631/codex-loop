@@ -217,14 +217,52 @@ function PairingView({ onPaired }) {
   );
 }
 
-function StatusBlock({ mobileView, statusText }) {
+function StatusBlock({ mobileView, productionStatus, statusText }) {
   const process = mobileView?.processStatus || {};
+  const productionObservation = productionStatus?.sections?.find(
+    (section) => section.label === "真实运行观测",
+  );
+  const productionLabel =
+    productionStatus?.status === "passed"
+      ? "可继续"
+      : productionStatus?.status === "waiting"
+        ? "等待中"
+        : productionStatus?.status
+          ? "需留意"
+          : "";
+  const productionDetail =
+    productionObservation?.status === "stale"
+      ? "真实运行观测已过期，请重新运行 npm run production:observe，或重新启动一次真实任务生成新的运行记录。"
+      : productionStatus?.nextAction || productionObservation?.summary || "";
   const rows = [
     ["当前状态", process.monitorLabel || mobileView?.loop?.modeLabel || "监控中"],
     ["下一步", process.nextAction || mobileView?.suggestedAction || "等待下一轮更新"],
+    productionStatus ? ["生产观测", `${productionLabel} · ${productionDetail}`] : null,
     ["最近指令", process.latestInstructionSourceLabel || "等待生成"],
-  ];
+  ].filter(Boolean);
   const details = [
+    productionStatus
+      ? [
+          "生产状态",
+          [
+            productionStatus.title || "生产状态摘要",
+            productionStatus.nextAction || productionObservation?.summary,
+          ]
+            .filter(Boolean)
+            .join("："),
+        ]
+      : null,
+    productionObservation
+      ? [
+          "真实运行观测",
+          [
+            productionObservation.status === "stale" ? "已过期" : productionObservation.summary,
+            productionObservation.nextAction,
+          ]
+            .filter(Boolean)
+            .join("："),
+        ]
+      : null,
     ["等待原因", process.holdReason],
     ["待合并引导", process.pendingGuidancePreview || mobileView?.pendingGuidance?.preview],
     ["独立验收", process.supervisorVerificationLabel || process.supervisorVerificationStatus],
@@ -237,7 +275,7 @@ function StatusBlock({ mobileView, statusText }) {
           : ""),
     ],
     ["模型来源", process.latestInstructionSourceDetail],
-  ].filter(([, value]) => asText(value));
+  ].filter((row) => row && asText(row[1]));
 
   return (
     <section className="status-block">
@@ -350,6 +388,7 @@ function GuidanceComposer({ value, setValue, editing, submitting, onCancel, onSu
 function TaskMonitorApp() {
   const [device, setDevice] = useState(readDevice);
   const [mobileView, setMobileView] = useState(null);
+  const [productionStatus, setProductionStatus] = useState(null);
   const [statusText, setStatusText] = useState("正在连接");
   const [errorText, setErrorText] = useState("");
   const [guidance, setGuidance] = useState("");
@@ -360,14 +399,18 @@ function TaskMonitorApp() {
     if (!device?.deviceId || !device?.deviceToken) return;
     if (!silent) setStatusText("正在同步");
     try {
-      const result = await requestJson("/mobile/view", {
-        method: "POST",
-        body: JSON.stringify({
-          deviceId: device.deviceId,
-          deviceToken: device.deviceToken,
+      const [result, production] = await Promise.all([
+        requestJson("/mobile/view", {
+          method: "POST",
+          body: JSON.stringify({
+            deviceId: device.deviceId,
+            deviceToken: device.deviceToken,
+          }),
         }),
-      });
+        requestJson("/production-status").catch(() => null),
+      ]);
       setMobileView(result.mobile);
+      setProductionStatus(production);
       setErrorText("");
       setStatusText("已同步");
     } catch (error) {
@@ -467,7 +510,11 @@ function TaskMonitorApp() {
       </header>
 
       {errorText ? <p className="notice danger">{errorText}</p> : null}
-      <StatusBlock mobileView={mobileView} statusText={statusText} />
+      <StatusBlock
+        mobileView={mobileView}
+        productionStatus={productionStatus}
+        statusText={statusText}
+      />
       <Conversation mobileView={mobileView} />
       <PendingGuidance
         pending={mobileView?.pendingGuidance}
