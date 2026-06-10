@@ -369,6 +369,18 @@ function StatusBlock({ mobileView, productionStatus, productionPreflight, status
       : null,
     ["等待原因", process.holdReason],
     ["待合并引导", process.pendingGuidancePreview || mobileView?.pendingGuidance?.preview],
+    process.lastMergedGuidanceStatus
+      ? [
+          "已合并补充",
+          [
+            process.lastMergedGuidanceLabel,
+            process.lastMergedGuidancePreview,
+            process.lastMergedGuidanceDetail,
+          ]
+            .filter(Boolean)
+            .join("："),
+        ]
+      : null,
     ["独立验收", process.supervisorVerificationLabel || process.supervisorVerificationStatus],
     ["验收动作", process.supervisorVerificationAction],
     [

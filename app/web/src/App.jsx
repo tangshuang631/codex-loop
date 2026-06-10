@@ -1450,6 +1450,12 @@ function MobileTaskApp() {
                 <strong>{processStatus.latestCodexSummarySourceLabel}</strong>
               </div>
             ) : null}
+            {processStatus.lastMergedGuidanceStatus ? (
+              <div className="mobile-task-panel-row">
+                <span>已合并补充</span>
+                <strong>{processStatus.lastMergedGuidancePreview || processStatus.lastMergedGuidanceLabel}</strong>
+              </div>
+            ) : null}
             {mobileView?.pendingGuidance?.hasPending ? (
               <div className="mobile-task-panel-row">
                 <span>待合并</span>
@@ -1661,6 +1667,18 @@ function StatusSummaryPanel({
     processStatus?.holdReason ? ["判断", processStatus.holdReason] : null,
     processStatus?.hasPendingGuidance
       ? ["待合并补充", processStatus?.pendingGuidancePreview || "已记录"]
+      : null,
+    processStatus?.lastMergedGuidanceStatus
+      ? [
+          "已合并补充",
+          [
+            processStatus.lastMergedGuidanceLabel,
+            processStatus.lastMergedGuidancePreview,
+            processStatus.lastMergedGuidanceDetail,
+          ]
+            .filter(Boolean)
+            .join("："),
+        ]
       : null,
     processStatus?.hasSupervisorReview
       ? ["监督复盘", processStatus?.supervisorReview || "已完成监督复盘"]

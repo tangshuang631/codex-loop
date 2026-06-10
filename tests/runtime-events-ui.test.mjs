@@ -88,6 +88,21 @@ test("dashboard uses mobile process status as the primary runtime status source"
   assert.match(appSource, /待合并补充/);
 });
 
+test("dashboard surfaces merged guidance evidence without adding a new card", async () => {
+  const appSource = await fs.readFile("app/web/src/App.jsx", "utf8");
+  const statusStart = appSource.indexOf("function StatusSummaryPanel");
+  const statusEnd = appSource.indexOf("const StatusSummaryPanelV2", statusStart);
+  const statusSource = appSource.slice(statusStart, statusEnd);
+
+  assert.notEqual(statusStart, -1);
+  assert.match(statusSource, /lastMergedGuidanceStatus/);
+  assert.match(statusSource, /lastMergedGuidanceLabel/);
+  assert.match(statusSource, /lastMergedGuidancePreview/);
+  assert.match(statusSource, /已合并补充/);
+  assert.match(statusSource, /status-detail-fold/);
+  assert.doesNotMatch(appSource, /merged-guidance-card/);
+});
+
 test("dashboard shows loop controller status as one compact status row", async () => {
   const appSource = await fs.readFile("app/web/src/App.jsx", "utf8");
 

@@ -19,6 +19,7 @@ import {
   startRun,
   requestGracefulStop,
   updateBudgets,
+  syncCodexThreadMirror,
 } from "../app/server/lib/runtime-store.mjs";
 import { saveUserOverrides } from "../app/server/lib/adapter-store.mjs";
 import { writeLauncherStatus } from "../app/server/lib/launcher-status.mjs";
@@ -823,6 +824,55 @@ test("exportMobileView exposes customized npc rules and pending mobile guidance"
   assert.match(mobile.pendingGuidance.actionLabel, /可发送|等待发送/);
   assert.match(mobile.pendingGuidance.userMessage, /Codex.*完成/);
   assert.match(mobile.pendingGuidance.userMessage, /本地模型|NPC|Ollama/);
+});
+
+test("exportMobileView shows evidence after queued guidance is merged into the next Codex instruction", async () => {
+  const configRoot = await createWorkspace();
+  await ensureLoopArtifacts(configRoot);
+  await saveThreadBinding(configRoot, {
+    workspaceName: "demo",
+    threadTitle: "移动端合并证据",
+    threadId: "thread-mobile-guidance-evidence",
+    singleThreadMode: true,
+  });
+  await syncCodexThreadMirror(configRoot, {
+    latestCodexSummary: "Codex 已完成移动端状态整理，等待下一轮指示。",
+  });
+  await savePendingGuidance(configRoot, {
+    text: "下一轮请优先检查 App 远程操控入口是否清楚。",
+  });
+
+  await runLoopTurn(configRoot, {
+    generateFollowupPrompt: async () => ({
+      prompt: "请继续按清单推进移动端远程操控。",
+      source: "ollama",
+    }),
+    dispatchThreadMessage: async ({ prompt }) => {
+      assert.match(prompt, /下一轮请优先检查 App 远程操控入口是否清楚/);
+      return {
+        deliveryObserved: true,
+        transport: "native-app",
+      };
+    },
+  });
+
+  const mobile = await exportMobileView(configRoot);
+
+  assert.equal(mobile.pendingGuidance.hasPending, false);
+  assert.equal(mobile.processStatus.lastMergedGuidanceStatus, "merged");
+  assert.match(mobile.processStatus.lastMergedGuidanceLabel, /已合并/);
+  assert.match(
+    mobile.processStatus.lastMergedGuidancePreview,
+    /App 远程操控入口是否清楚/,
+  );
+  assert.match(
+    mobile.processStatus.lastMergedGuidanceDetail,
+    /本次指令|Codex/,
+  );
+  assert.match(
+    mobile.conversationItems.map((item) => item.preview || item.text).join("\n"),
+    /用户补充|App 远程操控入口是否清楚/,
+  );
 });
 
 test("exportMobileView suggests binding a visible thread before starting when thread is missing", async () => {

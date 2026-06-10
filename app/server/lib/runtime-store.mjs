@@ -541,6 +541,19 @@ function pendingGuidanceAfterDispatch(thread = {}, dispatchedGuidance = "") {
   };
 }
 
+function buildMergedGuidanceMetadata(guidance = "", at = nowIso()) {
+  const text = safeText(guidance, "");
+  if (!text) {
+    return {};
+  }
+  return {
+    lastMergedGuidance: text,
+    lastMergedGuidanceAt: at,
+    lastMergedGuidancePreview: buildPromptPreview(text, 160),
+    lastMergedGuidanceStatus: "merged",
+  };
+}
+
 async function markDispatchWaiting(
   snapshot,
   {
@@ -552,6 +565,10 @@ async function markDispatchWaiting(
   },
 ) {
   const monitorOnlyDispatch = Boolean(snapshot.state.monitorOnly);
+  const mergedGuidanceMetadata = buildMergedGuidanceMetadata(
+    snapshot.thread.pendingUserGuidance,
+    dispatchAt,
+  );
   const dispatchingSummary = monitorOnlyDispatch
     ? "监控模式正在发送这条引导；只发送这一条，不会开启自动循环。"
     : "正在通过 Codex 桌面端原生链路发送指令，等待确认送达。";
@@ -565,6 +582,7 @@ async function markDispatchWaiting(
       lastDispatchAt: dispatchAt,
       lastDispatchPrompt: prompt,
       lastDispatchPromptGenerator: promptGenerator,
+      ...mergedGuidanceMetadata,
       lastContinuationError: promptGenerationError,
       promptGenerationWarning,
       latestSummary: dispatchingSummary,
@@ -586,6 +604,8 @@ async function markDispatchWaiting(
     promptGenerator,
     promptGenerationError,
     promptGenerationWarning,
+    mergedGuidanceIncluded: Boolean(mergedGuidanceMetadata.lastMergedGuidance),
+    mergedGuidancePreview: mergedGuidanceMetadata.lastMergedGuidancePreview || "",
     summary: dispatchingSummary,
     promptPreview: buildPromptPreview(prompt),
   });
@@ -615,6 +635,10 @@ async function markDispatchSentWithoutCompletion(
 ) {
   const sentAt = nowIso();
   const refreshed = await ensureLoopArtifacts(startDir);
+  const mergedGuidanceMetadata = buildMergedGuidanceMetadata(
+    consumedPendingGuidance,
+    sentAt,
+  );
   const nextPendingGuidance = pendingGuidanceAfterDispatch(
     refreshed.thread,
     consumedPendingGuidance,
@@ -631,6 +655,7 @@ async function markDispatchSentWithoutCompletion(
       continuationEnabled: true,
       continuationStatus: "dispatching",
       ...nextPendingGuidance,
+      ...mergedGuidanceMetadata,
       lastContinuationError: promptGenerationError,
       promptGenerationWarning,
       lastDispatchPromptGenerator: promptGenerator,
@@ -652,6 +677,8 @@ async function markDispatchSentWithoutCompletion(
     promptGenerator,
     promptGenerationError,
     promptGenerationWarning,
+    mergedGuidanceIncluded: Boolean(mergedGuidanceMetadata.lastMergedGuidance),
+    mergedGuidancePreview: mergedGuidanceMetadata.lastMergedGuidancePreview || "",
     summary: sentSummary,
   });
   await appendTranscriptEntry(refreshed.paths.transcriptPath, {
@@ -759,6 +786,10 @@ function createThreadDefaults(config) {
     lastCompletionAt: "",
     lastDispatchPrompt: "",
     lastDispatchPromptGenerator: "",
+    lastMergedGuidance: "",
+    lastMergedGuidanceAt: "",
+    lastMergedGuidancePreview: "",
+    lastMergedGuidanceStatus: "",
     lastContinuationError: "",
     lastSupervisorReview: "",
     lastSupervisorReviewAt: "",
@@ -2307,6 +2338,11 @@ function buildProcessStatus(snapshot) {
   const healthBlocker = blockingHealthIssue(snapshot.health);
   const budgetReached = budgetLimitReached(snapshot.state);
   const hasPendingGuidance = Boolean(snapshot.thread.pendingUserGuidance);
+  const lastMergedGuidance = safeText(snapshot.thread.lastMergedGuidance, "");
+  const lastMergedGuidancePreview = safeText(
+    snapshot.thread.lastMergedGuidancePreview,
+    buildPromptPreview(lastMergedGuidance, 160),
+  );
   const waitingDurationLabel = waitingForCodex
     ? formatElapsedMinutesSince(snapshot.thread.lastDispatchAt)
     : "";
@@ -2461,6 +2497,13 @@ function buildProcessStatus(snapshot) {
     canSendNextTurn,
     hasPendingGuidance,
     pendingGuidancePreview: buildPromptPreview(snapshot.thread.pendingUserGuidance || ""),
+    lastMergedGuidanceStatus: lastMergedGuidance ? "merged" : "",
+    lastMergedGuidanceLabel: lastMergedGuidance ? "用户补充已合并" : "",
+    lastMergedGuidancePreview,
+    lastMergedGuidanceDetail: lastMergedGuidance
+      ? "这条用户补充已经进入本次发给 Codex 的指令。"
+      : "",
+    lastMergedGuidanceAt: snapshot.thread.lastMergedGuidanceAt || "",
     hasSupervisorReview: Boolean(supervisorReview || supervisorInstruction),
     supervisorReview: supervisorReview ? summarizeForFollowup(supervisorReview, 180) : "",
     supervisorInstructionPreview: supervisorInstruction
@@ -3082,6 +3125,14 @@ function buildThreadMirror(thread, state, overrides = {}) {
       overrides.pendingUserGuidance ?? thread.pendingUserGuidance ?? "",
     pendingUserGuidanceAt:
       overrides.pendingUserGuidanceAt ?? thread.pendingUserGuidanceAt ?? "",
+    lastMergedGuidance:
+      overrides.lastMergedGuidance ?? thread.lastMergedGuidance ?? "",
+    lastMergedGuidanceAt:
+      overrides.lastMergedGuidanceAt ?? thread.lastMergedGuidanceAt ?? "",
+    lastMergedGuidancePreview:
+      overrides.lastMergedGuidancePreview ?? thread.lastMergedGuidancePreview ?? "",
+    lastMergedGuidanceStatus:
+      overrides.lastMergedGuidanceStatus ?? thread.lastMergedGuidanceStatus ?? "",
     lastContinuationError,
     lastContinuationFailureCategory,
     lastContinuationFailureLabel,
