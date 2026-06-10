@@ -123,6 +123,70 @@ test("exportMobileView returns recent transcript entries for mobile readers", as
   assert.equal(Array.isArray(mobile.codexConversation.entries), true);
 });
 
+test("exportMobileView returns shared Codex-style conversation items with collapsed details", async () => {
+  const configRoot = await createWorkspace();
+  const snapshot = await ensureLoopArtifacts(configRoot);
+  await saveThreadBinding(configRoot, {
+    workspaceName: "demo",
+    threadTitle: "移动端远程监控",
+    threadId: "thread-shared-conversation",
+    singleThreadMode: true,
+  });
+  await startRun(configRoot);
+  await recordHeartbeat(configRoot, {
+    activeTask: "实现移动端历史对话",
+    progressSummary: "把网页端和移动端历史记录统一成 Codex 风格对话流。",
+    note: "共享对话模型",
+  });
+  const threadMirror = JSON.parse(await fs.readFile(snapshot.paths.threadPath, "utf8"));
+  await fs.writeFile(
+    snapshot.paths.threadPath,
+    `${JSON.stringify(
+      {
+        ...threadMirror,
+        lastDispatchAt: "2026-06-10T10:09:00.000Z",
+        lastDispatchPrompt: "请继续实现移动端历史对话，把网页端和 App 都改成 Codex 风格对话流。",
+      },
+      null,
+      2,
+    )}\n`,
+    "utf8",
+  );
+  await fs.appendFile(
+    snapshot.paths.logPath,
+    `${JSON.stringify({
+      type: "codex_conversation_mirror_synced",
+      at: "2026-06-10T10:10:00.000Z",
+      latestAssistantPreview: "已修改 app/web/src/App.jsx，并运行 npm run build:mobile 验证通过。",
+    })}\n${JSON.stringify({
+      type: "heartbeat",
+      at: "2026-06-10T10:11:00.000Z",
+      activeTask: "验证历史对话",
+      progressSummary: "命令输出：npm run build:mobile\n\n> build:mobile\n> vite build --config app/mobile/vite.config.mjs\n\n✓ built in 1.2s",
+    })}\n`,
+    "utf8",
+  );
+
+  const mobile = await exportMobileView(configRoot);
+
+  assert.equal(Array.isArray(mobile.conversationItems), true);
+  assert.equal(mobile.conversationItems.length >= 2, true);
+  assert.ok(
+    mobile.conversationItems.some((item) => item.role === "loop" && item.align === "right"),
+    "codex-loop 发出的指令应该作为右侧对话项统一输出。",
+  );
+  assert.ok(
+    mobile.conversationItems.some((item) => item.role === "codex" && item.align === "left"),
+    "Codex 回复应该作为左侧对话项统一输出。",
+  );
+  const detailItem = mobile.conversationItems.find((item) => item.detailBlocks?.length);
+  assert.ok(detailItem, "长命令、文件改动或测试日志应默认收纳成详情块。");
+  assert.equal(detailItem.detailBlocks[0].collapsedByDefault, true);
+  assert.match(detailItem.detailBlocks[0].kind, /command_output|file_change|test_log|runtime_detail/);
+  assert.match(detailItem.detailBlocks[0].summary, /命令|文件|验证|详情|日志/);
+  assert.match(detailItem.detailBlocks[0].text, /npm run build:mobile|app\/web\/src\/App\.jsx/);
+});
+
 test("exportMobileView returns readable runtime events for mobile monitoring", async () => {
   const configRoot = await createWorkspace();
   await ensureLoopArtifacts(configRoot);

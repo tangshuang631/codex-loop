@@ -1894,6 +1894,42 @@ select {
   border-top: 1px dashed #e2ded5;
 }
 
+.conversation-detail-list {
+  display: grid;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.conversation-detail-block {
+  border-top: 1px solid #e7e7e1;
+  color: var(--muted);
+}
+
+.conversation-detail-block summary {
+  padding: 10px 0 0;
+  cursor: pointer;
+  list-style: none;
+  font-size: 12px;
+}
+
+.conversation-detail-block summary::-webkit-details-marker {
+  display: none;
+}
+
+.conversation-detail-body {
+  margin: 10px 0 0;
+  padding: 12px;
+  overflow-x: auto;
+  border-radius: 12px;
+  background: #f7f7f3;
+  color: #25251f;
+  font-family: "Cascadia Code", "SFMono-Regular", Consolas, monospace;
+  font-size: 12px;
+  line-height: 1.65;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
 .markdown-heading {
   margin: 2px 0 0;
   font-size: 17px;

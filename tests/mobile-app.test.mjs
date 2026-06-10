@@ -44,6 +44,18 @@ test("mobile app is a lightweight task monitor instead of a desktop console clon
   assert.match(styleSource, /position:\s*sticky/);
 });
 
+test("mobile app uses shared conversation items and collapses Codex-style details", async () => {
+  const source = await read("app/mobile/src/main.jsx");
+  const styleSource = await read("app/mobile/src/styles.css");
+
+  assert.match(source, /mobileView\?\.conversationItems/);
+  assert.match(source, /detailBlocks/);
+  assert.match(source, /conversation-detail-block/);
+  assert.match(source, /collapsedByDefault/);
+  assert.match(styleSource, /\.conversation-detail-block/);
+  assert.match(styleSource, /\.conversation-detail-body/);
+});
+
 test("mobile app surfaces production monitoring signals in one compact status block", async () => {
   const source = await read("app/mobile/src/main.jsx");
   const styleSource = await read("app/mobile/src/styles.css");

@@ -114,6 +114,17 @@ function dedupe(entries) {
 }
 
 function buildConversation(mobileView) {
+  if (mobileView?.conversationItems?.length) {
+    return dedupe(mobileView.conversationItems).sort((a, b) => {
+      const left = Date.parse(a.at || "");
+      const right = Date.parse(b.at || "");
+      if (!Number.isFinite(left) && !Number.isFinite(right)) return 0;
+      if (!Number.isFinite(left)) return 1;
+      if (!Number.isFinite(right)) return -1;
+      return left - right;
+    });
+  }
+
   const mirrored = mobileView?.codexConversation?.entries || [];
   if (mirrored.length) {
     return dedupe(mirrored);
@@ -378,6 +389,26 @@ function StatusBlock({ mobileView, productionStatus, productionPreflight, status
   );
 }
 
+function ConversationDetailBlocks({ blocks = [] }) {
+  const visibleBlocks = Array.isArray(blocks) ? blocks.filter(Boolean) : [];
+  if (!visibleBlocks.length) return null;
+
+  return (
+    <div className="conversation-detail-list">
+      {visibleBlocks.map((block, index) => (
+        <details
+          className="conversation-detail-block"
+          key={`${block.kind || "detail"}-${index}`}
+          open={block.collapsedByDefault === false}
+        >
+          <summary>{asText(block.summary, "查看详情")}</summary>
+          <pre className="conversation-detail-body">{asText(block.text)}</pre>
+        </details>
+      ))}
+    </div>
+  );
+}
+
 function Conversation({ mobileView }) {
   const entries = useMemo(() => buildConversation(mobileView), [mobileView]);
   const bottomRef = useRef(null);
@@ -394,7 +425,7 @@ function Conversation({ mobileView }) {
     <section className="conversation" aria-label="历史对话">
       <h2>历史对话</h2>
       {entries.map((entry, index) => {
-        const isLoop = entry.role === "user";
+        const isLoop = entry.role === "user" || entry.role === "loop" || entry.role === "guidance";
         const text = asText(entry.text || entry.summary || entry.preview);
         return (
           <article className={isLoop ? "message is-loop" : "message is-codex"} key={`${entry.at || index}-${entry.role}-${index}`}>
@@ -404,6 +435,7 @@ function Conversation({ mobileView }) {
                 <strong>{compactText(entry.preview || text, isLoop ? 120 : 220)}</strong>
               </summary>
               <pre>{text}</pre>
+              <ConversationDetailBlocks blocks={entry.detailBlocks} />
             </details>
           </article>
         );

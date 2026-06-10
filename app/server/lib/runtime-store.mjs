@@ -2605,6 +2605,161 @@ function buildFallbackTranscriptEntries(snapshot) {
   ];
 }
 
+function conversationItemRole(entry = {}) {
+  if (entry.role === "guidance") return "guidance";
+  if (entry.role === "loop") return "loop";
+  if (entry.role === "user") return "loop";
+  if (entry.role === "runtime") return "runtime";
+  return "codex";
+}
+
+function classifyConversationDetail(text) {
+  const value = safeText(text, "");
+  if (/截图|\.png|\.jpg|\.jpeg|\.webp|runtime[\\/]+screenshots/i.test(value)) {
+    return "screenshot";
+  }
+  if (/TAP version|node --test|npm run|pnpm |yarn |vite build|build:mobile|tests?|pass|fail|失败|通过/i.test(value)) {
+    return "test_log";
+  }
+  if (/diff --git|app[\\/][\w.-]+|scripts[\\/][\w.-]+|docs[\\/][\w.-]+|E:[\\/]|C:[\\/]|已修改|文件|路径/i.test(value)) {
+    return "file_change";
+  }
+  if (/^\s*\$|命令|输出|Exit code|PowerShell|shell|运行/i.test(value)) {
+    return "command_output";
+  }
+  return "runtime_detail";
+}
+
+function conversationDetailSummary(kind, text) {
+  const prefix = {
+    command_output: "命令输出",
+    file_change: "文件改动",
+    test_log: "验证日志",
+    screenshot: "截图证据",
+    runtime_detail: "运行详情",
+  }[kind] || "详情";
+  return `${prefix}：${summarizeForFollowup(text, 96) || "点击展开查看完整内容"}`;
+}
+
+function buildConversationDetailBlocks(text, { force = false } = {}) {
+  const value = safeText(text, "");
+  if (!value) return [];
+  const shouldCollapse =
+    force ||
+    value.length > 420 ||
+    /```|TAP version|npm run|node --test|diff --git|Exit code|已修改|截图|\.png|app[\\/]/i.test(value);
+  if (!shouldCollapse) return [];
+  const kind = classifyConversationDetail(value);
+  return [
+    {
+      kind,
+      summary: conversationDetailSummary(kind, value),
+      text: value,
+      collapsedByDefault: true,
+    },
+  ];
+}
+
+function normalizeConversationItem(entry = {}, fallback = {}) {
+  const text = safeText(entry.text || entry.summary || entry.detail || entry.preview, "");
+  if (!text) return null;
+  const role = conversationItemRole(entry);
+  const isLoop = role === "loop" || role === "guidance";
+  const label = safeText(
+    entry.label,
+    role === "guidance" ? "你的补充" : isLoop ? "codex-loop 指令" : role === "runtime" ? "运行记录" : "Codex 回复",
+  );
+  const detailBlocks = Array.isArray(entry.detailBlocks)
+    ? entry.detailBlocks
+    : buildConversationDetailBlocks(text, { force: entry.forceDetail === true });
+  return {
+    id: safeText(entry.id, `${safeText(entry.at || fallback.at, "")}-${role}-${buildPromptPreview(text, 48)}`),
+    at: safeText(entry.at || fallback.at, ""),
+    role,
+    sourceRole: safeText(entry.role, ""),
+    label,
+    align: isLoop ? "right" : "left",
+    text,
+    preview: buildPromptPreview(entry.preview || text, isLoop ? 180 : 260),
+    detailBlocks,
+    completed: Boolean(entry.completed),
+  };
+}
+
+function dedupeConversationItems(items = []) {
+  const byContent = new Map();
+  for (const item of items.filter(Boolean)) {
+    const key = [
+      item.role,
+      safeText(item.text, "").replace(/\s+/g, " ").slice(0, 600),
+    ].join("|");
+    const currentAt = Date.parse(item.at || "");
+    const existing = byContent.get(key);
+    const existingAt = Date.parse(existing?.at || "");
+    if (
+      !existing ||
+      (Number.isFinite(currentAt) && (!Number.isFinite(existingAt) || currentAt >= existingAt)) ||
+      (item.completed && !existing.completed)
+    ) {
+      byContent.set(key, item);
+    }
+  }
+  return [...byContent.values()].sort((a, b) => {
+    const left = Date.parse(a.at || "");
+    const right = Date.parse(b.at || "");
+    if (!Number.isFinite(left) && !Number.isFinite(right)) return 0;
+    if (!Number.isFinite(left)) return 1;
+    if (!Number.isFinite(right)) return -1;
+    return left - right;
+  });
+}
+
+function buildConversationItems(snapshot, { transcriptEntries = [], runtimeEvents = [] } = {}) {
+  const items = [];
+  const latestPrompt = safeText(snapshot?.thread?.lastDispatchPrompt, "");
+  if (latestPrompt) {
+    items.push(normalizeConversationItem({
+      role: "loop",
+      label: "codex-loop 指令",
+      at: snapshot?.thread?.lastDispatchAt || "",
+      text: latestPrompt,
+      preview: latestPrompt,
+    }));
+  }
+
+  for (const entry of snapshot?.codexConversation?.entries || []) {
+    items.push(normalizeConversationItem(entry));
+  }
+
+  for (const entry of transcriptEntries || []) {
+    const text = safeText(entry.summary || entry.note, "");
+    if (!text) continue;
+    items.push(normalizeConversationItem({
+      role: "codex",
+      label: entry.activeTask || "本地记录",
+      at: entry.at,
+      text,
+      preview: text,
+    }));
+  }
+
+  for (const event of runtimeEvents || []) {
+    const text = safeText(event.detail || event.title, "");
+    if (!text) continue;
+    const dispatchLike = /dispatch|sent|followup|guidance/i.test(event.type || "");
+    items.push(normalizeConversationItem({
+      role: dispatchLike ? "loop" : "runtime",
+      label: event.title || "运行记录",
+      at: event.at,
+      text,
+      preview: text,
+      forceDetail: !dispatchLike,
+    }));
+  }
+
+  return dedupeConversationItems(items).slice(-24);
+}
+
 export async function exportMobileView(startDir = process.cwd()) {
   const snapshot = await ensureLoopArtifacts(startDir);
   const summary = buildSummaryPayload(snapshot);
@@ -2612,6 +2767,14 @@ export async function exportMobileView(startDir = process.cwd()) {
   const transcriptText = await fs.readFile(snapshot.paths.transcriptPath, "utf8");
   const transcriptEntries = parseTranscriptEntries(transcriptText);
   const runtimeEvents = await readReadableRuntimeEvents(snapshot.paths.logPath);
+  const visibleTranscriptEntries =
+    transcriptEntries.length > 0
+      ? transcriptEntries
+      : buildFallbackTranscriptEntries(snapshot);
+  const conversationItems = buildConversationItems(snapshot, {
+    transcriptEntries: visibleTranscriptEntries,
+    runtimeEvents,
+  });
   const strategy = buildContinuationStrategy(snapshot);
   const processStatus = buildProcessStatus(snapshot);
   const supervisor = snapshot.profile?.resolved?.conversation?.supervisor || {};
@@ -2689,10 +2852,8 @@ export async function exportMobileView(startDir = process.cwd()) {
     suggestedAction,
     latestPrompt: snapshot.thread.lastDispatchPrompt || "",
     runtimeEvents,
-    transcriptEntries:
-      transcriptEntries.length > 0
-        ? transcriptEntries
-        : buildFallbackTranscriptEntries(snapshot),
+    transcriptEntries: visibleTranscriptEntries,
+    conversationItems,
   };
 }
 function buildTranscriptEntry({ at, activeTask, note, summary, mode }) {

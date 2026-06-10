@@ -1089,6 +1089,10 @@ function parsePairingPayload(value) {
 }
 
 function buildMobileConversationEntries(mobileView) {
+  if (mobileView?.conversationItems?.length) {
+    return dedupeConversationEntries(mobileView.conversationItems);
+  }
+
   const codexEntries = mobileView?.codexConversation?.entries || [];
   if (codexEntries.length) {
     return dedupeConversationEntries(codexEntries);
@@ -1160,7 +1164,7 @@ function MobileConversationTimeline({ mobileView }) {
   return (
     <div className="conversation-timeline mobile-task-conversation">
       {entries.map((entry, index) => {
-        const isLoopMessage = entry.role === "user";
+        const isLoopMessage = entry.role === "user" || entry.role === "loop";
         const fullText = formatValue(entry.text || entry.summary || entry.preview, "");
         const summary = summarizeVisibleText(
           entry.preview || fullText,
@@ -1204,6 +1208,7 @@ function MobileConversationTimeline({ mobileView }) {
                 </span>
               </summary>
               {fullText ? <MarkdownMessage text={fullText} /> : null}
+              <ConversationDetailBlocks blocks={entry.detailBlocks} />
             </details>
           </article>
         );
@@ -1751,6 +1756,28 @@ function StatusSummaryPanel({
 
 const StatusSummaryPanelV2 = StatusSummaryPanel;
 
+function ConversationDetailBlocks({ blocks = [] }) {
+  const visibleBlocks = Array.isArray(blocks) ? blocks.filter(Boolean) : [];
+  if (!visibleBlocks.length) {
+    return null;
+  }
+
+  return (
+    <div className="conversation-detail-list">
+      {visibleBlocks.map((block, index) => (
+        <details
+          className="conversation-detail-block"
+          key={`${block.kind || "detail"}-${index}`}
+          open={block.collapsedByDefault === false}
+        >
+          <summary>{formatValue(block.summary, "查看详情")}</summary>
+          <pre className="conversation-detail-body">{formatValue(block.text, "")}</pre>
+        </details>
+      ))}
+    </div>
+  );
+}
+
 function RuntimeEventList({ events = [] }) {
   const visibleEvents = dedupeRuntimeEventsForDisplay(events, 4);
   if (!visibleEvents.length) {
@@ -1863,7 +1890,7 @@ function ConversationTimeline({
     <div className="conversation-timeline">
       {visibleEntries.length ? visibleEntries.map((entry, index) => {
         const isGuidance = entry.role === "guidance";
-        const isLoopMessage = entry.role === "user" || isGuidance;
+        const isLoopMessage = entry.role === "user" || entry.role === "loop" || isGuidance;
         const rowClassName = isGuidance
           ? "conversation-row is-guidance"
           : isLoopMessage
@@ -1913,6 +1940,7 @@ function ConversationTimeline({
                 </span>
               </summary>
               {fullText ? <MarkdownMessage text={fullText} /> : null}
+              <ConversationDetailBlocks blocks={entry.detailBlocks} />
           </details>
         );
         return (
@@ -3019,6 +3047,7 @@ function DashboardHome({
   latestSummary,
   transcriptEntries,
   latestPrompt,
+  mobileView,
   processStatus,
   productionStatus,
   productionPreflight,
@@ -3051,7 +3080,10 @@ function DashboardHome({
   const codexConversation = snapshot?.codexConversation || {};
   const latestCodexUser = codexConversation.latestUser || null;
   const latestCodexAssistant = codexConversation.latestAssistant || null;
-  const codexConversationEntries = [...(codexConversation.entries || []).slice(0, 10)].reverse();
+  const sharedConversationItems = mobileView?.conversationItems || [];
+  const codexConversationEntries = sharedConversationItems.length
+    ? sharedConversationItems
+    : [...(codexConversation.entries || []).slice(0, 10)].reverse();
   const visibleTranscriptEntries = transcriptEntries.filter(isUsefulTranscriptEntry).slice(0, 4);
   const isDispatching = snapshot?.thread?.continuationStatus === "dispatching";
   const isReviewing = snapshot?.thread?.continuationStatus === "reviewing";
@@ -4165,6 +4197,7 @@ function DesktopConsoleApp() {
             suggestedAction={suggestedAction}
             transcriptEntries={transcriptEntries}
             latestPrompt={latestPrompt}
+            mobileView={mobileView}
             processStatus={processStatus}
             productionStatus={productionStatus}
             productionPreflight={productionPreflight}

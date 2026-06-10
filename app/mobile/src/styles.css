@@ -266,6 +266,44 @@ label {
   line-height: 1.65;
 }
 
+.conversation-detail-list {
+  display: grid;
+  gap: 0.45rem;
+  margin-top: 0.75rem;
+}
+
+.conversation-detail-block {
+  border-top: 1px solid rgba(31, 33, 31, 0.09);
+  color: inherit;
+}
+
+.conversation-detail-block summary {
+  padding-top: 0.65rem;
+  cursor: pointer;
+  list-style: none;
+  color: inherit;
+  font-size: 0.78rem;
+  opacity: 0.72;
+}
+
+.conversation-detail-block summary::-webkit-details-marker {
+  display: none;
+}
+
+.conversation-detail-body {
+  margin: 0.65rem 0 0;
+  padding: 0.75rem;
+  overflow-x: auto;
+  border-radius: 0.9rem;
+  background: rgba(31, 33, 31, 0.045);
+  color: inherit;
+  font-family: "Cascadia Code", "SFMono-Regular", Consolas, monospace;
+  font-size: 0.78rem;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
 .pending-guidance {
   display: flex;
   align-items: flex-start;
