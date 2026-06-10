@@ -1505,6 +1505,7 @@ function StatusSummaryPanel({
   pollStatus,
   healthSummary,
   runtimeEvents,
+  productionStatus,
 }) {
   const processDetail = processStatus?.detail || codexWorkStatus;
   const monitorText = processStatus?.monitorLabel || processStatus?.headline || continuationStatus;
@@ -1572,6 +1573,30 @@ function StatusSummaryPanel({
       : null,
   ].filter(Boolean);
   const detailRows = [
+    productionStatus?.title
+      ? [
+          "生产状态摘要",
+          [
+            productionStatus.status === "passed" ? "可继续使用" : "需要留意",
+            productionStatus.nextAction
+              ? `${productionStatus.nextActionLabel || "下一步建议"}：${productionStatus.nextAction}`
+              : "",
+          ]
+            .filter(Boolean)
+            .join("："),
+        ]
+      : null,
+    productionStatus?.sections?.length
+      ? [
+          "最近生产检查",
+          productionStatus.sections
+            .slice(0, 3)
+            .map((section) =>
+              [section.label, section.summary].filter(Boolean).join("："),
+            )
+            .join(" · "),
+        ]
+      : null,
     processStatus?.supervisorVerificationEvidenceCount
       ? [
           "截图证据",
@@ -2888,6 +2913,7 @@ function DashboardHome({
   transcriptEntries,
   latestPrompt,
   processStatus,
+  productionStatus,
   settingsForm,
   healthIssues,
   uiError,
@@ -3110,6 +3136,7 @@ function DashboardHome({
               controllerStatus={controllerStatus}
               codexWorkStatus={codexWorkStatus}
               processStatus={processStatus}
+              productionStatus={productionStatus}
               currentLoopName={loopTitle}
               threadLabel={threadLabel}
               modelStatus={modelStatus}
@@ -3133,6 +3160,7 @@ function DesktopConsoleApp() {
   const [devicePairingError, setDevicePairingError] = useState("");
   const [automationStatus, setAutomationStatus] = useState(null);
   const [controllerStatus, setControllerStatus] = useState(null);
+  const [productionStatus, setProductionStatus] = useState(null);
   const [ollamaModels, setOllamaModels] = useState([]);
   const [assistantState, setAssistantState] = useState(null);
   const [assistantAnswer, setAssistantAnswer] = useState("");
@@ -3217,6 +3245,7 @@ function DesktopConsoleApp() {
         nextLauncherStatus,
         nextRemoteAccessStatus,
         nextControllerStatus,
+        nextProductionStatus,
         nextOllamaModels,
         nextAssistantState,
       ] = await Promise.all([
@@ -3232,6 +3261,7 @@ function DesktopConsoleApp() {
               detail: "自动循环状态暂不可用。",
             },
         ),
+        requestJson("/production-status").catch(() => productionStatus || null),
         requestJson("/ollama/models").catch(() => ({ models: [] })),
         requestJson("/loop-creation-assistant").catch(() => assistantState || null),
       ]);
@@ -3243,6 +3273,7 @@ function DesktopConsoleApp() {
       setLauncherStatus(nextLauncherStatus);
       setRemoteAccessStatus(nextRemoteAccessStatus);
       setControllerStatus(nextControllerStatus);
+      setProductionStatus(nextProductionStatus);
       setOllamaModels(nextOllamaModels.models || []);
       if (
         !(
@@ -4017,6 +4048,7 @@ function DesktopConsoleApp() {
             transcriptEntries={transcriptEntries}
             latestPrompt={latestPrompt}
             processStatus={processStatus}
+            productionStatus={productionStatus}
             mobileSummary={mobileSummary}
             bindingNote={bindingNote}
             strategy={strategy}

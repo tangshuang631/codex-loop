@@ -132,6 +132,50 @@ test("handler dispatches health route with snapshot health summary", async () =>
   assert.match(chunks.join(""), /events:missing/);
 });
 
+test("handler dispatches production status route for product health checks", async () => {
+  const handler = buildHandler({
+    operations: {
+      readProductionStatus: async () => ({
+        title: "codex-loop 生产状态摘要",
+        status: "passed",
+        nextAction: "可以进入真实任务使用；长时间运行仍建议保留人工观察和运行日志。",
+        sections: [
+          {
+            label: "最近生产检查",
+            status: "passed",
+            summary: "8 项检查通过",
+          },
+        ],
+      }),
+    },
+  });
+
+  const chunks = [];
+  const response = {
+    writeHead(statusCode, headers) {
+      this.statusCode = statusCode;
+      this.headers = headers;
+    },
+    end(text) {
+      chunks.push(text);
+    },
+  };
+
+  await handler(
+    {
+      method: "GET",
+      url: "/api/production-status",
+      [Symbol.asyncIterator]: async function* iterator() {},
+    },
+    response,
+  );
+
+  assert.equal(response.statusCode, 200);
+  assert.match(chunks.join(""), /codex-loop 生产状态摘要/);
+  assert.match(chunks.join(""), /最近生产检查/);
+  assert.match(chunks.join(""), /可以进入真实任务使用/);
+});
+
 test("handler dispatches summary route", async () => {
   const handler = buildHandler({
     operations: {

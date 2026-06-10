@@ -44,6 +44,7 @@ import {
       updateAutomationIntervalForThread,
 } from "./lib/automation-store.mjs";
 import { saveUserOverrides } from "./lib/adapter-store.mjs";
+import { readProductionStatusSummary } from "../../scripts/production-status.mjs";
 
 function sendJson(response, statusCode, value) {
   response.writeHead(statusCode, {
@@ -114,6 +115,7 @@ export function buildHandler({
         const snapshot = await readLoopSnapshot(startDir);
         return readAutomationStatusForThread(snapshot.thread);
       },
+      readProductionStatus: readProductionStatusSummary,
       shutdownLauncher: async (startDir = process.cwd(), payload = {}) => {
         const snapshot = await readLoopSnapshot(startDir);
         const activeLoopRunning =
@@ -196,6 +198,11 @@ export function buildHandler({
           continuationStatus: snapshot.thread.continuationStatus,
           issues: snapshot.health?.issues || [],
         });
+        return;
+      }
+
+      if (request.method === "GET" && request.url === "/api/production-status") {
+        sendJson(response, 200, await operations.readProductionStatus());
         return;
       }
 

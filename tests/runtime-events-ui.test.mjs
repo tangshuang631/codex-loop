@@ -112,6 +112,18 @@ test("dashboard folds low-frequency status details by default", async () => {
   assert.match(stylesSource, /\.status-detail-fold summary/);
 });
 
+test("dashboard keeps production status inside folded status details", async () => {
+  const appSource = await fs.readFile("app/web/src/App.jsx", "utf8");
+
+  assert.match(appSource, /productionStatus/);
+  assert.match(appSource, /requestJson\("\/production-status"\)\.catch/);
+  assert.match(appSource, /生产状态摘要/);
+  assert.match(appSource, /最近生产检查/);
+  assert.match(appSource, /下一步建议/);
+  assert.match(appSource, /status-detail-fold/);
+  assert.doesNotMatch(appSource, /production-status-card/);
+});
+
 test("dashboard surfaces supervisor review without adding noisy debug cards", async () => {
   const appSource = await fs.readFile("app/web/src/App.jsx", "utf8");
 

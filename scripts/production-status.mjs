@@ -1,4 +1,5 @@
 import fs from "node:fs/promises";
+import { fileURLToPath } from "node:url";
 import path from "node:path";
 
 const root = process.cwd();
@@ -130,7 +131,7 @@ function deriveNextAction(items) {
   return "可以进入真实任务使用；长时间运行仍建议保留人工观察和运行日志。";
 }
 
-async function main() {
+export async function readProductionStatusSummary() {
   const startedAt = new Date();
   const items = [];
 
@@ -139,7 +140,7 @@ async function main() {
   }
 
   const status = items.every((item) => item.status === "passed") ? "passed" : "attention";
-  const report = {
+  return {
     title: "codex-loop 生产状态摘要",
     status,
     startedAt: startedAt.toISOString(),
@@ -148,14 +149,19 @@ async function main() {
     nextActionLabel: "下一步建议",
     nextAction: deriveNextAction(items),
   };
+}
 
+async function main() {
+  const report = await readProductionStatusSummary();
   process.stdout.write(`${JSON.stringify(report, null, 2)}\n`);
-  if (status !== "passed") {
+  if (report.status !== "passed") {
     process.exitCode = 1;
   }
 }
 
-main().catch((error) => {
-  process.stderr.write(`${error.stack || error.message}\n`);
-  process.exitCode = 1;
-});
+if (process.argv[1] && fileURLToPath(import.meta.url) === path.resolve(process.argv[1])) {
+  main().catch((error) => {
+    process.stderr.write(`${error.stack || error.message}\n`);
+    process.exitCode = 1;
+  });
+}
