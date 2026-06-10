@@ -1300,6 +1300,19 @@ test("production status detects supervisor recovery from structured diagnosis", 
   }
 });
 
+test("frontend evidence check requires closed-loop evidence progress on desktop and mobile", async () => {
+  const source = await read("scripts/frontend-evidence-check.mjs");
+  const readme = await read("README.md");
+  const architecture = await read("docs/enterprise-loop-architecture.md");
+
+  assert.match(source, /闭环证据/);
+  assert.match(source, /真实闭环/);
+  assert.match(source, /先确认桌面端和移动端构建产物是否包含/);
+  assert.match(source, /闭环证据/);
+  assert.match(readme, /闭环证据/);
+  assert.match(architecture, /闭环证据/);
+});
+
 test("docs make production readiness check the pre-use gate", async () => {
   const readme = await read("README.md");
   const checklist = await read("codex-loop6.7-13-29开发清单.md");
