@@ -3737,6 +3737,11 @@ function DesktopConsoleApp() {
 
     if (actionId === "start-loop") {
       await withSubmit(async () => {
+        const preflight = await requestJson("/production-preflight");
+        setProductionPreflight(preflight);
+        if (!preflight.canDispatch) {
+          throw new Error(preflight.nextAction || preflight.summary || "暂不建议启动真实循环。");
+        }
         await requestJson("/start", { method: "POST" });
       });
       return;

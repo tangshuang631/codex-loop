@@ -326,6 +326,27 @@ test("dashboard treats supervisor reviewing as its own non-dispatching wait stat
   assert.match(appSource, /Codex 已完成，正在等待本地监督复盘。/);
 });
 
+test("dashboard checks production preflight before starting a real loop", async () => {
+  const appSource = await fs.readFile("app/web/src/App.jsx", "utf8");
+  const actionStart = appSource.indexOf('if (actionId === "start-loop")');
+  const actionEnd = appSource.indexOf('if (actionId === "stop-loop")', actionStart);
+  const actionSource = appSource.slice(actionStart, actionEnd);
+  const preflightIndex = actionSource.indexOf('requestJson("/production-preflight")');
+  const startIndex = actionSource.indexOf('requestJson("/start"');
+
+  assert.notEqual(actionStart, -1);
+  assert.notEqual(actionEnd, -1);
+  assert.notEqual(preflightIndex, -1);
+  assert.notEqual(startIndex, -1);
+  assert.ok(
+    preflightIndex < startIndex,
+    "开始循环必须先刷新真实循环前预检，再调用真实启动接口。",
+  );
+  assert.match(actionSource, /setProductionPreflight/);
+  assert.match(actionSource, /canDispatch/);
+  assert.match(actionSource, /暂不建议启动真实循环/);
+});
+
 test("dashboard loads core loop data even when auxiliary status endpoints fail", async () => {
   const appSource = await fs.readFile("app/web/src/App.jsx", "utf8");
 
