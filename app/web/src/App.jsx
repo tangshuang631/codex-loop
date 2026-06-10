@@ -1557,6 +1557,15 @@ function StatusSummaryPanel({
     : maturity?.canLongRun
       ? "已达到长期运行基本证据。"
       : "等待更多真实闭环证据。";
+  const closedLoopCount = Math.max(
+    0,
+    Number(productionObservation?.counters?.closedLoops || 0),
+  );
+  const closedLoopTarget = 2;
+  const closedLoopProgress = Math.min(100, Math.round((closedLoopCount / closedLoopTarget) * 100));
+  const closedLoopText = closedLoopCount >= closedLoopTarget
+    ? "已达到长期运行基本证据"
+    : `还差 ${closedLoopTarget - closedLoopCount} 轮真实闭环`;
   const preflightLabel = productionPreflight?.canDispatch
     ? "可以启动"
     : productionPreflight?.status === "waiting"
@@ -1732,6 +1741,17 @@ function StatusSummaryPanel({
           <strong>{value}</strong>
         </div>
       ))}
+      {productionStatus ? (
+        <div className="closed-loop-evidence">
+          <div>
+            <span>闭环证据</span>
+            <strong>{closedLoopCount}/{closedLoopTarget} · {closedLoopText}</strong>
+          </div>
+          <div className="closed-loop-evidence-bar" aria-hidden="true">
+            <span style={{ width: `${closedLoopProgress}%` }} />
+          </div>
+        </div>
+      ) : null}
       <details className="status-detail-fold">
         <summary>
           <span>更多状态</span>

@@ -102,6 +102,19 @@ test("mobile app shows structured maturity and remaining production gaps", async
   assert.match(source, /剩余缺口/);
 });
 
+test("mobile app shows closed-loop evidence progress for remote supervision", async () => {
+  const source = await read("app/mobile/src/main.jsx");
+  const styleSource = await read("app/mobile/src/styles.css");
+
+  assert.match(source, /closedLoopCount/);
+  assert.match(source, /closedLoopTarget/);
+  assert.match(source, /闭环证据/);
+  assert.match(source, /closed-loop-evidence/);
+  assert.match(source, /还差.*轮|已达到长期运行基本证据/);
+  assert.match(styleSource, /\.closed-loop-evidence/);
+  assert.match(styleSource, /\.closed-loop-evidence-bar/);
+});
+
 test("mobile app shows supervisor screenshot evidence without adding noisy cards", async () => {
   const source = await read("app/mobile/src/main.jsx");
   const styleSource = await read("app/mobile/src/styles.css");

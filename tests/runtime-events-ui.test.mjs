@@ -154,6 +154,23 @@ test("dashboard uses structured maturity instead of parsing production prose", a
   assert.match(statusSource, /剩余缺口/);
 });
 
+test("dashboard shows closed-loop evidence progress before long-running use", async () => {
+  const appSource = await fs.readFile("app/web/src/App.jsx", "utf8");
+  const stylesSource = await fs.readFile("app/web/src/styles.css", "utf8");
+  const statusStart = appSource.indexOf("function StatusSummaryPanel");
+  const statusEnd = appSource.indexOf("const StatusSummaryPanelV2", statusStart);
+  const statusSource = appSource.slice(statusStart, statusEnd);
+
+  assert.notEqual(statusStart, -1);
+  assert.match(statusSource, /closedLoopCount/);
+  assert.match(statusSource, /closedLoopTarget/);
+  assert.match(statusSource, /闭环证据/);
+  assert.match(statusSource, /closed-loop-evidence/);
+  assert.match(statusSource, /还差.*轮|已达到长期运行基本证据/);
+  assert.match(stylesSource, /\.closed-loop-evidence/);
+  assert.match(stylesSource, /\.closed-loop-evidence-bar/);
+});
+
 test("dashboard surfaces supervisor review without adding noisy debug cards", async () => {
   const appSource = await fs.readFile("app/web/src/App.jsx", "utf8");
 

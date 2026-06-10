@@ -165,6 +165,46 @@ label {
   line-height: 1.55;
 }
 
+.closed-loop-evidence {
+  display: grid;
+  gap: 0.58rem;
+  padding: 0.95rem 1rem;
+  border-top: 1px solid rgba(31, 33, 31, 0.09);
+}
+
+.closed-loop-evidence > div:first-child {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.closed-loop-evidence span {
+  color: #85867f;
+  font-size: 0.76rem;
+}
+
+.closed-loop-evidence strong {
+  color: #373933;
+  font-size: 0.92rem;
+  line-height: 1.55;
+  text-align: right;
+}
+
+.closed-loop-evidence-bar {
+  height: 0.38rem;
+  overflow: hidden;
+  border-radius: 999px;
+  background: rgba(31, 33, 31, 0.09);
+}
+
+.closed-loop-evidence-bar span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: #242620;
+}
+
 .status-detail {
   border-top: 1px solid rgba(31, 33, 31, 0.09);
   padding: 0.85rem 1rem;
