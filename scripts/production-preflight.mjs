@@ -28,6 +28,8 @@ function buildEvidence(status) {
   const observation = findSection(status, "真实运行观测");
   if (status.readiness?.stage === "production") {
     evidence.push("真实运行已具备 2 轮闭环证据。");
+  } else if (needsSupervisorRecovery(status)) {
+    evidence.push("Codex 已有完成回复，但还缺少 NPC 监督复盘；请先运行 npm run production:recover 补齐监督复盘。");
   } else if (/1 轮/u.test(`${observation.summary || ""}\n${status.readiness?.summary || ""}`)) {
     evidence.push("真实运行已经观察到 1 轮闭环，还缺少第 2 轮连续闭环证据。");
   } else {
@@ -37,8 +39,21 @@ function buildEvidence(status) {
   return evidence;
 }
 
+function needsSupervisorRecovery(status = {}) {
+  const observation = findSection(status, "真实运行观测");
+  const textBlock = [
+    status.nextAction,
+    status.readiness?.nextAction,
+    status.readiness?.summary,
+    observation.summary,
+    observation.nextAction,
+  ].filter(Boolean).join("\n");
+  return /缺少\s*NPC\s*监督复盘|补齐监督复盘|production:recover/u.test(textBlock);
+}
+
 function derivePreflightStatus(status) {
   const stage = status.readiness?.stage || "";
+  if (needsSupervisorRecovery(status)) return { status: "blocked", canDispatch: false };
   if (stage === "production") return { status: "ready", canDispatch: true };
   if (stage === "trial") return { status: "ready_with_attention", canDispatch: true };
   if (stage === "observing") return { status: "waiting", canDispatch: false };
@@ -74,6 +89,11 @@ export async function readProductionPreflightSummary({
     "目标线程是当前 codex-loop 自己所在的 Codex 线程，不能启动真实循环。";
   const selfTargetNextAction =
     "请绑定另一个可见 Codex 窗口作为目标线程，再重新运行预检。";
+  const supervisorRecovery = needsSupervisorRecovery(status);
+  const recoverySummary =
+    "Codex 已有完成回复，但还缺少 NPC 监督复盘，不能继续发送下一轮。";
+  const recoveryNextAction =
+    "请先运行 npm run production:recover 补齐监督复盘；该命令不会发送下一轮指令。";
 
   return {
     title: "codex-loop 真实循环前预检",
@@ -85,6 +105,8 @@ export async function readProductionPreflightSummary({
     summary:
       selfTarget
         ? selfTargetSummary
+        : supervisorRecovery
+          ? recoverySummary
         : stage === "production"
         ? "已具备长期运行基本证据，可以在人工观察下继续运行。"
         : stage === "trial"
@@ -94,6 +116,8 @@ export async function readProductionPreflightSummary({
             : "预检未通过，暂不建议启动真实循环。",
     nextAction: selfTarget
       ? selfTargetNextAction
+      : supervisorRecovery
+        ? recoveryNextAction
       : decision.canDispatch
       ? `${targetAction}再启动真实任务，观察发送、Codex 完成和 NPC 复盘是否连续出现。`
       : status.nextAction || status.readiness?.nextAction || "先处理预检提示后再继续。",

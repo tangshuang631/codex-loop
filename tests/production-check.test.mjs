@@ -119,6 +119,45 @@ test("production preflight blocks dispatching to the current codex-loop thread",
   assert.match(preflight.evidence.join("\n"), /不能把当前线程作为目标/);
 });
 
+test("production preflight blocks dispatch when Codex completion still needs supervisor recovery", async () => {
+  const status = {
+    status: "attention",
+    target: {
+      runId: "assistant-loop",
+      threadId: "thread-needs-review",
+      threadTitle: "需要复盘的任务",
+      workspaceRoot: "E:\\2026\\opencow",
+      continuationStatus: "idle",
+    },
+    readiness: {
+      stage: "trial",
+      summary: "代码闸门已通过，适合短时试用。",
+      nextAction: "先运行 npm run production:recover 补齐监督复盘；该命令不会发送下一轮指令。",
+    },
+    sections: [
+      { label: "最近生产检查", status: "passed", summary: "8 项检查通过" },
+      { label: "前端证据", status: "passed", summary: "关键界面信号已进入构建产物" },
+      { label: "长跑节奏", status: "passed", summary: "本地长跑节奏通过" },
+      {
+        label: "真实运行观测",
+        status: "attention",
+        summary: "Codex 已有完成回复，但还缺少 NPC 监督复盘，暂时不能算完整闭环。",
+        nextAction: "先运行 npm run production:recover 补齐监督复盘；该命令不会发送下一轮指令。",
+      },
+    ],
+  };
+
+  const preflight = await readProductionPreflightSummary({
+    readProductionStatusSummary: async () => status,
+  });
+
+  assert.equal(preflight.status, "blocked");
+  assert.equal(preflight.canDispatch, false);
+  assert.match(preflight.summary, /还缺少 NPC 监督复盘/);
+  assert.match(preflight.nextAction, /production:recover/);
+  assert.match(preflight.evidence.join("\n"), /补齐监督复盘/);
+});
+
 test("long-run smoke check is exposed and uses simulated controller dependencies", async () => {
   const packageJson = JSON.parse(await read("package.json"));
   const source = await read("scripts/longrun-smoke.mjs");
