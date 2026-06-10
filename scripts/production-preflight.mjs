@@ -45,18 +45,35 @@ function derivePreflightStatus(status) {
   return { status: "blocked", canDispatch: false };
 }
 
+function isCurrentCodexThreadTarget(target = {}, currentCodexThreadId = "") {
+  const targetThreadId = text(target.threadId);
+  const currentThreadId = text(currentCodexThreadId);
+  return Boolean(targetThreadId && currentThreadId && targetThreadId === currentThreadId);
+}
+
 export async function readProductionPreflightSummary({
   readProductionStatusSummary = defaultReadProductionStatusSummary,
+  currentCodexThreadId = process.env.CODEX_THREAD_ID || "",
   now = new Date(),
 } = {}) {
   const status = await readProductionStatusSummary({ now });
-  const decision = derivePreflightStatus(status);
+  const selfTarget = isCurrentCodexThreadTarget(status.target || {}, currentCodexThreadId);
+  const decision = selfTarget
+    ? { status: "blocked", canDispatch: false }
+    : derivePreflightStatus(status);
   const targetLabel = formatTarget(status.target || {});
   const evidence = buildEvidence(status);
+  if (selfTarget) {
+    evidence.push("不能把当前线程作为目标，否则 codex-loop 会给自己发送循环指令。");
+  }
   const stage = status.readiness?.stage || "";
   const targetAction = targetLabel
     ? `确认当前验证目标：${targetLabel}。`
     : "先确认当前验证目标。";
+  const selfTargetSummary =
+    "目标线程是当前 codex-loop 自己所在的 Codex 线程，不能启动真实循环。";
+  const selfTargetNextAction =
+    "请绑定另一个可见 Codex 窗口作为目标线程，再重新运行预检。";
 
   return {
     title: "codex-loop 真实循环前预检",
@@ -66,14 +83,18 @@ export async function readProductionPreflightSummary({
     target: status.target || {},
     readiness: status.readiness || {},
     summary:
-      stage === "production"
+      selfTarget
+        ? selfTargetSummary
+        : stage === "production"
         ? "已具备长期运行基本证据，可以在人工观察下继续运行。"
         : stage === "trial"
           ? "代码闸门已通过，可以短时试用；继续前必须确认目标，并补齐第 2 轮真实闭环证据。"
           : stage === "observing"
             ? "真实任务仍在观察中，暂时不要重复发送下一轮。"
             : "预检未通过，暂不建议启动真实循环。",
-    nextAction: decision.canDispatch
+    nextAction: selfTarget
+      ? selfTargetNextAction
+      : decision.canDispatch
       ? `${targetAction}再启动真实任务，观察发送、Codex 完成和 NPC 复盘是否连续出现。`
       : status.nextAction || status.readiness?.nextAction || "先处理预检提示后再继续。",
     evidence,

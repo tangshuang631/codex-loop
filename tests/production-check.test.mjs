@@ -80,6 +80,45 @@ test("production preflight reports trial readiness with explicit target confirma
   assert.match(preflight.evidence.join("\n"), /还缺少第 2 轮/);
 });
 
+test("production preflight blocks dispatching to the current codex-loop thread", async () => {
+  const status = {
+    status: "attention",
+    target: {
+      runId: "assistant-loop",
+      threadId: "thread-self",
+      threadTitle: "当前 codex-loop 窗口",
+      workspaceRoot: "E:\\2026\\codex-loop",
+      continuationStatus: "idle",
+    },
+    readiness: {
+      stage: "trial",
+      summary: "代码闸门已通过，并已观察到 1 轮真实闭环。",
+      nextAction: "再跑至少 1 轮真实任务。",
+    },
+    sections: [
+      { label: "最近生产检查", status: "passed", summary: "8 项检查通过" },
+      { label: "前端证据", status: "passed", summary: "关键界面信号已进入构建产物" },
+      { label: "长跑节奏", status: "passed", summary: "本地长跑节奏通过" },
+      {
+        label: "真实运行观测",
+        status: "attention",
+        summary: "已经观察到 1 轮发送、Codex 完成和 NPC 复盘。",
+      },
+    ],
+  };
+
+  const preflight = await readProductionPreflightSummary({
+    currentCodexThreadId: "thread-self",
+    readProductionStatusSummary: async () => status,
+  });
+
+  assert.equal(preflight.status, "blocked");
+  assert.equal(preflight.canDispatch, false);
+  assert.match(preflight.summary, /当前 codex-loop 自己所在的 Codex 线程/);
+  assert.match(preflight.nextAction, /绑定另一个可见 Codex 窗口/);
+  assert.match(preflight.evidence.join("\n"), /不能把当前线程作为目标/);
+});
+
 test("long-run smoke check is exposed and uses simulated controller dependencies", async () => {
   const packageJson = JSON.parse(await read("package.json"));
   const source = await read("scripts/longrun-smoke.mjs");
