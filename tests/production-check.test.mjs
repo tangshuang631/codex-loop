@@ -5,6 +5,7 @@ import os from "node:os";
 import path from "node:path";
 
 import { readProductionStatusSummary } from "../scripts/production-status.mjs";
+import { readProductionPreflightSummary } from "../scripts/production-preflight.mjs";
 import { runProductionRecovery } from "../scripts/production-recover.mjs";
 
 async function read(path) {
@@ -22,6 +23,61 @@ test("production readiness check is exposed as one verified command", async () =
   assert.match(source, /npm run build:web/);
   assert.match(source, /npm run build:mobile/);
   assert.match(source, /git diff --check/);
+});
+
+test("production preflight is exposed as a read-only gate before real loop dispatch", async () => {
+  const packageJson = JSON.parse(await read("package.json"));
+  const source = await read("scripts/production-preflight.mjs");
+
+  assert.equal(packageJson.scripts["production:preflight"], "node scripts/production-preflight.mjs");
+  assert.match(source, /真实循环前预检/);
+  assert.match(source, /readProductionStatusSummary/);
+  assert.match(source, /当前验证目标/);
+  assert.doesNotMatch(source, /runLoopTurn|sendPendingGuidance|startRun|dispatchThreadMessage/);
+});
+
+test("production preflight reports trial readiness with explicit target confirmation", async () => {
+  const status = {
+    status: "attention",
+    target: {
+      runId: "assistant-loop",
+      threadId: "thread-123",
+      threadTitle: "按清单继续开发",
+      workspaceRoot: "E:\\2026\\opencow",
+      continuationStatus: "idle",
+    },
+    readiness: {
+      stage: "trial",
+      summary: "代码闸门已通过，并已观察到 1 轮真实闭环。",
+      nextAction:
+        "再跑至少 1 轮真实任务，确认发送、Codex 完成和 NPC 复盘能连续出现。 当前验证目标：按清单继续开发 / E:\\2026\\opencow / thread-123。触发真实循环前，请确认这就是要继续的任务。",
+    },
+    sections: [
+      { label: "最近生产检查", status: "passed", summary: "8 项检查通过" },
+      { label: "前端证据", status: "passed", summary: "关键界面信号已进入构建产物" },
+      { label: "长跑节奏", status: "passed", summary: "本地长跑节奏通过" },
+      {
+        label: "真实运行观测",
+        status: "attention",
+        summary: "已经观察到 1 轮发送、Codex 完成和 NPC 复盘。",
+        nextAction: "再跑至少 1 轮真实任务，确认发送、Codex 完成和 NPC 复盘能连续出现。",
+      },
+    ],
+  };
+
+  const preflight = await readProductionPreflightSummary({
+    readProductionStatusSummary: async () => status,
+  });
+
+  assert.equal(preflight.title, "codex-loop 真实循环前预检");
+  assert.equal(preflight.status, "ready_with_attention");
+  assert.equal(preflight.canDispatch, true);
+  assert.equal(preflight.target.workspaceRoot, "E:\\2026\\opencow");
+  assert.match(preflight.summary, /可以短时试用/);
+  assert.match(preflight.nextAction, /确认当前验证目标/);
+  assert.match(preflight.nextAction, /E:\\2026\\opencow/);
+  assert.match(preflight.evidence.join("\n"), /代码闸门/);
+  assert.match(preflight.evidence.join("\n"), /还缺少第 2 轮/);
 });
 
 test("long-run smoke check is exposed and uses simulated controller dependencies", async () => {

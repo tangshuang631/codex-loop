@@ -15,6 +15,7 @@
     "loop:start": "start-codex-loop.bat",
     "production:check": "node scripts/production-check.mjs",
     "production:status": "node scripts/production-status.mjs",
+    "production:preflight": "node scripts/production-preflight.mjs",
     "production:observe": "node scripts/production-observer.mjs",
     "production:recover": "node scripts/production-recover.mjs",
     "dev": "node scripts/dev.mjs",

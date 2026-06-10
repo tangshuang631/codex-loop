@@ -176,6 +176,49 @@ test("handler dispatches production status route for product health checks", asy
   assert.match(chunks.join(""), /可以进入真实任务使用/);
 });
 
+test("handler dispatches production preflight route before real loop dispatch", async () => {
+  const handler = buildHandler({
+    operations: {
+      readProductionPreflight: async () => ({
+        title: "codex-loop 真实循环前预检",
+        status: "ready_with_attention",
+        canDispatch: true,
+        target: {
+          threadTitle: "按清单继续开发",
+          workspaceRoot: "E:\\2026\\opencow",
+          threadId: "thread-123",
+        },
+        nextAction: "确认当前验证目标：按清单继续开发 / E:\\2026\\opencow / thread-123。",
+      }),
+    },
+  });
+
+  const chunks = [];
+  const response = {
+    writeHead(statusCode, headers) {
+      this.statusCode = statusCode;
+      this.headers = headers;
+    },
+    end(text) {
+      chunks.push(text);
+    },
+  };
+
+  await handler(
+    {
+      method: "GET",
+      url: "/api/production-preflight",
+      [Symbol.asyncIterator]: async function* iterator() {},
+    },
+    response,
+  );
+
+  assert.equal(response.statusCode, 200);
+  assert.match(chunks.join(""), /codex-loop 真实循环前预检/);
+  assert.match(chunks.join(""), /ready_with_attention/);
+  assert.match(chunks.join(""), /确认当前验证目标/);
+});
+
 test("handler dispatches summary route", async () => {
   const handler = buildHandler({
     operations: {

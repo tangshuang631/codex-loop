@@ -46,6 +46,7 @@ import {
 } from "./lib/automation-store.mjs";
 import { saveUserOverrides } from "./lib/adapter-store.mjs";
 import { readProductionStatusSummary } from "../../scripts/production-status.mjs";
+import { readProductionPreflightSummary } from "../../scripts/production-preflight.mjs";
 
 function sendJson(response, statusCode, value) {
   response.writeHead(statusCode, {
@@ -117,6 +118,7 @@ export function buildHandler({
         return readAutomationStatusForThread(snapshot.thread);
       },
       readProductionStatus: readProductionStatusSummary,
+      readProductionPreflight: readProductionPreflightSummary,
       shutdownLauncher: async (startDir = process.cwd(), payload = {}) => {
         const snapshot = await readLoopSnapshot(startDir);
         const activeLoopRunning =
@@ -205,6 +207,11 @@ export function buildHandler({
 
       if (request.method === "GET" && request.url === "/api/production-status") {
         sendJson(response, 200, await operations.readProductionStatus());
+        return;
+      }
+
+      if (request.method === "GET" && request.url === "/api/production-preflight") {
+        sendJson(response, 200, await operations.readProductionPreflight());
         return;
       }
 
