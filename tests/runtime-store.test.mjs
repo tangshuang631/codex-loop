@@ -3448,6 +3448,66 @@ test("loop creation assistant keeps visible questions in product task wording", 
   assert.doesNotMatch(state.currentQuestion.prompt, /新 loop|这个 loop|当前 loop/);
 });
 
+test("loop creation assistant does not claim docs were found when none are detected", async () => {
+  const configRoot = await createWorkspace();
+  const projectRoot = path.join(configRoot, "no-docs-project");
+  await fs.mkdir(projectRoot, { recursive: true });
+  await fs.mkdir(path.join(projectRoot, ".git"), { recursive: true });
+
+  let state = await replyLoopCreationAssistant(configRoot, {
+    answer: projectRoot,
+  });
+  state = await replyLoopCreationAssistant(configRoot, {
+    answer: "无文档项目",
+  });
+  state = await replyLoopCreationAssistant(configRoot, {
+    answer: "无文档任务",
+  });
+  state = await replyLoopCreationAssistant(configRoot, {
+    answer: "dev",
+  });
+
+  assert.equal(state.currentQuestion.id, "docs_confirmed");
+  assert.doesNotMatch(state.currentQuestion.prompt, /我已经找到 git 和文档线索/);
+  assert.match(state.currentQuestion.prompt, /未自动发现.*文档|没有.*文档/);
+  assert.match(state.currentQuestion.prompt, /confirm/);
+});
+
+test("loop creation assistant accepts labeled rule docs at the final confirmation step", async () => {
+  const configRoot = await createWorkspace();
+  const projectRoot = path.join(configRoot, "manual-docs-project");
+  const ruleDocPath = path.join(projectRoot, "docs", "policy.md");
+  const devDocPath = path.join(projectRoot, "docs", "context.md");
+  await fs.mkdir(path.dirname(ruleDocPath), { recursive: true });
+  await fs.writeFile(ruleDocPath, "# product rules\n", "utf8");
+  await fs.writeFile(devDocPath, "# dev notes\n", "utf8");
+  await fs.mkdir(path.join(projectRoot, ".git"), { recursive: true });
+
+  let state = await replyLoopCreationAssistant(configRoot, {
+    answer: projectRoot,
+  });
+  state = await replyLoopCreationAssistant(configRoot, {
+    answer: "手动文档项目",
+  });
+  state = await replyLoopCreationAssistant(configRoot, {
+    answer: "手动文档任务",
+  });
+  state = await replyLoopCreationAssistant(configRoot, {
+    answer: "dev",
+  });
+  assert.equal(state.draft.docs.ruleDocs.includes(ruleDocPath), false);
+  assert.equal(state.draft.docs.devDocs.includes(devDocPath), false);
+  state = await replyLoopCreationAssistant(configRoot, {
+    answer: `规则文档：${ruleDocPath}\n开发文档：${devDocPath}`,
+  });
+
+  assert.equal(state.status, "completed");
+  assert.equal(state.createdLoop.loop.docs.ruleDocs.includes(ruleDocPath), true);
+  assert.equal(state.createdLoop.loop.docs.devDocs.includes(devDocPath), true);
+  assert.equal(state.createdLoop.loop.startContextPaths.includes(ruleDocPath), true);
+  assert.equal(state.createdLoop.loop.startContextPaths.includes(devDocPath), true);
+});
+
 test("loop creation assistant can start from a natural-language planning intent", async () => {
   const configRoot = await createWorkspace();
   const projectRoot = path.join(configRoot, "demo-project");
@@ -3717,6 +3777,48 @@ test("loop creation assistant automatically binds a matched Codex thread when cr
   const snapshot = await selectLoop(configRoot, { loopId: state.createdLoop.loop.id });
   assert.equal(snapshot.thread.threadId, "auto-thread-from-create");
   assert.match(snapshot.thread.note, /已自动绑定 Codex 窗口/);
+});
+
+test("loop creation assistant parses labeled project path before automatic binding", async () => {
+  const configRoot = await createWorkspace();
+  const projectRoot = path.join(configRoot, "labeled-path-project");
+  await fs.mkdir(projectRoot, { recursive: true });
+  await fs.mkdir(path.join(projectRoot, ".git"), { recursive: true });
+  await fs.writeFile(
+    path.join(projectRoot, ".git", "HEAD"),
+    "ref: refs/heads/dev\n",
+    "utf8",
+  );
+
+  let state = await replyLoopCreationAssistant(configRoot, {
+    answer: `项目路径：${projectRoot}\nCodex 窗口：任务窗口 A`,
+  });
+  assert.equal(state.currentQuestion.id, "project_name");
+  assert.equal(state.draft.workspaceRoot, projectRoot);
+  assert.equal(state.draft.windowTitle, "任务窗口 A");
+
+  state = await replyLoopCreationAssistant(configRoot, { answer: "标签项目" });
+  state = await replyLoopCreationAssistant(configRoot, { answer: "标签任务" });
+  state = await replyLoopCreationAssistant(configRoot, { answer: "dev" });
+  state = await replyLoopCreationAssistant(configRoot, {
+    answer: "confirm",
+    resolveCodexThread: async ({ workspaceRoot, windowTitle }) => {
+      assert.equal(workspaceRoot, projectRoot);
+      assert.equal(windowTitle, "任务窗口 A");
+      return {
+        status: "matched",
+        threadId: "thread-from-labeled-input",
+        threadTitle: "任务窗口 A",
+        workspaceName: "标签项目",
+        workspaceRoot,
+        userMessage: "已自动绑定标签输入窗口。",
+      };
+    },
+  });
+
+  assert.equal(state.status, "completed");
+  assert.equal(state.createdLoop.loop.threadBinding.threadId, "thread-from-labeled-input");
+  assert.equal(state.createdLoop.loop.creation.evidence.threadResolutionStatus, "matched");
 });
 
 test("syncCodexThreadMirror stores normalized Codex linkage summaries", async () => {

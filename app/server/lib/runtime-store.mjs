@@ -1190,6 +1190,12 @@ function parseWorkspaceRootAnswer(answer) {
       continue;
     }
 
+    const workspaceMatch = line.match(/^(?:项目路径|项目目录|工作区|工作区路径|workspace\s*root|workspace|path|目录)\s*[：:]\s*(.+)$/iu);
+    if (workspaceMatch) {
+      workspaceRoot = safeText(workspaceMatch[1], workspaceRoot);
+      continue;
+    }
+
     if (!workspaceRoot) {
       workspaceRoot = line;
     }
@@ -1199,6 +1205,52 @@ function parseWorkspaceRootAnswer(answer) {
     workspaceRoot: workspaceRoot || safeText(answer, ""),
     windowTitle,
   };
+}
+
+function parseLoopDocsAnswer(answer, workspaceRoot = "") {
+  const result = {
+    ruleDocs: [],
+    devDocs: [],
+  };
+  const lines = safeText(answer, "")
+    .split(/\r?\n/u)
+    .map((line) => line.trim())
+    .filter(Boolean);
+
+  for (const line of lines) {
+    if (/^confirm$/iu.test(line)) {
+      continue;
+    }
+
+    const ruleMatch = line.match(/^(?:规则文档|规则|规范|rule\s*doc|rules?)\s*[：:]\s*(.+)$/iu);
+    if (ruleMatch) {
+      result.ruleDocs.push(resolveLoopDocPath(ruleMatch[1], workspaceRoot));
+      continue;
+    }
+
+    const devMatch = line.match(/^(?:开发文档|开发说明|说明文档|项目文档|dev\s*doc|docs?)\s*[：:]\s*(.+)$/iu);
+    if (devMatch) {
+      result.devDocs.push(resolveLoopDocPath(devMatch[1], workspaceRoot));
+      continue;
+    }
+
+    result.devDocs.push(resolveLoopDocPath(line, workspaceRoot));
+  }
+
+  return {
+    ruleDocs: result.ruleDocs.filter(Boolean),
+    devDocs: result.devDocs.filter(Boolean),
+  };
+}
+
+function resolveLoopDocPath(value, workspaceRoot = "") {
+  const docPath = safeText(value, "").trim();
+  if (!docPath) {
+    return "";
+  }
+  return path.isAbsolute(docPath)
+    ? path.resolve(docPath)
+    : path.resolve(safeText(workspaceRoot, "") || process.cwd(), docPath);
 }
 
 function normalizeThreadResolution(resolution = {}) {
@@ -1514,10 +1566,16 @@ function buildLoopAssistantQuestion(step, draft = createLoopAssistantDraft()) {
     };
   }
 
+  const docs = draft.docs || {};
+  const docsCount = (docs.ruleDocs?.length || 0) + (docs.devDocs?.length || 0);
+  const gitText = draft.git?.hasGit ? "已找到 Git" : "未检测到 Git";
+  const docsText = docsCount
+    ? `已找到 ${docsCount} 个文档线索`
+    : "未自动发现明显的规则或开发文档";
   return {
     id: "docs_confirmed",
     prompt:
-      "我已经找到 git 和文档线索。回复 confirm 直接创建，或补充你想强制纳入的规则文档路径。",
+      `${gitText}，${docsText}。回复 confirm 直接创建，或粘贴你想强制纳入的规则文档路径。`,
     placeholder: "输入 confirm，或粘贴额外文档路径",
   };
 }
@@ -4379,7 +4437,9 @@ export async function replyLoopCreationAssistant(startDir = process.cwd(), paylo
     notes: [...(draft.docs?.notes || [])],
   };
   if (answer && answer.toLowerCase() !== "confirm") {
-    docs.devDocs = [...new Set([...docs.devDocs, path.resolve(answer)])];
+    const manualDocs = parseLoopDocsAnswer(answer, draft.workspaceRoot);
+    docs.ruleDocs = [...new Set([...docs.ruleDocs, ...manualDocs.ruleDocs])];
+    docs.devDocs = [...new Set([...docs.devDocs, ...manualDocs.devDocs])];
   }
 
   const createdAt = nowIso();
