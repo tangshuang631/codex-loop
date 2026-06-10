@@ -114,6 +114,131 @@ test("production observer marks missing or failed long-run evidence as attention
   assert.match(failed.nextAction, /先处理失败记录/);
 });
 
+test("production observer diagnoses sent-but-timeout failures separately from dispatch failures", async () => {
+  const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), "codex-loop-observer-"));
+  const logDir = path.join(tempRoot, "runtime", "timeout-loop", "logs");
+  await fs.mkdir(logDir, { recursive: true });
+  await fs.writeFile(
+    path.join(logDir, "events.jsonl"),
+    [
+      {
+        type: "run_started_from_console",
+        at: "2026-06-10T11:00:00.000Z",
+      },
+      {
+        type: "codex_followup_dispatching",
+        at: "2026-06-10T11:01:00.000Z",
+        promptPreview: "继续完成真实链路验证。",
+      },
+      {
+        type: "codex_followup_sent_waiting",
+        at: "2026-06-10T11:01:02.000Z",
+        summary: "消息已送达绑定线程，正在等待 Codex 完成这一轮回复。",
+      },
+      {
+        type: "codex_followup_failed",
+        at: "2026-06-10T11:11:02.000Z",
+        message: "Codex 已收到指令，但等待这一轮回复超时。",
+      },
+    ]
+      .map((event) => JSON.stringify(event))
+      .join("\n") + "\n",
+    "utf8",
+  );
+
+  const report = await buildProductionObservation({
+    root: tempRoot,
+    runId: "timeout-loop",
+  });
+
+  assert.equal(report.status, "attention");
+  assert.equal(report.diagnosis.category, "codex_timeout_after_delivery");
+  assert.match(report.diagnosis.userMessage, /指令已经送达/);
+  assert.match(report.diagnosis.nextAction, /不要立即连续补发/);
+});
+
+test("production observer treats legacy received timeout details as delivered timeout", async () => {
+  const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), "codex-loop-observer-"));
+  const logDir = path.join(tempRoot, "runtime", "legacy-timeout-loop", "logs");
+  await fs.mkdir(logDir, { recursive: true });
+  await fs.writeFile(
+    path.join(logDir, "events.jsonl"),
+    [
+      {
+        type: "run_started_from_console",
+        at: "2026-06-10T12:00:00.000Z",
+      },
+      {
+        type: "codex_followup_dispatching",
+        at: "2026-06-10T12:01:00.000Z",
+        promptPreview: "继续完成真实链路验证。",
+      },
+      {
+        type: "codex_followup_failed",
+        at: "2026-06-10T12:11:00.000Z",
+        message: "Codex 已收到指令，但等待这一轮回复超时。",
+      },
+    ]
+      .map((event) => JSON.stringify(event))
+      .join("\n") + "\n",
+    "utf8",
+  );
+
+  const report = await buildProductionObservation({
+    root: tempRoot,
+    runId: "legacy-timeout-loop",
+  });
+
+  assert.equal(report.diagnosis.category, "codex_timeout_after_delivery");
+  assert.match(report.diagnosis.userMessage, /指令已经送达/);
+});
+
+test("production observer diagnoses the latest failed followup even after an earlier completion", async () => {
+  const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), "codex-loop-observer-"));
+  const logDir = path.join(tempRoot, "runtime", "mixed-cycle-loop", "logs");
+  await fs.mkdir(logDir, { recursive: true });
+  await fs.writeFile(
+    path.join(logDir, "events.jsonl"),
+    [
+      {
+        type: "run_started_from_console",
+        at: "2026-06-10T13:00:00.000Z",
+      },
+      {
+        type: "codex_followup_dispatching",
+        at: "2026-06-10T13:01:00.000Z",
+        promptPreview: "第一轮继续。",
+      },
+      {
+        type: "codex_followup_completed",
+        at: "2026-06-10T13:05:00.000Z",
+        latestAssistantPreview: "第一轮完成。",
+      },
+      {
+        type: "codex_followup_dispatching",
+        at: "2026-06-10T13:06:00.000Z",
+        promptPreview: "第二轮继续。",
+      },
+      {
+        type: "codex_followup_failed",
+        at: "2026-06-10T13:16:00.000Z",
+        message: "Codex 已收到指令，但等待这一轮回复超时。",
+      },
+    ]
+      .map((event) => JSON.stringify(event))
+      .join("\n") + "\n",
+    "utf8",
+  );
+
+  const report = await buildProductionObservation({
+    root: tempRoot,
+    runId: "mixed-cycle-loop",
+  });
+
+  assert.equal(report.diagnosis.category, "codex_timeout_after_delivery");
+  assert.match(report.diagnosis.nextAction, /不要立即连续补发/);
+});
+
 test("production observer dedupes repeated stop noise and repairs unreadable legacy details", async () => {
   const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), "codex-loop-observer-"));
   const logDir = path.join(tempRoot, "runtime", "noisy-loop", "logs");

@@ -2,7 +2,6 @@ import fs from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 
-const root = process.cwd();
 const MAX_REPORT_AGE_HOURS = Number(process.env.CODEX_LOOP_STATUS_MAX_REPORT_AGE_HOURS || 12);
 
 const reportKinds = [
@@ -32,12 +31,17 @@ const reportKinds = [
   },
 ];
 
-function resolveLabel(label) {
+function currentRoot() {
+  return process.cwd();
+}
+
+function resolveLabel(label, root = currentRoot()) {
   return path.join(root, ...label.split("/"));
 }
 
 async function readLatestReport(kind) {
-  const dir = resolveLabel(kind.dirLabel);
+  const root = currentRoot();
+  const dir = resolveLabel(kind.dirLabel, root);
   let entries = [];
 
   try {
@@ -89,6 +93,7 @@ async function readLatestReport(kind) {
     isStale,
     durationMs: report.durationMs || 0,
     summary: isStale ? `${summary}，但报告已过期` : summary,
+    nextAction: report.diagnosis?.nextAction || report.nextAction || "",
   };
 }
 
@@ -124,9 +129,11 @@ function summarizeReport(kind, report) {
 
   if (kind.key === "productionObservation") {
     const counters = report.counters || {};
+    const diagnosis = report.diagnosis || {};
+    const userMessage = typeof diagnosis.userMessage === "string" ? diagnosis.userMessage.trim() : "";
     return report.status === "passed"
       ? `真实运行已形成闭环：发送 ${counters.dispatches || 0} 次，完成 ${counters.completions || 0} 次，NPC 复盘 ${counters.supervisorReviews || 0} 次`
-      : report.summary || "真实运行观测需要留意";
+      : userMessage || report.summary || "真实运行观测需要留意";
   }
 
   return report.nextAction || report.summary || "未记录摘要。";
@@ -139,7 +146,7 @@ function deriveNextAction(items) {
   }
   const failed = items.find((item) => item.status && item.status !== "passed");
   if (failed) {
-    return `先处理${failed.label}：${failed.summary}`;
+    return `先处理${failed.label}：${failed.nextAction || failed.summary}`;
   }
   return "可以进入真实任务使用；长时间运行仍建议保留人工观察和运行日志。";
 }

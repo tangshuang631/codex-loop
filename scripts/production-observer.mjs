@@ -158,6 +158,73 @@ function deriveStatusAndAdvice(counters, timeline) {
   };
 }
 
+function deriveDiagnosis(counters, timeline) {
+  if (!timeline.length) {
+    return {
+      category: "no_runtime_events",
+      userMessage: "还没有看到这一轮真实运行记录。",
+      nextAction: "先启动一次任务，等出现发送、等待、完成或失败记录后再判断。",
+    };
+  }
+
+  if (counters.failures <= 0) {
+    return {
+      category: "healthy_or_waiting",
+      userMessage: "当前周期没有失败记录。",
+      nextAction: "继续观察 Codex 完成和 NPC 复盘是否稳定出现。",
+    };
+  }
+
+  const types = new Set(timeline.map((event) => event.type));
+  const details = timeline.map((event) => event.detail).join("\n");
+  const latestFailureIndex = timeline.findLastIndex((event) =>
+    /failed|stalled|runtime_error/u.test(event.type),
+  );
+  const latestFailureWindow =
+    latestFailureIndex >= 0 ? timeline.slice(Math.max(0, latestFailureIndex - 2)) : timeline;
+  const latestFailureDetails = latestFailureWindow.map((event) => event.detail).join("\n");
+  const latestFailureTypes = new Set(latestFailureWindow.map((event) => event.type));
+  const hasCompletionAfterLatestFailure =
+    latestFailureIndex >= 0 &&
+    timeline.slice(latestFailureIndex + 1).some((event) => event.type === "codex_followup_completed");
+  const hasDeliveredTimeout =
+    latestFailureTypes.has("codex_followup_sent_waiting") ||
+    /(已收到|已送达|received|delivered).*(超时|timeout)/iu.test(latestFailureDetails);
+  if (
+    hasDeliveredTimeout &&
+    /超时|timeout|waiting/i.test(latestFailureDetails) &&
+    !hasCompletionAfterLatestFailure
+  ) {
+    return {
+      category: "codex_timeout_after_delivery",
+      userMessage: "指令已经送达 Codex，但这一轮没有在等待时间内返回完成结果。",
+      nextAction: "不要立即连续补发；先确认 Codex 是否仍在处理，必要时延长等待时间或查看 Codex 任务是否卡在确认步骤。",
+    };
+  }
+
+  if (types.has("codex_followup_dispatching") && !types.has("codex_followup_sent_waiting")) {
+    return {
+      category: "dispatch_failed_before_delivery",
+      userMessage: "指令进入发送阶段，但没有观察到已送达 Codex 的记录。",
+      nextAction: "优先检查线程绑定、桌面端原生发送入口和本机 Codex 连接状态。",
+    };
+  }
+
+  if (types.has("runtime_error")) {
+    return {
+      category: "runtime_error",
+      userMessage: "运行时出现异常。",
+      nextAction: "先查看最近一条运行异常日志，再重新启动任务。",
+    };
+  }
+
+  return {
+    category: "followup_failed",
+    userMessage: "这一轮续跑失败，但当前日志不足以进一步区分发送失败还是等待超时。",
+    nextAction: "查看最近记录中的失败详情，并确认线程绑定、Codex 状态和 Ollama 配置。",
+  };
+}
+
 export async function buildProductionObservation({
   root = process.cwd(),
   runId = process.env.CODEX_LOOP_OBSERVE_RUN_ID || "assistant-loop",
@@ -179,6 +246,7 @@ export async function buildProductionObservation({
   const counters = buildCounters(cycles.current);
   const historyCounters = buildCounters(cycles.previous);
   const advice = deriveStatusAndAdvice(counters, cycles.current);
+  const diagnosis = deriveDiagnosis(counters, cycles.current);
 
   return {
     title: "codex-loop 真实运行观测报告",
@@ -197,6 +265,7 @@ export async function buildProductionObservation({
       totalTimelineEvents: timeline.length,
       previousTimelineEvents: cycles.previous.length,
     },
+    diagnosis,
     summary: advice.summary,
     nextAction: advice.nextAction,
     timeline: cycles.current,
