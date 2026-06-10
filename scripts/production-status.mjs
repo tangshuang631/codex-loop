@@ -46,6 +46,17 @@ function cleanText(value, fallback = "") {
   return typeof value === "string" && value.trim() ? value.trim() : fallback;
 }
 
+const frontendEvidenceLabels = {
+  "conversation-detail-block": "折叠详情",
+  "markdown-code-block": "代码块",
+  "file-path-chip": "文件路径",
+};
+
+function readableFrontendEvidence(text) {
+  const value = cleanText(text);
+  return frontendEvidenceLabels[value] || value;
+}
+
 function formatTargetLabel(target = {}) {
   return [
     cleanText(target.threadTitle, cleanText(target.workspaceName, cleanText(target.runId, "当前任务"))),
@@ -191,7 +202,12 @@ function summarizeReport(kind, report) {
     const requiredTexts = [
       ...new Set(
         results
-          .flatMap((item) => (Array.isArray(item.requiredText) ? item.requiredText : []))
+          .flatMap((item) => {
+            if (Array.isArray(item.requiredEvidence) && item.requiredEvidence.length) {
+              return item.requiredEvidence;
+            }
+            return Array.isArray(item.requiredText) ? item.requiredText.map(readableFrontendEvidence) : [];
+          })
           .filter(Boolean),
       ),
     ];
