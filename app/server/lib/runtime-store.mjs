@@ -19,6 +19,7 @@ import {
   generatePromptWithOllama,
 } from "./ollama-prompt-generator.mjs";
 import { resolveProjectLayout } from "./paths.mjs";
+import { budgetLimitReached } from "./loop-core/controller-gates.mjs";
 import { classifyContinuationFailure } from "./runtime-governance/failure-classifier.mjs";
 import {
   defaultRunSupervisorVerificationCommand,
@@ -2038,6 +2039,11 @@ function deriveMonitorStatus(processState) {
       monitorLabel: "需处理",
       monitorTone: "warning",
     },
+    budget_blocked: {
+      monitorLevel: "blocked",
+      monitorLabel: "已到限制",
+      monitorTone: "warning",
+    },
     codex_working: {
       monitorLevel: "busy",
       monitorLabel: "处理中",
@@ -2150,6 +2156,7 @@ function buildProcessStatus(snapshot) {
   const waitingForCodex = continuationStatus === "dispatching";
   const reviewingSupervisor = continuationStatus === "reviewing";
   const healthBlocker = blockingHealthIssue(snapshot.health);
+  const budgetReached = budgetLimitReached(snapshot.state);
   const hasPendingGuidance = Boolean(snapshot.thread.pendingUserGuidance);
   const promptGenerationWarning = safeText(snapshot.thread.promptGenerationWarning, "");
   const supervisorReview = safeText(snapshot.thread.lastSupervisorReview, "");
@@ -2263,6 +2270,13 @@ function buildProcessStatus(snapshot) {
     canSendNextTurn = false;
     holdReason = "Codex 正在执行当前轮，完成前不能追加发送。";
     nextAction = "等待 Codex 完成；如果要补充方向，先写入下一轮引导。";
+  } else if (budgetReached) {
+    state = "budget_blocked";
+    headline = "已到停止条件";
+    detail = "当前任务已经达到时间或 token 停止条件，codex-loop 不会再发送下一轮。";
+    canSendNextTurn = false;
+    holdReason = "已达到停止条件或预算限制，不能继续发送下一轮。";
+    nextAction = "先停止并查看结果；需要继续时调整停止条件后重新开始循环。";
   } else if (snapshot.state.monitorOnly) {
     state = "monitoring";
     headline = "监控中";

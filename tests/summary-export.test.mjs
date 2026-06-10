@@ -17,6 +17,7 @@ import {
   selectLoop,
   startRun,
   requestGracefulStop,
+  updateBudgets,
 } from "../app/server/lib/runtime-store.mjs";
 import { saveUserOverrides } from "../app/server/lib/adapter-store.mjs";
 import { writeLauncherStatus } from "../app/server/lib/launcher-status.mjs";
@@ -217,6 +218,39 @@ test("exportMobileView returns a direct process status for production monitoring
   assert.match(mobile.processStatus.pendingGuidancePreview, /\u79fb\u52a8\u7aef\u8fdb\u7a0b\u72b6\u6001/);
   assert.match(mobile.processStatus.stopLimit, /\u6700\u957f.*\u5206\u949f/);
   assert.match(mobile.processStatus.stopLimit, /token/);
+});
+
+test("exportMobileView blocks next turn when stop limits are already reached", async () => {
+  const configRoot = await createWorkspace();
+  await ensureLoopArtifacts(configRoot);
+  await saveThreadBinding(configRoot, {
+    workspaceName: "demo",
+    threadTitle: "移动端停止条件",
+    threadId: "thread-process-budget",
+    singleThreadMode: true,
+  });
+  await startRun(configRoot);
+  await recordHeartbeat(configRoot, {
+    activeTask: "检查移动端停止条件",
+    note: "已消耗一批 token",
+    progressSummary: "当前任务仍在推进，但预算已经接近或达到限制。",
+    consumedTokens: 4200,
+  });
+  await updateBudgets(configRoot, {
+    maxMinutes: 120,
+    maxTokens: 4200,
+    finalizeLeadMinutes: 0,
+    finalizeLeadTokens: 0,
+  });
+
+  const mobile = await exportMobileView(configRoot);
+
+  assert.equal(mobile.processStatus.state, "budget_blocked");
+  assert.equal(mobile.processStatus.monitorLabel, "已到限制");
+  assert.equal(mobile.processStatus.monitorTone, "warning");
+  assert.equal(mobile.processStatus.canSendNextTurn, false);
+  assert.match(mobile.processStatus.holdReason, /停止条件|预算|token/);
+  assert.match(mobile.processStatus.nextAction, /停止|调整.*设置|重新开始/);
 });
 
 test("exportMobileView blocks next turn when required rule docs are missing", async () => {
