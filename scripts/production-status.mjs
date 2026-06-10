@@ -233,6 +233,53 @@ function deriveOverallStatus(items) {
   return "passed";
 }
 
+function deriveReadiness(items) {
+  const failed = items.find((item) => item.status && !["passed", "waiting", "stale"].includes(item.status));
+  if (failed) {
+    return {
+      stage: "blocked",
+      summary: `生产检查还不能通过：${failed.label}需要处理。`,
+      nextAction: failed.nextAction || failed.summary || "先处理失败项，再重新运行 npm run production:check。",
+    };
+  }
+
+  const codeGateLabels = new Set(["最近生产检查", "前端证据", "长跑节奏"]);
+  const codeGatesPassed = items
+    .filter((item) => codeGateLabels.has(item.label))
+    .every((item) => item.status === "passed");
+  const observation = items.find((item) => item.label === "真实运行观测");
+
+  if (codeGatesPassed && observation?.status === "passed") {
+    return {
+      stage: "production",
+      summary: "代码闸门和真实 2 轮闭环证据都已通过，可以进入有人工观察的长期运行。",
+      nextAction: "继续保留运行日志和人工观察，再逐步提高自动化时长。",
+    };
+  }
+
+  if (codeGatesPassed && observation?.status === "waiting") {
+    return {
+      stage: "observing",
+      summary: "代码闸门已通过，真实任务正在等待 Codex 完成这一轮，还不能判断长期稳定性。",
+      nextAction: observation.nextAction || "等待 Codex 完成后，让 NPC 复盘并继续观察是否形成 2 轮闭环。",
+    };
+  }
+
+  if (codeGatesPassed) {
+    return {
+      stage: "trial",
+      summary: "代码闸门已通过，适合短时真实试用；但还缺少真实 2 轮闭环证据，暂不适合提高自动化时长。",
+      nextAction: "启动真实任务，观察至少 2 次发送、Codex 完成、NPC 复盘的连续闭环，再判断是否提高自动化时长。",
+    };
+  }
+
+  return {
+    stage: "blocked",
+    summary: "代码闸门还没有全部通过，暂不适合投入真实任务。",
+    nextAction: "先运行 npm run production:check，并按失败项修复后再继续。",
+  };
+}
+
 export async function readProductionStatusSummary({
   refreshObservation = true,
   runId = null,
@@ -256,6 +303,7 @@ export async function readProductionStatusSummary({
     status,
     startedAt: startedAt.toISOString(),
     finishedAt: new Date().toISOString(),
+    readiness: deriveReadiness(items),
     sections: items,
     nextActionLabel: "下一步建议",
     nextAction: deriveNextAction(items),

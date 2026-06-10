@@ -443,6 +443,66 @@ test("production status marks stale live runtime observations by log age", async
   }
 });
 
+test("production status separates passed code gates from missing live long-run evidence", async () => {
+  const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), "codex-loop-status-"));
+  const writeReport = async (dirLabel, fileName, report) => {
+    const dir = path.join(tempRoot, ...dirLabel.split("/"));
+    await fs.mkdir(dir, { recursive: true });
+    await fs.writeFile(path.join(dir, fileName), `${JSON.stringify(report, null, 2)}\n`, "utf8");
+  };
+  const now = "2026-06-10T14:20:00.000Z";
+  await writeReport("runtime/production-checks", "latest-production-check.json", {
+    status: "passed",
+    finishedAt: now,
+    durationMs: 1,
+    checks: [{ status: "passed" }, { status: "passed" }],
+  });
+  await writeReport("runtime/frontend-evidence", "latest-frontend-evidence.json", {
+    status: "passed",
+    finishedAt: now,
+    durationMs: 1,
+    results: [{ status: "passed" }],
+  });
+  await writeReport("runtime/longrun-smoke", "latest-longrun-smoke.json", {
+    status: "passed",
+    finishedAt: now,
+    durationMs: 1,
+    checks: [{ status: "passed" }],
+  });
+
+  const logDir = path.join(tempRoot, "runtime", "assistant-loop", "logs");
+  await fs.mkdir(logDir, { recursive: true });
+  const logPath = path.join(logDir, "events.jsonl");
+  await fs.writeFile(
+    logPath,
+    [
+      { type: "run_started_from_console", at: "2026-06-08T05:53:43.574Z" },
+      { type: "codex_followup_completed", at: "2026-06-08T05:57:53.245Z" },
+    ].map((event) => JSON.stringify(event)).join("\n") + "\n",
+    "utf8",
+  );
+  await fs.utimes(logPath, new Date("2026-06-08T05:57:53.245Z"), new Date("2026-06-08T05:57:53.245Z"));
+
+  const previousCwd = process.cwd();
+  try {
+    process.chdir(tempRoot);
+    const status = await readProductionStatusSummary({
+      refreshObservation: true,
+      now: new Date("2026-06-10T14:20:00.000Z"),
+    });
+
+    assert.equal(status.status, "attention");
+    assert.equal(status.readiness.stage, "trial");
+    assert.match(status.readiness.summary, /代码闸门已通过/);
+    assert.match(status.readiness.summary, /缺少真实 2 轮闭环证据/);
+    assert.match(status.readiness.nextAction, /启动真实任务/);
+    assert.match(status.readiness.nextAction, /发送、Codex 完成、NPC 复盘/);
+    assert.doesNotMatch(status.readiness.summary, /长期无人值守/);
+  } finally {
+    process.chdir(previousCwd);
+  }
+});
+
 test("production status exposes the two-cycle live evidence threshold", async () => {
   const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), "codex-loop-status-"));
   const writeReport = async (dirLabel, fileName, report) => {
