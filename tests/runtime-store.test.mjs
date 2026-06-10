@@ -4152,6 +4152,44 @@ test("readLoopSnapshot reports long-running Codex work without converting it to 
   assert.match(refreshed.health.issues.join(","), /continuation:stalled/);
 });
 
+test("exportMobileView keeps stale dispatch visible as Codex working instead of a config blocker", async () => {
+  const configRoot = await createWorkspace();
+  const snapshot = await ensureLoopArtifacts(configRoot);
+  await saveThreadBinding(configRoot, {
+    workspaceName: "demo",
+    threadTitle: "long-running mobile thread",
+    threadId: "thread-long-running-mobile",
+    singleThreadMode: true,
+  });
+
+  const currentThread = (await readLoopSnapshot(configRoot)).thread;
+  await fs.writeFile(
+    snapshot.paths.threadPath,
+    `${JSON.stringify(
+      {
+        ...currentThread,
+        continuationEnabled: true,
+        continuationStatus: "dispatching",
+        lastContinuationError: "",
+        lastDispatchAt: new Date(Date.now() - 1000 * 60 * 12).toISOString(),
+      },
+      null,
+      2,
+    )}\n`,
+    "utf8",
+  );
+
+  const mobile = await exportMobileView(configRoot);
+
+  assert.equal(mobile.processStatus.state, "codex_working");
+  assert.equal(mobile.processStatus.waitingForCodex, true);
+  assert.equal(mobile.processStatus.canSendNextTurn, false);
+  assert.match(mobile.processStatus.detail, /已经等待约 12 分钟/);
+  assert.match(mobile.processStatus.nextAction, /不要重复发送|补充方向/);
+  assert.match(mobile.suggestedAction, /已经等待约 12 分钟/);
+  assert.doesNotMatch(mobile.processStatus.headline, /配置/);
+});
+
 test("readLoopSnapshot marks health issue when transcript is stale during an active run", async () => {
   const configRoot = await createWorkspace();
   const snapshot = await startRun(configRoot);

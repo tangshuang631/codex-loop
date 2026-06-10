@@ -2059,6 +2059,15 @@ function blockingHealthIssue(health = {}) {
   return null;
 }
 
+function formatElapsedMinutesSince(isoValue, now = Date.now()) {
+  const startedAt = Date.parse(isoValue || "");
+  if (!Number.isFinite(startedAt)) {
+    return "";
+  }
+  const minutes = Math.max(0, Math.round((now - startedAt) / 60000));
+  return `已经等待约 ${minutes} 分钟`;
+}
+
 function deriveMonitorStatus(processState) {
   const map = {
     waiting_next_turn: {
@@ -2249,6 +2258,9 @@ function buildProcessStatus(snapshot) {
   const healthBlocker = blockingHealthIssue(snapshot.health);
   const budgetReached = budgetLimitReached(snapshot.state);
   const hasPendingGuidance = Boolean(snapshot.thread.pendingUserGuidance);
+  const waitingDurationLabel = waitingForCodex
+    ? formatElapsedMinutesSince(snapshot.thread.lastDispatchAt)
+    : "";
   const promptGenerationWarning = safeText(snapshot.thread.promptGenerationWarning, "");
   const latestInstructionSourceView = deriveLatestInstructionSourceView(
     snapshot.thread.lastDispatchPromptGenerator,
@@ -2363,10 +2375,10 @@ function buildProcessStatus(snapshot) {
   } else if (waitingForCodex) {
     state = "codex_working";
     headline = "Codex 正在处理";
-    detail = "当前轮还没有完成，codex-loop 不会追加发送，避免打断 Codex。";
+    detail = `${waitingDurationLabel ? waitingDurationLabel + "。" : ""}当前轮还没有完成，codex-loop 不会追加发送，避免打断 Codex。`;
     canSendNextTurn = false;
     holdReason = "Codex 正在执行当前轮，完成前不能追加发送。";
-    nextAction = "等待 Codex 完成；如果要补充方向，先写入下一轮引导。";
+    nextAction = "不要重复发送；等待 Codex 完成。如果要补充方向，先写入下一轮引导，完成后再合并发送。";
   } else if (budgetReached) {
     state = "budget_blocked";
     headline = "已到停止条件";
@@ -2427,6 +2439,7 @@ function buildProcessStatus(snapshot) {
     failureSeverity: snapshot.thread.lastContinuationFailureSeverity || "",
     stopLimit: formatLoopStopLimit(snapshot.state.budgets || snapshot.config.budgets || {}),
     lastDispatchAt: snapshot.thread.lastDispatchAt || "",
+    waitingDurationLabel,
     lastCompletionAt: snapshot.thread.lastCompletionAt || "",
     latestEventType: snapshot.thread.latestEventType || snapshot.state.events?.at(-1)?.type || "",
   };
@@ -2573,7 +2586,8 @@ export async function exportMobileView(startDir = process.cwd()) {
     }
   } else if (snapshot.thread.threadId) {
     if (snapshot.thread.continuationStatus === "dispatching") {
-      suggestedAction = "Codex 正在处理当前轮，请等待完成后再继续。";
+      const waitingDurationLabel = formatElapsedMinutesSince(snapshot.thread.lastDispatchAt);
+      suggestedAction = `${waitingDurationLabel ? waitingDurationLabel + "，" : ""}Codex 正在处理当前轮，请等待完成后再继续。`;
     } else if (snapshot.thread.continuationStatus === "reviewing") {
       suggestedAction = "监督复盘中，请等待本地模型决定下一步。";
     } else {
