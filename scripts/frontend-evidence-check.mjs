@@ -10,15 +10,25 @@ const targets = [
     name: "桌面端",
     distLabel: "dist/web",
     distDir: path.join(root, "dist", "web"),
-    requiredText: ["历史对话", "发送引导", "截图证据", "生产阶段", "生产成熟度", "剩余缺口", "闭环证据", "真实闭环", "验证目标", "启动预检", "复制命令", "复制文件", "待合并", "已合并补充", "本地模型", "NPC"],
+    requiredText: ["历史对话", "发送引导", "截图证据", "生产阶段", "生产成熟度", "剩余缺口", "闭环证据", "真实闭环", "验证目标", "启动预检", "复制命令", "复制文件", "待合并", "已合并补充", "本地模型", "NPC", "conversation-detail-block", "file-path-chip"],
   },
   {
     name: "移动端",
     distLabel: "dist/mobile",
     distDir: path.join(root, "dist", "mobile"),
-    requiredText: ["历史对话", "发送引导", "截图证据", "生产阶段", "生产成熟度", "剩余缺口", "闭环证据", "真实闭环", "验证目标", "启动预检", "复制命令", "复制文件", "待合并", "已合并补充", "本地模型", "NPC"],
+    requiredText: ["历史对话", "发送引导", "截图证据", "生产阶段", "生产成熟度", "剩余缺口", "闭环证据", "真实闭环", "验证目标", "启动预检", "复制命令", "复制文件", "待合并", "已合并补充", "本地模型", "NPC", "conversation-detail-block", "markdown-code-block", "file-path-chip"],
   },
 ];
+
+const evidenceLabels = {
+  "conversation-detail-block": "折叠详情",
+  "markdown-code-block": "代码块",
+  "file-path-chip": "文件路径",
+};
+
+function readableEvidenceList(requiredText = []) {
+  return requiredText.map((text) => evidenceLabels[text] || text);
+}
 
 function nowForFile() {
   return new Date().toISOString().replace(/[:.]/g, "-");
@@ -55,7 +65,9 @@ async function inspectTarget(target) {
     status: missing.length ? "failed" : "passed",
     checkedFiles: files.map((file) => path.relative(root, file).replace(/\\/g, "/")),
     requiredText: target.requiredText,
+    requiredEvidence: readableEvidenceList(target.requiredText),
     missing,
+    missingEvidence: readableEvidenceList(missing),
   };
 }
 
@@ -99,8 +111,8 @@ async function main() {
     scope: "检查桌面端和移动端构建产物是否包含关键中文产品界面信号。",
     results,
     nextAction: failed
-      ? "先确认桌面端和移动端构建产物是否包含历史对话、发送引导、截图证据、生产阶段、生产成熟度、剩余缺口、闭环证据、真实闭环、验证目标、启动预检、复制命令、复制文件、待合并、已合并补充、本地模型和 NPC。"
-      : "前端关键状态、历史对话、生产阶段、生产成熟度、剩余缺口、闭环证据、真实闭环、验证目标、启动预检、复制命令、复制文件、待合并、已合并补充、本地模型、NPC 和引导入口已进入构建产物。",
+      ? "先确认桌面端和移动端构建产物是否包含历史对话、发送引导、截图证据、生产阶段、生产成熟度、剩余缺口、闭环证据、真实闭环、验证目标、启动预检、复制命令、复制文件、折叠详情、代码块、文件路径、待合并、已合并补充、本地模型和 NPC。"
+      : "前端关键状态、历史对话、生产阶段、生产成熟度、剩余缺口、闭环证据、真实闭环、验证目标、启动预检、复制命令、复制文件、折叠详情、代码块、文件路径、待合并、已合并补充、本地模型、NPC 和引导入口已进入构建产物。",
   };
   const reportPath = await writeReport(report);
   process.stdout.write(`报告路径: ${reportPath}\n`);

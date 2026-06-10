@@ -1388,6 +1388,20 @@ test("frontend evidence check requires closed-loop evidence progress on desktop 
   assert.match(architecture, /闭环证据/);
 });
 
+test("frontend evidence check requires mobile Codex-style conversation rendering signals", async () => {
+  const source = await read("scripts/frontend-evidence-check.mjs");
+  const readme = await read("README.md");
+  const architecture = await read("docs/enterprise-loop-architecture.md");
+
+  assert.match(source, /markdown-code-block/);
+  assert.match(source, /file-path-chip/);
+  assert.match(source, /conversation-detail-block/);
+  assert.match(source, /代码块/);
+  assert.match(source, /文件路径/);
+  assert.match(readme, /代码块|文件路径/);
+  assert.match(architecture, /代码块|文件路径/);
+});
+
 test("docs make production readiness check the pre-use gate", async () => {
   const readme = await read("README.md");
   const checklist = await read("codex-loop6.7-13-29开发清单.md");
