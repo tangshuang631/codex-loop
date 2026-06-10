@@ -131,7 +131,9 @@ async function readLiveProductionObservation(kind, {
     ageHours: Number(ageHours.toFixed(2)),
     isStale,
     durationMs: report.durationMs || 0,
-    summary: isStale ? `${summary}，但真实运行日志已过期` : summary,
+    summary: isStale
+      ? "真实运行观测已过期，需要重新生成运行记录后再判断长期稳定性。"
+      : summary,
     nextAction: isStale
       ? "请重新运行 npm run production:observe，或重新启动一次真实任务生成新的运行记录。"
       : report.diagnosis?.nextAction || report.nextAction || "",
@@ -171,6 +173,11 @@ function summarizeReport(kind, report) {
 
   if (kind.key === "productionObservation") {
     const counters = report.counters || {};
+    const closedLoops = counters.closedLoops || Math.min(
+      counters.dispatches || 0,
+      counters.completions || 0,
+      counters.supervisorReviews || 0,
+    );
     const diagnosis = report.diagnosis || {};
     const waiting = report.waiting || {};
     const userMessage = typeof diagnosis.userMessage === "string" ? diagnosis.userMessage.trim() : "";
@@ -180,7 +187,7 @@ function summarizeReport(kind, report) {
         ? `已等待约 ${waitingMinutes} 分钟，`
         : "";
     return report.status === "passed"
-      ? `真实运行已形成闭环：发送 ${counters.dispatches || 0} 次，完成 ${counters.completions || 0} 次，NPC 复盘 ${counters.supervisorReviews || 0} 次`
+      ? `真实运行已形成 ${closedLoops} 轮真实闭环，达到长期运行基本证据：发送 ${counters.dispatches || 0} 次，完成 ${counters.completions || 0} 次，NPC 复盘 ${counters.supervisorReviews || 0} 次`
       : `${waitingLabel}${userMessage || report.summary || "真实运行观测需要留意"}`;
   }
 
