@@ -1682,7 +1682,16 @@ function StatusSummaryPanel({
     verificationText ? ["独立验收", verificationText] : null,
     processStatus?.holdReason ? ["判断", processStatus.holdReason] : null,
     processStatus?.hasPendingGuidance
-      ? ["待合并补充", processStatus?.pendingGuidancePreview || "已记录"]
+      ? [
+          "待合并补充",
+          [
+            processStatus?.pendingGuidancePreview || "已记录",
+            processStatus?.pendingGuidanceMergeLabel,
+            processStatus?.pendingGuidanceMergeDetail,
+          ]
+            .filter(Boolean)
+            .join("："),
+        ]
       : null,
     processStatus?.lastMergedGuidanceStatus
       ? [

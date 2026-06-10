@@ -334,6 +334,10 @@ test("exportMobileView returns a direct process status for production monitoring
   assert.match(mobile.processStatus.headline, /\u7b49\u5f85\u4e0b\u4e00\u8f6e/);
   assert.match(mobile.processStatus.detail, /\u53ef\u4ee5.*\u53d1\u9001|\u4e0b\u4e00\u8f6e/);
   assert.match(mobile.processStatus.pendingGuidancePreview, /\u79fb\u52a8\u7aef\u8fdb\u7a0b\u72b6\u6001/);
+  assert.equal(mobile.processStatus.pendingGuidanceMergeTiming, "codex_completed");
+  assert.equal(mobile.processStatus.pendingGuidanceMergeProcessor, "ollama_npc");
+  assert.match(mobile.processStatus.pendingGuidanceMergeLabel, /本地模型|NPC|Ollama/);
+  assert.match(mobile.processStatus.pendingGuidanceMergeDetail, /Codex.*完成|合并/);
   assert.match(mobile.processStatus.stopLimit, /\u6700\u957f.*\u5206\u949f/);
   assert.match(mobile.processStatus.stopLimit, /token/);
 });

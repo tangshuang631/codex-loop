@@ -2553,6 +2553,12 @@ function buildProcessStatus(snapshot) {
     canSendNextTurn,
     hasPendingGuidance,
     pendingGuidancePreview: buildPromptPreview(snapshot.thread.pendingUserGuidance || ""),
+    pendingGuidanceMergeTiming: hasPendingGuidance ? "codex_completed" : "",
+    pendingGuidanceMergeProcessor: hasPendingGuidance ? "ollama_npc" : "",
+    pendingGuidanceMergeLabel: hasPendingGuidance ? "等 Codex 完成后由本地模型 / NPC 合并" : "",
+    pendingGuidanceMergeDetail: hasPendingGuidance
+      ? "这条补充不会打断当前轮，会等 Codex 完成后结合最新回复合并进下一条指令。"
+      : "",
     lastMergedGuidanceStatus: lastMergedGuidance ? "merged" : "",
     lastMergedGuidanceLabel: lastMergedGuidance ? "用户补充已合并" : "",
     lastMergedGuidancePreview,

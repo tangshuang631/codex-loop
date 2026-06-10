@@ -86,6 +86,9 @@ test("dashboard uses mobile process status as the primary runtime status source"
   assert.match(stylesSource, /\.status-pill\.is-ready/);
   assert.match(appSource, /processStatus\?\.stopLimit/);
   assert.match(appSource, /待合并补充/);
+  assert.match(appSource, /pendingGuidanceMergeLabel/);
+  assert.match(appSource, /pendingGuidanceMergeDetail/);
+  assert.match(appSource, /本地模型|NPC|Ollama/);
 });
 
 test("dashboard surfaces merged guidance evidence without adding a new card", async () => {

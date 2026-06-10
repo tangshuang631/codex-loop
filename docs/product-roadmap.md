@@ -65,27 +65,31 @@ Current implementation progress:
 ## Near-term roadmap
 
 1. strengthen Codex thread linkage and transcript mirror
-2. improve adapter-driven strict defaults for different repositories
-3. keep the local console fast, simple, and reliable
-4. improve startup resilience and recovery messaging
-5. formalize template-driven project loop setup
-6. evaluate optional ccswitch-assisted telemetry enrichments
-7. keep loop differentiation clearly stronger than native Codex automations
+2. ship Android App / PWA remote control as a P0 path: paired phone can view task progress, read history, send guidance, edit or recall queued guidance, and reconnect after codex-loop restarts
+3. make desktop and mobile history render like Codex desktop: continuous divider-based conversation, right-side codex-loop guidance, left/full-width Codex replies, and collapsed detail blocks for files, commands, scripts, tests, logs, screenshots, and verification evidence
+4. improve adapter-driven strict defaults for different repositories
+5. keep the local console fast, simple, and reliable
+6. improve startup resilience and recovery messaging
+7. formalize template-driven project loop setup
+8. evaluate optional ccswitch-assisted telemetry enrichments
+9. keep loop differentiation clearly stronger than native Codex automations
 
 ## Later roadmap
 
 Later enhancements can broaden adoption, but they should not distract from the core loop:
 
-- mobile-readable status page
-- summarized Codex history viewing from phone
-- optional remote read-only access
 - richer adapter management
+- native Android packaging polish beyond the current PWA shell
+- device authorization management for teams, including revoke, rotate, audit, and multi-device visibility
+- optional secure relay after the local-first Tailnet path is stable
 
 Current foundation for that direction:
 
 - local summary export payload
 - thread mirror metadata
 - transcript mirror for fuller local recovery
+- protected mobile task payload with long-lived device token verification
+- shared Codex-style conversation items used by desktop, `/mobile`, and `app/mobile`
 
 ## Template-driven setup direction
 
@@ -112,7 +116,7 @@ The correct ordering is now:
 3. make Android App / PWA remote monitoring and guidance a P0 usage path
 4. make desktop and mobile history rendering match the Codex desktop conversation model
 
-The first mobile App capability should be:
+The first mobile App capability must be production-shaped, not a debug page:
 
 - history conversation
 - current task state
@@ -121,11 +125,23 @@ The first mobile App capability should be:
 - consistent with the web task detail content
 - collapsible detail blocks for edited files, command output, scripts, tests, screenshots, and verification logs
 - a Codex-like conversation flow instead of separated dashboard cards
+- long-lived pairing so the same phone can reconnect after the workstation service restarts
+- the same queue rule as desktop: if Codex is still working or NPC review is running, user guidance waits and does not interrupt
+- clear status labels for whether Codex is waiting, working, reviewing, blocked, or ready for the next instruction
 
 Not:
 
 - destructive actions
 - replacing the desktop Codex workflow
+- showing backend debug fields or raw English event names as the primary mobile experience
+
+History rendering requirement:
+
+- Codex replies should read like the Codex desktop transcript, with comfortable line length and light dividers instead of stacked cards.
+- codex-loop and user guidance should appear as compact right-side bubbles.
+- File paths should be visually distinct and copyable.
+- Edited files, command output, script content, test logs, screenshots, and verification evidence should collapse by default with a short Chinese label and expand on tap.
+- Desktop Web, `/mobile`, and `app/mobile` should consume the same conversation item model so mobile does not drift from the desktop experience.
 
 Phone pairing requirement:
 
