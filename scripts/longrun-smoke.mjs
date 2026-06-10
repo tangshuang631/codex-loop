@@ -2,6 +2,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 
 import { createLoopController } from "../app/server/lib/loop-controller.mjs";
+import { runSupervisorIndependentVerification } from "../app/server/lib/verification/supervisor-verification.mjs";
 
 const root = process.cwd();
 const reportRootLabel = "runtime/longrun-smoke";
@@ -53,6 +54,69 @@ async function writeReport(report) {
   const reportPath = path.join(reportRoot, `${nowForFile()}-longrun-smoke.json`);
   await fs.writeFile(reportPath, `${JSON.stringify(report, null, 2)}\n`, "utf8");
   return reportPath;
+}
+
+async function runIndependentVerificationSmoke() {
+  const executedCommands = [];
+  const review = {
+    shouldContinue: true,
+    needsIndependentVerification: true,
+    verificationCommands: ["node --test tests/supervisor-verification.test.mjs"],
+    acceptanceFocus: [
+      "产品经理视角：确认下一步没有偏离用户目标。",
+      "测试人员视角：确认可验证证据能回写到状态。",
+      "真实用户视角：确认移动端能看懂进展和补充引导。",
+    ],
+  };
+  const firstSnapshot = makeSnapshot({
+    thread: {
+      lastCompletionAt: "2026-06-10T08:30:00.000Z",
+    },
+  });
+  firstSnapshot.paths = { workspaceRoot: root };
+
+  const first = await runSupervisorIndependentVerification(firstSnapshot, review, {
+    runVerificationCommand: async ({ command }) => {
+      executedCommands.push(command);
+      return {
+        command,
+        ok: true,
+        exitCode: 0,
+        output: "PM/QA/真实用户验收通过：状态、历史和补充引导可读。",
+      };
+    },
+  });
+
+  if (first.status !== "passed" || executedCommands.length !== 1) {
+    throw new Error("Codex 完成里程碑后必须执行一次 PM/QA/真实用户独立验收。");
+  }
+
+  const cooldownSnapshot = makeSnapshot({
+    thread: {
+      lastCompletionAt: "2026-06-10T08:40:00.000Z",
+      lastSupervisorVerificationStatus: "passed",
+      lastSupervisorVerificationAt: new Date().toISOString(),
+      lastSupervisorVerificationCommands: review.verificationCommands,
+    },
+  });
+  cooldownSnapshot.paths = { workspaceRoot: root };
+
+  const cooldown = await runSupervisorIndependentVerification(cooldownSnapshot, review, {
+    runVerificationCommand: async () => {
+      throw new Error("冷却期内不应重复执行独立验收。");
+    },
+  });
+
+  if (cooldown.status !== "skipped" || !/冷却期|近期已完成/u.test(cooldown.summary)) {
+    throw new Error("PM/QA/真实用户独立验收必须有冷却策略，避免每轮重复打断。");
+  }
+
+  return {
+    first,
+    cooldown,
+    executedCommands,
+    role: "产品经理 + 测试人员 + 真实用户",
+  };
 }
 
 async function runSmoke() {
@@ -239,6 +303,8 @@ async function runSmoke() {
     throw new Error("到达停止条件后必须停止自动循环。");
   }
 
+  const independentVerification = await runIndependentVerificationSmoke();
+
   return {
     title: "codex-loop 长跑 smoke 检查",
     status: "passed",
@@ -249,6 +315,7 @@ async function runSmoke() {
       stopCount,
       generatorSawGuidance,
       dispatchedPromptWithGuidance,
+      independentVerification,
       events,
     },
     checks: [
@@ -256,6 +323,7 @@ async function runSmoke() {
       "Codex 未完成时不追发",
       "Codex 完成后先监督复盘再续发",
       "用户补充会等 Codex 完成后交给 NPC 合并",
+      "定期以产品经理、测试人员和真实用户视角做独立验收，并在冷却期内不重复执行",
       "预算到达后停止自动发送",
     ],
   };
