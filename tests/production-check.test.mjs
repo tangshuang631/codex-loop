@@ -226,12 +226,12 @@ test("production status frontend evidence summary includes production stage", as
       {
         name: "桌面端",
         status: "passed",
-        requiredText: ["历史对话", "发送引导", "截图证据", "生产阶段", "验证目标", "启动预检"],
+        requiredText: ["历史对话", "发送引导", "截图证据", "生产阶段", "验证目标", "启动预检", "待合并", "本地模型", "NPC"],
       },
       {
         name: "移动端",
         status: "passed",
-        requiredText: ["历史对话", "发送引导", "截图证据", "生产阶段", "验证目标", "启动预检"],
+        requiredText: ["历史对话", "发送引导", "截图证据", "生产阶段", "验证目标", "启动预检", "待合并", "本地模型", "NPC"],
       },
     ],
   });
@@ -256,6 +256,8 @@ test("production status frontend evidence summary includes production stage", as
     assert.match(frontend.summary, /验证目标/);
     assert.match(frontend.summary, /历史对话/);
     assert.match(frontend.summary, /发送引导/);
+    assert.match(frontend.summary, /NPC 已进入构建产物/);
+    assert.doesNotMatch(frontend.summary, /NPC已进入构建产物/);
   } finally {
     process.chdir(previousCwd);
   }

@@ -195,7 +195,7 @@ function summarizeReport(kind, report) {
     ];
     return failed
       ? `${failed.name || "前端"}缺少证据：${(failed.missing || []).join("、") || failed.error || "未记录原因"}`
-      : `${requiredTexts.length ? requiredTexts.join("、") : "关键界面信号"}已进入构建产物`;
+      : `${requiredTexts.length ? requiredTexts.join("、") : "关键界面信号"} 已进入构建产物`;
   }
 
   if (kind.key === "longrunSmoke") {
