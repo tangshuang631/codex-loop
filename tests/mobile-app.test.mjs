@@ -62,9 +62,14 @@ test("mobile app shows production status and stale observation guidance", async 
   const source = await read("app/mobile/src/main.jsx");
 
   assert.match(source, /\/production-status/);
+  assert.match(source, /\/production-preflight/);
   assert.match(source, /productionStatus/);
+  assert.match(source, /productionPreflight/);
   assert.match(source, /productionStatus\?\.target/);
+  assert.match(source, /productionPreflight\?\.target/);
   assert.match(source, /验证目标/);
+  assert.match(source, /启动预检/);
+  assert.match(source, /可以启动|先别启动|等待中/);
   assert.match(source, /shortThreadId/);
   assert.match(source, /readiness\?\.stage/);
   assert.match(source, /生产阶段/);

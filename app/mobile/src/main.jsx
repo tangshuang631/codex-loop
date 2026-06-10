@@ -240,14 +240,22 @@ function PairingView({ onPaired }) {
   );
 }
 
-function StatusBlock({ mobileView, productionStatus, statusText }) {
+function StatusBlock({ mobileView, productionStatus, productionPreflight, statusText }) {
   const process = mobileView?.processStatus || {};
   const productionObservation = productionStatus?.sections?.find(
     (section) => section.label === "真实运行观测",
   );
   const readiness = productionStatus?.readiness || {};
-  const productionTarget = formatProductionTarget(productionStatus?.target);
+  const productionTarget = formatProductionTarget(productionPreflight?.target || productionStatus?.target);
   const readinessLabel = formatReadinessStage(readiness);
+  const preflightLabel = productionPreflight?.canDispatch
+    ? "可以启动"
+    : productionPreflight?.status === "waiting"
+      ? "等待中"
+      : productionPreflight
+        ? "先别启动"
+        : "";
+  const preflightDetail = productionPreflight?.nextAction || productionPreflight?.summary || "";
   const productionLabel =
     productionStatus?.status === "passed"
       ? "可继续"
@@ -265,6 +273,7 @@ function StatusBlock({ mobileView, productionStatus, statusText }) {
     ["当前状态", process.monitorLabel || mobileView?.loop?.modeLabel || "监控中"],
     ["下一步", process.nextAction || mobileView?.suggestedAction || "等待下一轮更新"],
     productionTarget ? ["验证目标", productionTarget] : null,
+    productionPreflight ? ["启动预检", `${preflightLabel} · ${preflightDetail}`] : null,
     productionStatus ? ["生产阶段", `${readinessLabel} · ${readinessDetail}`] : null,
     productionStatus ? ["生产观测", `${productionLabel} · ${productionDetail}`] : null,
     ["最近指令", process.latestInstructionSourceLabel || "等待生成"],
@@ -288,6 +297,18 @@ function StatusBlock({ mobileView, productionStatus, statusText }) {
           [
             productionObservation.status === "stale" ? "已过期" : productionObservation.summary,
             productionObservation.nextAction,
+          ]
+            .filter(Boolean)
+            .join("："),
+        ]
+      : null,
+    productionPreflight
+      ? [
+          "真实循环前预检",
+          [
+            preflightLabel,
+            productionPreflight.summary,
+            productionPreflight.nextAction,
           ]
             .filter(Boolean)
             .join("："),
@@ -419,6 +440,7 @@ function TaskMonitorApp() {
   const [device, setDevice] = useState(readDevice);
   const [mobileView, setMobileView] = useState(null);
   const [productionStatus, setProductionStatus] = useState(null);
+  const [productionPreflight, setProductionPreflight] = useState(null);
   const [statusText, setStatusText] = useState("正在连接");
   const [errorText, setErrorText] = useState("");
   const [guidance, setGuidance] = useState("");
@@ -429,7 +451,7 @@ function TaskMonitorApp() {
     if (!device?.deviceId || !device?.deviceToken) return;
     if (!silent) setStatusText("正在同步");
     try {
-      const [result, production] = await Promise.all([
+      const [result, production, preflight] = await Promise.all([
         requestJson("/mobile/view", {
           method: "POST",
           body: JSON.stringify({
@@ -438,9 +460,11 @@ function TaskMonitorApp() {
           }),
         }),
         requestJson("/production-status").catch(() => null),
+        requestJson("/production-preflight").catch(() => null),
       ]);
       setMobileView(result.mobile);
       setProductionStatus(production);
+      setProductionPreflight(preflight);
       setErrorText("");
       setStatusText("已同步");
     } catch (error) {
@@ -543,6 +567,7 @@ function TaskMonitorApp() {
       <StatusBlock
         mobileView={mobileView}
         productionStatus={productionStatus}
+        productionPreflight={productionPreflight}
         statusText={statusText}
       />
       <Conversation mobileView={mobileView} />

@@ -1525,6 +1525,7 @@ function StatusSummaryPanel({
   healthSummary,
   runtimeEvents,
   productionStatus,
+  productionPreflight,
 }) {
   const processDetail = processStatus?.detail || codexWorkStatus;
   const monitorText = processStatus?.monitorLabel || processStatus?.headline || continuationStatus;
@@ -1532,8 +1533,16 @@ function StatusSummaryPanel({
     (section) => section.label === "真实运行观测",
   );
   const readiness = productionStatus?.readiness || {};
-  const productionTarget = formatProductionTarget(productionStatus?.target);
+  const productionTarget = formatProductionTarget(productionPreflight?.target || productionStatus?.target);
   const readinessLabel = formatReadinessStage(readiness);
+  const preflightLabel = productionPreflight?.canDispatch
+    ? "可以启动"
+    : productionPreflight?.status === "waiting"
+      ? "等待中"
+      : productionPreflight
+        ? "先别启动"
+        : "";
+  const preflightDetail = productionPreflight?.nextAction || productionPreflight?.summary || "";
   const productionLabel =
     productionStatus?.status === "passed"
       ? "可继续"
@@ -1572,10 +1581,11 @@ function StatusSummaryPanel({
     ["说明", processDetail],
     processStatus?.nextAction ? ["下一步", processStatus.nextAction] : null,
     productionTarget ? ["验证目标", productionTarget] : null,
+    productionPreflight ? ["启动预检", `${preflightLabel} · ${preflightDetail}`] : null,
     productionStatus ? ["生产阶段", `${readinessLabel} · ${readinessDetail}`] : null,
     productionStatus ? ["生产观测", `${productionLabel} · ${productionDetail}`] : null,
   ].filter(Boolean);
-  const primaryLabels = new Set(["当前", "说明", "下一步", "验证目标", "生产阶段", "生产观测"]);
+  const primaryLabels = new Set(["当前", "说明", "下一步", "验证目标", "启动预检", "生产阶段", "生产观测"]);
   const detailRows = [
     controllerStatus?.label
       ? [
@@ -1626,6 +1636,18 @@ function StatusSummaryPanel({
             productionStatus.nextAction
               ? `${productionStatus.nextActionLabel || "下一步建议"}：${productionStatus.nextAction}`
               : "",
+          ]
+            .filter(Boolean)
+            .join("："),
+        ]
+      : null,
+    productionPreflight?.title
+      ? [
+          "真实循环前预检",
+          [
+            preflightLabel,
+            productionPreflight.summary,
+            productionPreflight.nextAction,
           ]
             .filter(Boolean)
             .join("："),
@@ -2970,6 +2992,7 @@ function DashboardHome({
   latestPrompt,
   processStatus,
   productionStatus,
+  productionPreflight,
   settingsForm,
   healthIssues,
   uiError,
@@ -3193,6 +3216,7 @@ function DashboardHome({
               codexWorkStatus={codexWorkStatus}
               processStatus={processStatus}
               productionStatus={productionStatus}
+              productionPreflight={productionPreflight}
               currentLoopName={loopTitle}
               threadLabel={threadLabel}
               modelStatus={modelStatus}
@@ -3217,6 +3241,7 @@ function DesktopConsoleApp() {
   const [automationStatus, setAutomationStatus] = useState(null);
   const [controllerStatus, setControllerStatus] = useState(null);
   const [productionStatus, setProductionStatus] = useState(null);
+  const [productionPreflight, setProductionPreflight] = useState(null);
   const [ollamaModels, setOllamaModels] = useState([]);
   const [assistantState, setAssistantState] = useState(null);
   const [assistantAnswer, setAssistantAnswer] = useState("");
@@ -3302,6 +3327,7 @@ function DesktopConsoleApp() {
         nextRemoteAccessStatus,
         nextControllerStatus,
         nextProductionStatus,
+        nextProductionPreflight,
         nextOllamaModels,
         nextAssistantState,
       ] = await Promise.all([
@@ -3318,6 +3344,7 @@ function DesktopConsoleApp() {
             },
         ),
         requestJson("/production-status").catch(() => productionStatus || null),
+        requestJson("/production-preflight").catch(() => productionPreflight || null),
         requestJson("/ollama/models").catch(() => ({ models: [] })),
         requestJson("/loop-creation-assistant").catch(() => assistantState || null),
       ]);
@@ -3330,6 +3357,7 @@ function DesktopConsoleApp() {
       setRemoteAccessStatus(nextRemoteAccessStatus);
       setControllerStatus(nextControllerStatus);
       setProductionStatus(nextProductionStatus);
+      setProductionPreflight(nextProductionPreflight);
       setOllamaModels(nextOllamaModels.models || []);
       if (
         !(
@@ -4105,6 +4133,7 @@ function DesktopConsoleApp() {
             latestPrompt={latestPrompt}
             processStatus={processStatus}
             productionStatus={productionStatus}
+            productionPreflight={productionPreflight}
             mobileSummary={mobileSummary}
             bindingNote={bindingNote}
             strategy={strategy}
