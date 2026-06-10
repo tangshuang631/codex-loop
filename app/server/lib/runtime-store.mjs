@@ -750,6 +750,8 @@ function createThreadDefaults(config) {
     lastUserInstructionSummary: "",
     lastAssistantActionSummary: "",
     latestCodexSummary: "",
+    latestCodexSummarySource: "",
+    latestCodexSummaryWarning: "",
     continuationStatus: "idle",
     continuationEnabled: false,
     continuationCycleCount: 0,
@@ -2234,6 +2236,50 @@ function deriveLatestInstructionSourceView(source, warning) {
   };
 }
 
+function deriveCodexSummarySourceView(source, warning) {
+  const cleanSource = safeText(source, "");
+  const cleanWarning = safeText(warning, "");
+
+  if (cleanSource === "ollama") {
+    return {
+      latestCodexSummarySource: "ollama",
+      latestCodexSummarySourceLabel: "本地模型整理",
+      latestCodexSummarySourceTone: "ready",
+      latestCodexSummarySourceDetail:
+        "最新 Codex 回复已经过 Ollama / NPC 工作流整理，更适合在控制台和移动端查看。",
+    };
+  }
+
+  if (cleanSource === "raw" && cleanWarning) {
+    return {
+      latestCodexSummarySource: "raw",
+      latestCodexSummarySourceLabel: "原文降级",
+      latestCodexSummarySourceTone: "warning",
+      latestCodexSummarySourceDetail:
+        cleanWarning.includes("Ollama") || /ollama/i.test(cleanWarning)
+          ? cleanWarning
+          : `Ollama 摘要整理失败，已保留 Codex 原文：${cleanWarning}`,
+    };
+  }
+
+  if (cleanSource === "raw") {
+    return {
+      latestCodexSummarySource: "raw",
+      latestCodexSummarySourceLabel: "原文",
+      latestCodexSummarySourceTone: "soft",
+      latestCodexSummarySourceDetail:
+        "最新 Codex 回复直接使用原文展示；开启本地模型后会优先交给 Ollama / NPC 整理。",
+    };
+  }
+
+  return {
+    latestCodexSummarySource: "",
+    latestCodexSummarySourceLabel: "",
+    latestCodexSummarySourceTone: "soft",
+    latestCodexSummarySourceDetail: "",
+  };
+}
+
 function collectSupervisorVerificationEvidence(results = []) {
   const screenshots = [
     ...new Set(
@@ -2268,6 +2314,10 @@ function buildProcessStatus(snapshot) {
   const latestInstructionSourceView = deriveLatestInstructionSourceView(
     snapshot.thread.lastDispatchPromptGenerator,
     promptGenerationWarning,
+  );
+  const codexSummarySourceView = deriveCodexSummarySourceView(
+    snapshot.thread.latestCodexSummarySource,
+    snapshot.thread.latestCodexSummaryWarning,
   );
   const supervisorReview = safeText(snapshot.thread.lastSupervisorReview, "");
   const supervisorInstruction = safeText(snapshot.thread.lastSupervisorInstruction, "");
@@ -2437,6 +2487,7 @@ function buildProcessStatus(snapshot) {
     supervisorReviewWarning,
     promptGenerationWarning,
     ...latestInstructionSourceView,
+    ...codexSummarySourceView,
     failureCategory: snapshot.thread.lastContinuationFailureCategory || "",
     failureLabel: snapshot.thread.lastContinuationFailureLabel || "",
     failureSeverity: snapshot.thread.lastContinuationFailureSeverity || "",
@@ -2793,6 +2844,10 @@ function buildThreadMirror(thread, state, overrides = {}) {
       overrides.supervisorReviewWarning ?? thread.supervisorReviewWarning ?? "",
     promptGenerationWarning:
       overrides.promptGenerationWarning ?? thread.promptGenerationWarning ?? "",
+    latestCodexSummarySource:
+      overrides.latestCodexSummarySource ?? thread.latestCodexSummarySource ?? "",
+    latestCodexSummaryWarning:
+      overrides.latestCodexSummaryWarning ?? thread.latestCodexSummaryWarning ?? "",
     lastUpdatedAt: overrides.lastUpdatedAt ?? nowIso(),
   };
   return {
@@ -2803,6 +2858,9 @@ function buildThreadMirror(thread, state, overrides = {}) {
     lastUserInstructionSummary: normalizeUserFacingTaskText(nextThread.lastUserInstructionSummary),
     lastAssistantActionSummary: normalizeUserFacingTaskText(nextThread.lastAssistantActionSummary),
     latestCodexSummary: normalizeUserFacingTaskText(nextThread.latestCodexSummary),
+    latestCodexSummaryWarning: normalizeUserFacingTaskText(
+      nextThread.latestCodexSummaryWarning,
+    ),
   };
 }
 
@@ -5147,6 +5205,8 @@ export async function syncCodexThreadMirror(
       snapshot.thread.lastAssistantActionSummary ??
       "",
     latestCodexSummary: nextCodexSummary,
+    latestCodexSummarySource: visibleSummary.source,
+    latestCodexSummaryWarning: visibleSummary.error,
     continuationStatus:
       completedCurrentDispatch
         ? "idle"

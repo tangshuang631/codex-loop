@@ -2012,6 +2012,84 @@ test("syncCodexThreadMirror uses ollama summary when advanced continuation is en
   assert.equal(snapshot.thread.latestCodexSummary, "已完成实现和验证，并整理了后续风险。");
 });
 
+test("exportMobileView shows when Codex summary was processed by Ollama", async () => {
+  const configRoot = await createWorkspace();
+  await ensureLoopArtifacts(configRoot);
+  await saveUserOverrides(configRoot, {
+    conversation: {
+      language: "zh-CN",
+      promptGenerator: {
+        enabled: "auto",
+        provider: "ollama",
+        model: "qwen2.5:7b",
+      },
+    },
+  });
+  await saveThreadBinding(configRoot, {
+    workspaceName: "demo",
+    threadTitle: "摘要来源线程",
+    threadId: "thread-summary-source-ollama",
+    singleThreadMode: true,
+  });
+
+  await syncCodexThreadMirror(
+    configRoot,
+    {
+      latestCodexSummary:
+        "Codex wrote a long reply with implementation details and verification notes.",
+    },
+    {
+      generateCodexSummary: async () => "已整理为面向用户的中文摘要。",
+    },
+  );
+
+  const mobile = await exportMobileView(configRoot);
+
+  assert.equal(mobile.processStatus.latestCodexSummarySource, "ollama");
+  assert.equal(mobile.processStatus.latestCodexSummarySourceLabel, "本地模型整理");
+  assert.match(mobile.processStatus.latestCodexSummarySourceDetail, /Codex 回复|Ollama|NPC/);
+});
+
+test("exportMobileView shows summary fallback when Ollama summary fails in auto mode", async () => {
+  const configRoot = await createWorkspace();
+  await ensureLoopArtifacts(configRoot);
+  await saveUserOverrides(configRoot, {
+    conversation: {
+      language: "zh-CN",
+      promptGenerator: {
+        enabled: "auto",
+        provider: "ollama",
+        model: "qwen2.5:7b",
+      },
+    },
+  });
+  await saveThreadBinding(configRoot, {
+    workspaceName: "demo",
+    threadTitle: "摘要降级线程",
+    threadId: "thread-summary-source-fallback",
+    singleThreadMode: true,
+  });
+
+  await syncCodexThreadMirror(
+    configRoot,
+    {
+      latestCodexSummary: "Codex 原始回复保留给前端展示。",
+    },
+    {
+      generateCodexSummary: async () => {
+        throw new Error("ollama summary unavailable");
+      },
+    },
+  );
+
+  const mobile = await exportMobileView(configRoot);
+
+  assert.equal(mobile.summary.latestCodexSummary, "Codex 原始回复保留给前端展示。");
+  assert.equal(mobile.processStatus.latestCodexSummarySource, "raw");
+  assert.equal(mobile.processStatus.latestCodexSummarySourceLabel, "原文降级");
+  assert.match(mobile.processStatus.latestCodexSummarySourceDetail, /ollama summary unavailable|Ollama/);
+});
+
 test("ollama requests disable thinking output for dashboard summaries and prompts", async () => {
   const configRoot = await createWorkspace();
   await ensureLoopArtifacts(configRoot);

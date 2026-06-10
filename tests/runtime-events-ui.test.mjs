@@ -226,6 +226,26 @@ test("dashboard and mobile status show the latest instruction source", async () 
   assert.match(mobileSource, /最近指令/);
 });
 
+test("dashboard and mobile status show the latest Codex summary source", async () => {
+  const appSource = await fs.readFile("app/web/src/App.jsx", "utf8");
+  const mobileAppSource = await fs.readFile("app/mobile/src/main.jsx", "utf8");
+  const statusStart = appSource.indexOf("function StatusSummaryPanel");
+  const statusEnd = appSource.indexOf("const StatusSummaryPanelV2", statusStart);
+  const mobileStart = appSource.indexOf("function MobileTaskApp");
+  const mobileEnd = appSource.indexOf("function DesktopConsoleApp", mobileStart);
+  const statusSource = appSource.slice(statusStart, statusEnd);
+  const mobileSource = appSource.slice(mobileStart, mobileEnd);
+
+  assert.notEqual(statusStart, -1);
+  assert.notEqual(mobileStart, -1);
+  assert.match(statusSource, /latestCodexSummarySourceLabel/);
+  assert.match(statusSource, /回复摘要/);
+  assert.match(mobileSource, /latestCodexSummarySourceLabel/);
+  assert.match(mobileSource, /回复摘要/);
+  assert.match(mobileAppSource, /latestCodexSummarySourceLabel/);
+  assert.match(mobileAppSource, /回复摘要/);
+});
+
 test("dashboard shows a compact Codex-style loop progress panel", async () => {
   const appSource = await fs.readFile("app/web/src/App.jsx", "utf8");
   const stylesSource = await fs.readFile("app/web/src/styles.css", "utf8");

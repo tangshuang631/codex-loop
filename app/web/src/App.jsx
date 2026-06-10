@@ -1439,6 +1439,12 @@ function MobileTaskApp() {
                 <strong>{processStatus.latestInstructionSourceLabel}</strong>
               </div>
             ) : null}
+            {processStatus.latestCodexSummarySourceLabel ? (
+              <div className="mobile-task-panel-row">
+                <span>回复摘要</span>
+                <strong>{processStatus.latestCodexSummarySourceLabel}</strong>
+              </div>
+            ) : null}
             {mobileView?.pendingGuidance?.hasPending ? (
               <div className="mobile-task-panel-row">
                 <span>待合并</span>
@@ -1601,6 +1607,17 @@ function StatusSummaryPanel({
           [
             processStatus.latestInstructionSourceLabel,
             processStatus.latestInstructionSourceDetail,
+          ]
+            .filter(Boolean)
+            .join("："),
+        ]
+      : null,
+    processStatus?.latestCodexSummarySourceLabel
+      ? [
+          "回复摘要",
+          [
+            processStatus.latestCodexSummarySourceLabel,
+            processStatus.latestCodexSummarySourceDetail,
           ]
             .filter(Boolean)
             .join("："),

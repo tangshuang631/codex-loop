@@ -326,6 +326,15 @@ function StatusBlock({ mobileView, productionStatus, productionPreflight, status
           : ""),
     ],
     ["模型来源", process.latestInstructionSourceDetail],
+    [
+      "回复摘要",
+      [
+        process.latestCodexSummarySourceLabel,
+        process.latestCodexSummarySourceDetail,
+      ]
+        .filter(Boolean)
+        .join("："),
+    ],
   ].filter((row) => row && asText(row[1]));
 
   return (
