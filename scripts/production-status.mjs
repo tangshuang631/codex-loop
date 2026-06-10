@@ -120,6 +120,7 @@ async function readLatestReport(kind, {
     waiting: report.waiting || null,
     diagnosis: report.diagnosis || null,
     counters: report.counters || null,
+    guidance: report.guidance || null,
   };
 }
 
@@ -164,6 +165,7 @@ async function readLiveProductionObservation(kind, {
     waiting: report.waiting || null,
     diagnosis: report.diagnosis || null,
     counters: report.counters || null,
+    guidance: report.guidance || null,
   };
 }
 
@@ -220,8 +222,13 @@ function summarizeReport(kind, report) {
       report.status === "waiting" && Number.isFinite(waitingMinutes) && waitingMinutes > 0
         ? `已等待约 ${waitingMinutes} 分钟，`
         : "";
+    const mergedGuidance = Number(counters.mergedGuidance || report.guidance?.mergedCount || 0);
+    const guidancePreview = cleanText(report.guidance?.latestPreview);
+    const guidanceLabel = mergedGuidance > 0
+      ? `，已合并补充 ${mergedGuidance} 次${guidancePreview ? `：${guidancePreview}` : ""}`
+      : "";
     return report.status === "passed"
-      ? `真实运行已形成 ${closedLoops} 轮真实闭环，达到长期运行基本证据：发送 ${counters.dispatches || 0} 次，完成 ${counters.completions || 0} 次，NPC 复盘 ${counters.supervisorReviews || 0} 次`
+      ? `真实运行已形成 ${closedLoops} 轮真实闭环，达到长期运行基本证据：发送 ${counters.dispatches || 0} 次，完成 ${counters.completions || 0} 次，NPC 复盘 ${counters.supervisorReviews || 0} 次${guidanceLabel}`
       : `${waitingLabel}${userMessage || report.summary || "真实运行观测需要留意"}`;
   }
 

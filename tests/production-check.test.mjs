@@ -1119,6 +1119,67 @@ test("production status exposes the two-cycle live evidence threshold", async ()
   }
 });
 
+test("production status summarizes merged guidance evidence from real observations", async () => {
+  const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), "codex-loop-status-"));
+  const writeReport = async (dirLabel, fileName, report) => {
+    const dir = path.join(tempRoot, ...dirLabel.split("/"));
+    await fs.mkdir(dir, { recursive: true });
+    await fs.writeFile(path.join(dir, fileName), `${JSON.stringify(report, null, 2)}\n`, "utf8");
+  };
+  const now = "2026-06-10T14:20:00.000Z";
+  await writeReport("runtime/production-checks", "latest-production-check.json", {
+    status: "passed",
+    finishedAt: now,
+    durationMs: 1,
+    checks: [{ status: "passed" }],
+  });
+  await writeReport("runtime/frontend-evidence", "latest-frontend-evidence.json", {
+    status: "passed",
+    finishedAt: now,
+    durationMs: 1,
+    results: [{ status: "passed" }],
+  });
+  await writeReport("runtime/longrun-smoke", "latest-longrun-smoke.json", {
+    status: "passed",
+    finishedAt: now,
+    durationMs: 1,
+    checks: [{ status: "passed" }],
+  });
+  await writeReport("runtime/production-observations", "guidance-production-observation.json", {
+    status: "passed",
+    finishedAt: now,
+    durationMs: 1,
+    counters: {
+      dispatches: 2,
+      completions: 2,
+      supervisorReviews: 2,
+      closedLoops: 2,
+      mergedGuidance: 1,
+    },
+    guidance: {
+      mergedCount: 1,
+      latestPreview: "下一轮请优先检查 App 远程操控入口是否清楚。",
+    },
+  });
+
+  const previousCwd = process.cwd();
+  try {
+    process.chdir(tempRoot);
+    const status = await readProductionStatusSummary({
+      refreshObservation: false,
+      now: new Date("2026-06-10T14:20:00.000Z"),
+    });
+    const observation = status.sections.find((section) => section.label === "真实运行观测");
+
+    assert.equal(status.readiness.stage, "production");
+    assert.match(observation.summary, /已合并补充 1 次/);
+    assert.match(observation.summary, /App 远程操控入口是否清楚/);
+    assert.equal(observation.guidance.mergedCount, 1);
+  } finally {
+    process.chdir(previousCwd);
+  }
+});
+
 test("production status exposes structured maturity and remaining gaps", async () => {
   const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), "codex-loop-status-"));
   const writeReport = async (dirLabel, fileName, report) => {

@@ -138,6 +138,58 @@ test("production observer treats one complete cycle as trial evidence, not long-
   assert.match(report.nextAction, /再跑至少 1 轮/);
 });
 
+test("production observer counts merged guidance evidence from dispatched prompts", async () => {
+  const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), "codex-loop-observer-"));
+  const logDir = path.join(tempRoot, "runtime", "guidance-evidence-loop", "logs");
+  await fs.mkdir(logDir, { recursive: true });
+  await fs.writeFile(
+    path.join(logDir, "events.jsonl"),
+    [
+      {
+        type: "run_started_from_console",
+        at: "2026-06-10T08:00:00.000Z",
+      },
+      {
+        type: "codex_followup_dispatching",
+        at: "2026-06-10T08:01:00.000Z",
+        promptGenerator: "ollama",
+        promptPreview: "继续推进移动端远程操控。",
+        mergedGuidanceIncluded: true,
+        mergedGuidancePreview: "下一轮请优先检查 App 远程操控入口是否清楚。",
+      },
+      {
+        type: "codex_followup_sent_waiting",
+        at: "2026-06-10T08:01:02.000Z",
+        summary: "消息已送达绑定线程，正在等待 Codex 完成这一轮回复。",
+        mergedGuidanceIncluded: true,
+        mergedGuidancePreview: "下一轮请优先检查 App 远程操控入口是否清楚。",
+      },
+      {
+        type: "codex_followup_completed",
+        at: "2026-06-10T08:10:00.000Z",
+        latestAssistantPreview: "Codex 已完成移动端远程操控入口检查。",
+      },
+      {
+        type: "supervisor_review_completed",
+        at: "2026-06-10T08:12:00.000Z",
+        summary: "NPC 复盘确认用户补充已经落实。",
+      },
+    ].map((event) => JSON.stringify(event)).join("\n") + "\n",
+    "utf8",
+  );
+
+  const report = await buildProductionObservation({
+    root: tempRoot,
+    runId: "guidance-evidence-loop",
+  });
+
+  assert.equal(report.counters.mergedGuidance, 1);
+  assert.equal(report.guidance.mergedCount, 1);
+  assert.match(report.guidance.latestPreview, /App 远程操控入口是否清楚/);
+  assert.match(report.timeline.map((item) => item.label).join("\n"), /已合并补充/);
+  assert.match(report.timeline.map((item) => item.detail).join("\n"), /App 远程操控入口是否清楚/);
+});
+
 test("production observer only counts ordered dispatch-completion-review cycles", async () => {
   const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), "codex-loop-observer-"));
   const logDir = path.join(tempRoot, "runtime", "unordered-loop", "logs");

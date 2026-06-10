@@ -60,6 +60,7 @@ function eventLabel(type) {
     graceful_stop_completed: "已停止循环",
     graceful_stop_wait_elapsed: "停止等待结束",
     runtime_error: "运行异常",
+    merged_guidance_included: "已合并补充",
   };
   return labels[type] || "运行记录";
 }
@@ -101,6 +102,7 @@ function isTimelineEvent(event = {}) {
     "graceful_stop_completed",
     "graceful_stop_wait_elapsed",
     "runtime_error",
+    "merged_guidance_included",
   ].includes(safeText(event.type));
 }
 
@@ -116,6 +118,7 @@ function buildCounters(events) {
     dispatches,
     completions,
     supervisorReviews,
+    mergedGuidance: countMergedGuidance(events),
     closedLoops: countOrderedClosedLoops(events),
     closedLoopsAfterLatestFailure,
     verificationRuns: events.filter((event) => event.type === "supervisor_verification_completed").length,
@@ -124,6 +127,60 @@ function buildCounters(events) {
       failures > 0 && closedLoopsAfterLatestFailure >= 2 ? 0 : failures,
     stopEvents: events.filter((event) => event.type === "graceful_stop_completed").length,
   };
+}
+
+function countMergedGuidance(events) {
+  const previews = new Set();
+  for (const event of events) {
+    if (!event.mergedGuidanceIncluded) continue;
+    const preview = safeText(event.mergedGuidancePreview || event.detail, "");
+    if (preview) {
+      previews.add(preview);
+    }
+  }
+  return previews.size;
+}
+
+function buildGuidanceSummary(events) {
+  const merged = [];
+  const seen = new Set();
+  for (const event of events) {
+    if (!event.mergedGuidanceIncluded) continue;
+    const preview = safeText(event.mergedGuidancePreview || event.detail, "");
+    if (!preview || seen.has(preview)) continue;
+    seen.add(preview);
+    merged.push({
+      at: safeText(event.at),
+      preview,
+    });
+  }
+  const latest = merged.at(-1) || {};
+  return {
+    mergedCount: merged.length,
+    latestAt: latest.at || "",
+    latestPreview: latest.preview || "",
+    merged,
+  };
+}
+
+function expandMergedGuidanceEvents(events) {
+  const expanded = [];
+  const seen = new Set();
+  for (const event of events) {
+    expanded.push(event);
+    if (!event.mergedGuidanceIncluded) continue;
+    const preview = safeText(event.mergedGuidancePreview, "");
+    if (!preview || seen.has(preview)) continue;
+    seen.add(preview);
+    expanded.push({
+      type: "merged_guidance_included",
+      at: event.at,
+      summary: `用户补充已进入本次指令：${preview}`,
+      mergedGuidanceIncluded: true,
+      mergedGuidancePreview: preview,
+    });
+  }
+  return expanded;
 }
 
 function countOrderedClosedLoops(events) {
@@ -430,12 +487,14 @@ export async function buildProductionObservation({
   const logPath = path.join(root, "runtime", resolvedRunId, "logs", "events.jsonl");
   const events = await readJsonLines(logPath, limit);
   const timeline = dedupeTimeline(
-    events.filter(isTimelineEvent).map((event) => ({
+    expandMergedGuidanceEvents(events).filter(isTimelineEvent).map((event) => ({
       at: safeText(event.at),
       type: safeText(event.type),
       label: eventLabel(event.type),
       detail: eventDetail(event).slice(0, 220),
       promptGenerator: safeText(event.promptGenerator),
+      mergedGuidanceIncluded: Boolean(event.mergedGuidanceIncluded),
+      mergedGuidancePreview: safeText(event.mergedGuidancePreview),
     })),
   );
   const cycles = latestRunCycle(timeline);
@@ -443,6 +502,7 @@ export async function buildProductionObservation({
   cycles.current = recoveredCycle.timeline;
   const counters = buildCounters(cycles.current);
   const historyCounters = buildCounters(cycles.previous);
+  const guidance = buildGuidanceSummary(cycles.current);
   const waiting = buildWaitingObservation(cycles.current, now);
   const advice = deriveStatusAndAdvice(counters, cycles.current, { waiting });
   const diagnosis = deriveDiagnosis(counters, cycles.current, {
@@ -461,6 +521,7 @@ export async function buildProductionObservation({
       logPath: path.relative(root, logPath).replace(/\\/g, "/"),
     },
     counters,
+    guidance,
     history: {
       failureCount: historyCounters.failures,
       totalTimelineEvents: timeline.length,
