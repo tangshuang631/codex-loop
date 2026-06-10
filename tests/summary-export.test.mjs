@@ -240,6 +240,58 @@ test("exportMobileView collapses script snippets as Codex-style script details",
   );
 });
 
+test("exportMobileView splits mixed Codex details into file command and screenshot blocks", async () => {
+  const configRoot = await createWorkspace();
+  const snapshot = await ensureLoopArtifacts(configRoot);
+  await saveThreadBinding(configRoot, {
+    workspaceName: "demo",
+    threadTitle: "复杂历史渲染",
+    threadId: "thread-mixed-details",
+    singleThreadMode: true,
+  });
+  await fs.appendFile(
+    snapshot.paths.logPath,
+    `${JSON.stringify({
+      type: "codex_conversation_mirror_synced",
+      at: "2026-06-10T10:30:00.000Z",
+      latestAssistantPreview: [
+        "已完成移动端历史渲染优化。",
+        "编辑文件：app/web/src/App.jsx、app/mobile/src/main.jsx。",
+        "已运行命令：npm run build:mobile。",
+        "截图证据：runtime/screenshots/mobile-history.png。",
+      ].join("\n"),
+    })}\n`,
+    "utf8",
+  );
+
+  const mobile = await exportMobileView(configRoot);
+  const detailItem = mobile.conversationItems.find((item) =>
+    item.detailBlocks?.some((block) => /app\/web\/src\/App\.jsx/.test(block.text || "")),
+  );
+
+  assert.ok(detailItem, "混合回复应该保留为 Codex 对话项。");
+  const kinds = detailItem.detailBlocks.map((block) => block.kind);
+  assert.ok(kinds.includes("file_change"), "文件改动应该单独成为可展开详情块。");
+  assert.ok(kinds.includes("command_output"), "已运行命令应该单独成为可展开详情块。");
+  assert.ok(kinds.includes("screenshot"), "截图证据应该单独成为可展开详情块。");
+  assert.ok(
+    detailItem.detailBlocks.some((block) =>
+      block.copyTargets?.some((target) => target.kind === "file" && target.value === "app/web/src/App.jsx"),
+    ),
+    "文件详情块应该提供可复制文件路径。",
+  );
+  assert.ok(
+    detailItem.detailBlocks.some((block) =>
+      block.copyTargets?.some((target) => target.kind === "command" && target.value === "npm run build:mobile"),
+    ),
+    "命令详情块应该提供可复制命令。",
+  );
+  assert.ok(
+    detailItem.detailBlocks.every((block) => block.collapsedByDefault === true),
+    "复杂详情默认折叠，避免移动端被日志刷屏。",
+  );
+});
+
 test("exportMobileView returns readable runtime events for mobile monitoring", async () => {
   const configRoot = await createWorkspace();
   await ensureLoopArtifacts(configRoot);

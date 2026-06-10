@@ -2730,14 +2730,14 @@ function classifyConversationDetail(text) {
   if (/```(?:powershell|pwsh|bash|sh|javascript|js|typescript|ts|python|py|json|yaml|yml)?|@\s*'|function\s+\w+\s*\(|const\s+\w+\s*=|let\s+\w+\s*=|import\s+.+from\s+|nodeRepl\.|Get-ChildItem|Select-String/i.test(value)) {
     return "script_snippet";
   }
+  if (/^\s*\$|已运行命令|运行命令|命令[:：]|输出|Exit code|PowerShell|shell|运行/i.test(value)) {
+    return "command_output";
+  }
   if (/TAP version|node --test|npm run|pnpm |yarn |vite build|build:mobile|tests?|pass|fail|失败|通过/i.test(value)) {
     return "test_log";
   }
   if (/diff --git|app[\\/][\w.-]+|scripts[\\/][\w.-]+|docs[\\/][\w.-]+|E:[\\/]|C:[\\/]|已修改|文件|路径/i.test(value)) {
     return "file_change";
-  }
-  if (/^\s*\$|命令|输出|Exit code|PowerShell|shell|运行/i.test(value)) {
-    return "command_output";
   }
   return "runtime_detail";
 }
@@ -2795,6 +2795,10 @@ function dedupeCopyTargets(targets = []) {
   return nextTargets.slice(0, 8);
 }
 
+function cleanCopyTargetValue(value) {
+  return safeText(value, "").trim().replace(/[，。；、,.;&\s]+$/u, "");
+}
+
 function extractConversationCopyTargets(text) {
   const value = safeText(text, "");
   if (!value) return [];
@@ -2806,10 +2810,12 @@ function extractConversationCopyTargets(text) {
   ];
   for (const pattern of commandPatterns) {
     for (const match of value.matchAll(pattern)) {
+      const command = cleanCopyTargetValue(match[0]);
+      if (!command) continue;
       targets.push({
         kind: "command",
         label: "复制命令",
-        value: safeText(match[0], "").trim(),
+        value: command,
       });
     }
   }
@@ -2819,11 +2825,53 @@ function extractConversationCopyTargets(text) {
     targets.push({
       kind: "file",
       label: "复制文件",
-      value: safeText(match[0], "").trim(),
+      value: cleanCopyTargetValue(match[0]),
     });
   }
 
   return dedupeCopyTargets(targets);
+}
+
+function createConversationDetailBlock(kind, text) {
+  const value = safeText(text, "");
+  const copyTargets = extractConversationCopyTargets(value);
+  const title = conversationDetailTitle(kind);
+  const countLabel = conversationDetailCountLabel(kind, copyTargets);
+  return {
+    kind,
+    title,
+    countLabel,
+    displayLabel: `${title} · ${countLabel}`,
+    summary: conversationDetailSummary(kind, value),
+    text: value,
+    collapsedByDefault: true,
+    copyTargets,
+  };
+}
+
+function splitConversationDetailBlocks(text) {
+  const value = safeText(text, "");
+  if (!value || classifyConversationDetail(value) === "script_snippet") {
+    return [];
+  }
+
+  const blocks = [];
+  let current = null;
+  for (const line of value.split(/\n+/u).map((item) => item.trim()).filter(Boolean)) {
+    const kind = classifyConversationDetail(line);
+    if (kind === "runtime_detail") {
+      continue;
+    }
+    if (!current || current.kind !== kind) {
+      current = { kind, lines: [] };
+      blocks.push(current);
+    }
+    current.lines.push(line);
+  }
+
+  return blocks
+    .filter((block) => block.lines.length > 0)
+    .map((block) => createConversationDetailBlock(block.kind, block.lines.join("\n")));
 }
 
 function buildConversationDetailBlocks(text, { force = false } = {}) {
@@ -2834,22 +2882,12 @@ function buildConversationDetailBlocks(text, { force = false } = {}) {
     value.length > 420 ||
     /```|TAP version|npm run|node --test|diff --git|Exit code|已修改|截图|\.png|app[\\/]/i.test(value);
   if (!shouldCollapse) return [];
+  const splitBlocks = splitConversationDetailBlocks(value);
+  if (splitBlocks.length > 1) {
+    return splitBlocks;
+  }
   const kind = classifyConversationDetail(value);
-  const copyTargets = extractConversationCopyTargets(value);
-  const title = conversationDetailTitle(kind);
-  const countLabel = conversationDetailCountLabel(kind, copyTargets);
-  return [
-    {
-      kind,
-      title,
-      countLabel,
-      displayLabel: `${title} · ${countLabel}`,
-      summary: conversationDetailSummary(kind, value),
-      text: value,
-      collapsedByDefault: true,
-      copyTargets,
-    },
-  ];
+  return [createConversationDetailBlock(kind, value)];
 }
 
 function derivePendingGuidanceStatus(processStatus = {}) {
