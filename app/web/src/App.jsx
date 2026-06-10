@@ -575,6 +575,15 @@ function translateHealthIssue(issue) {
   return value || "暂无";
 }
 
+function formatReadinessStage(readiness = {}) {
+  const stage = readiness?.stage || "";
+  if (stage === "production") return "可长跑";
+  if (stage === "observing") return "观察中";
+  if (stage === "trial") return "短时试用";
+  if (stage === "blocked") return "需处理";
+  return "等待判断";
+}
+
 function isUsefulTranscriptEntry(entry) {
   const summary = formatValue(entry?.summary, "");
   if (!summary) {
@@ -1512,6 +1521,8 @@ function StatusSummaryPanel({
   const productionObservation = productionStatus?.sections?.find(
     (section) => section.label === "真实运行观测",
   );
+  const readiness = productionStatus?.readiness || {};
+  const readinessLabel = formatReadinessStage(readiness);
   const productionLabel =
     productionStatus?.status === "passed"
       ? "可继续"
@@ -1526,6 +1537,7 @@ function StatusSummaryPanel({
       : productionObservation?.summary ||
         productionStatus?.nextAction ||
         "等待形成 2 轮真实闭环后，再作为长期运行基本证据。";
+  const readinessDetail = readiness.summary || readiness.nextAction || productionDetail;
   const verificationStatus = processStatus?.supervisorVerificationStatus || "";
   const verificationLabel =
     processStatus?.supervisorVerificationLabel ||
@@ -1548,9 +1560,10 @@ function StatusSummaryPanel({
     ["当前", `${modeText} · ${monitorText}`],
     ["说明", processDetail],
     processStatus?.nextAction ? ["下一步", processStatus.nextAction] : null,
+    productionStatus ? ["生产阶段", `${readinessLabel} · ${readinessDetail}`] : null,
     productionStatus ? ["生产观测", `${productionLabel} · ${productionDetail}`] : null,
   ].filter(Boolean);
-  const primaryLabels = new Set(["当前", "说明", "下一步", "生产观测"]);
+  const primaryLabels = new Set(["当前", "说明", "下一步", "生产阶段", "生产观测"]);
   const detailRows = [
     controllerStatus?.label
       ? [
@@ -1596,6 +1609,7 @@ function StatusSummaryPanel({
       ? [
           "生产状态摘要",
           [
+            readinessLabel,
             productionStatus.status === "passed" ? "可继续使用" : "需要留意",
             productionStatus.nextAction
               ? `${productionStatus.nextActionLabel || "下一步建议"}：${productionStatus.nextAction}`

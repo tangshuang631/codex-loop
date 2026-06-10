@@ -63,6 +63,9 @@ test("mobile app shows production status and stale observation guidance", async 
 
   assert.match(source, /\/production-status/);
   assert.match(source, /productionStatus/);
+  assert.match(source, /readiness\?\.stage/);
+  assert.match(source, /生产阶段/);
+  assert.match(source, /短时试用|可长跑|观察中|需处理/);
   assert.match(source, /生产观测|生产状态/);
   assert.match(source, /真实运行观测/);
   assert.match(source, /已过期|重新启动一次真实任务|重新运行 npm run production:observe/);

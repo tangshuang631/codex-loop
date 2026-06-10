@@ -80,6 +80,15 @@ function compactText(value, length = 180) {
   return `${text.slice(0, length - 1)}…`;
 }
 
+function formatReadinessStage(readiness = {}) {
+  const stage = readiness?.stage || "";
+  if (stage === "production") return "可长跑";
+  if (stage === "observing") return "观察中";
+  if (stage === "trial") return "短时试用";
+  if (stage === "blocked") return "需处理";
+  return "等待判断";
+}
+
 function dedupe(entries) {
   const seen = new Set();
   return entries.filter((entry) => {
@@ -222,6 +231,8 @@ function StatusBlock({ mobileView, productionStatus, statusText }) {
   const productionObservation = productionStatus?.sections?.find(
     (section) => section.label === "真实运行观测",
   );
+  const readiness = productionStatus?.readiness || {};
+  const readinessLabel = formatReadinessStage(readiness);
   const productionLabel =
     productionStatus?.status === "passed"
       ? "可继续"
@@ -234,9 +245,11 @@ function StatusBlock({ mobileView, productionStatus, statusText }) {
     productionObservation?.status === "stale"
       ? "真实运行观测已过期，请重新运行 npm run production:observe，或重新启动一次真实任务生成新的运行记录。"
       : productionStatus?.nextAction || productionObservation?.summary || "";
+  const readinessDetail = readiness.summary || readiness.nextAction || productionDetail;
   const rows = [
     ["当前状态", process.monitorLabel || mobileView?.loop?.modeLabel || "监控中"],
     ["下一步", process.nextAction || mobileView?.suggestedAction || "等待下一轮更新"],
+    productionStatus ? ["生产阶段", `${readinessLabel} · ${readinessDetail}`] : null,
     productionStatus ? ["生产观测", `${productionLabel} · ${productionDetail}`] : null,
     ["最近指令", process.latestInstructionSourceLabel || "等待生成"],
   ].filter(Boolean);
@@ -245,6 +258,7 @@ function StatusBlock({ mobileView, productionStatus, statusText }) {
       ? [
           "生产状态",
           [
+            readinessLabel,
             productionStatus.title || "生产状态摘要",
             productionStatus.nextAction || productionObservation?.summary,
           ]

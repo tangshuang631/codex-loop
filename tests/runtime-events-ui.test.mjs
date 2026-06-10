@@ -104,7 +104,7 @@ test("dashboard folds low-frequency status details by default", async () => {
   const stylesSource = await fs.readFile("app/web/src/styles.css", "utf8");
 
   assert.match(appSource, /primaryRows/);
-  assert.match(appSource, /const primaryLabels = new Set\(\["当前", "说明", "下一步", "生产观测"\]\)/);
+  assert.match(appSource, /const primaryLabels = new Set\(\["当前", "说明", "下一步", "生产阶段", "生产观测"\]\)/);
   assert.match(appSource, /rows\.filter\(\(\[label\]\) => primaryLabels\.has\(label\)\)/);
   assert.match(appSource, /detailRows/);
   assert.match(appSource, /status-detail-fold/);
@@ -119,6 +119,9 @@ test("dashboard keeps production status inside folded status details", async () 
 
   assert.match(appSource, /productionStatus/);
   assert.match(appSource, /requestJson\("\/production-status"\)\.catch/);
+  assert.match(appSource, /readiness\?\.stage/);
+  assert.match(appSource, /生产阶段/);
+  assert.match(appSource, /短时试用|可长跑|观察中|需处理/);
   assert.match(appSource, /生产观测/);
   assert.match(appSource, /真实运行观测/);
   assert.match(appSource, /真实闭环|长期运行基本证据/);
@@ -155,7 +158,8 @@ test("dashboard keeps next action primary and folds independent verification det
   const verificationRowIndex = appSource.indexOf('verificationText ? ["独立验收"');
   const holdReasonRowIndex = appSource.indexOf("processStatus?.holdReason");
   const nextActionRowIndex = appSource.indexOf("processStatus?.nextAction");
-  const primaryLabelsIndex = appSource.indexOf('const primaryLabels = new Set(["当前", "说明", "下一步", "生产观测"])');
+  const primaryLabelsIndex = appSource.indexOf('const primaryLabels = new Set(["当前", "说明", "下一步", "生产阶段", "生产观测"])');
+  const productionStageRowIndex = appSource.indexOf('productionStatus ? ["生产阶段"');
   const detailRowsIndex = appSource.indexOf("const detailRows = [");
   const productionRowIndex = appSource.indexOf('productionStatus ? ["生产观测"');
   const primaryRowsIndex = appSource.indexOf("rows.filter(([label]) => primaryLabels.has(label))");
@@ -164,12 +168,17 @@ test("dashboard keeps next action primary and folds independent verification det
   assert.notEqual(holdReasonRowIndex, -1);
   assert.notEqual(nextActionRowIndex, -1);
   assert.notEqual(primaryLabelsIndex, -1);
+  assert.notEqual(productionStageRowIndex, -1);
   assert.notEqual(detailRowsIndex, -1);
   assert.notEqual(productionRowIndex, -1);
   assert.notEqual(primaryRowsIndex, -1);
   assert.ok(
     nextActionRowIndex < primaryLabelsIndex,
     "下一步要留在主要状态来源里，避免用户看不到下一步动作。",
+  );
+  assert.ok(
+    productionStageRowIndex < primaryLabelsIndex,
+    "生产阶段是长期运行门槛，应在主要状态里直接可见。",
   );
   assert.ok(
     productionRowIndex < primaryLabelsIndex,
