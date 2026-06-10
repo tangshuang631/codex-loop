@@ -185,6 +185,49 @@ test("loop core stops automatic control after monitor-mode one-shot guidance fin
         lastSupervisorReviewAt: "",
       },
     }),
+    {
+      type: "needs_supervisor_review",
+      status: "supervisor_reviewing",
+      completionAt: "2026-06-09T12:00:00.000Z",
+    },
+  );
+
+  assert.deepEqual(
+    decideLoopControllerGate({
+      state: {
+        mode: "running",
+        monitorOnly: true,
+        stopRequested: false,
+        finalizeRequested: false,
+      },
+      thread: {
+        continuationStatus: "idle",
+        latestEventType: "supervisor_review_completed",
+        lastCompletionAt: "2026-06-09T12:00:00.000Z",
+        lastSupervisorReviewAt: "2026-06-09T12:01:00.000Z",
+      },
+    }),
     { type: "monitor_only_stopped", status: "stopped" },
+  );
+});
+
+test("loop core keeps budget stop ahead of supervisor review", () => {
+  assert.deepEqual(
+    decideLoopControllerGate({
+      state: {
+        mode: "running",
+        stopRequested: false,
+        finalizeRequested: false,
+        elapsedMinutes: 120,
+        budgets: { maxMinutes: 120, finalizeLeadMinutes: 0 },
+      },
+      thread: {
+        continuationStatus: "idle",
+        latestEventType: "codex_followup_completed",
+        lastCompletionAt: "2026-06-09T12:00:00.000Z",
+        lastSupervisorReviewAt: "",
+      },
+    }),
+    { type: "budget_stopped", status: "budget_stopped" },
   );
 });

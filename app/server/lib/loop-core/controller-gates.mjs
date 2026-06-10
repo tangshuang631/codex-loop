@@ -67,10 +67,6 @@ export function decideLoopControllerGate(snapshot = {}, controllerState = {}) {
     };
   }
 
-  if (state.monitorOnly) {
-    return { type: "monitor_only_stopped", status: "stopped" };
-  }
-
   if (budgetLimitReached(state)) {
     return { type: "budget_stopped", status: "budget_stopped" };
   }
@@ -96,6 +92,10 @@ export function decideLoopControllerGate(snapshot = {}, controllerState = {}) {
       status: "supervisor_reviewing",
       completionAt,
     };
+  }
+
+  if (state.monitorOnly) {
+    return { type: "monitor_only_stopped", status: "stopped" };
   }
 
   return { type: "ready_to_dispatch", status: "ready_to_dispatch" };

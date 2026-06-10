@@ -466,12 +466,13 @@ test("loop controller stops before sending another turn when budget limit is rea
   assert.equal(controller.isRunning("demo"), false);
 });
 
-test("loop controller stops automatic control after monitor-mode one-shot completion", async () => {
+test("loop controller reviews monitor-mode completion before stopping automatic control", async () => {
   const scheduled = [];
   let runTurnCount = 0;
   let reviewCount = 0;
-  const controller = createLoopController({
-    readSnapshot: async () => ({
+  let readCount = 0;
+  const snapshots = [
+    {
       state: {
         mode: "running",
         monitorOnly: true,
@@ -484,12 +485,34 @@ test("loop controller stops automatic control after monitor-mode one-shot comple
         lastCompletionAt: "2026-06-09T12:00:00.000Z",
         lastSupervisorReviewAt: "",
       },
-    }),
+    },
+    {
+      state: {
+        mode: "running",
+        monitorOnly: true,
+        stopRequested: false,
+        finalizeRequested: false,
+      },
+      thread: {
+        continuationStatus: "idle",
+        latestEventType: "supervisor_review_completed",
+        lastCompletionAt: "2026-06-09T12:00:00.000Z",
+        lastSupervisorReviewAt: "2026-06-09T12:01:00.000Z",
+      },
+    },
+  ];
+  const controller = createLoopController({
+    readSnapshot: async () => snapshots[Math.min(readCount++, snapshots.length - 1)],
     runTurn: async () => {
       runTurnCount += 1;
     },
     reviewCompletion: async () => {
       reviewCount += 1;
+      return {
+        thread: {
+          latestEventType: "supervisor_review_completed",
+        },
+      };
     },
     schedule: (fn) => {
       scheduled.push(fn);
@@ -507,5 +530,5 @@ test("loop controller stops automatic control after monitor-mode one-shot comple
   assert.match(status.detail, /监控模式|不会自动循环/);
   assert.equal(controller.isRunning("demo"), false);
   assert.equal(runTurnCount, 0);
-  assert.equal(reviewCount, 0);
+  assert.equal(reviewCount, 1);
 });
