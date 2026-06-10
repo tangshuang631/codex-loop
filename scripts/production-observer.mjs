@@ -114,11 +114,42 @@ function buildCounters(events) {
     dispatches,
     completions,
     supervisorReviews,
-    closedLoops: Math.min(dispatches, completions, supervisorReviews),
+    closedLoops: countOrderedClosedLoops(events),
     verificationRuns: events.filter((event) => event.type === "supervisor_verification_completed").length,
     failures: events.filter((event) => /failed|stalled|runtime_error/u.test(event.type)).length,
     stopEvents: events.filter((event) => event.type === "graceful_stop_completed").length,
   };
+}
+
+function countOrderedClosedLoops(events) {
+  let closedLoops = 0;
+  let state = "idle";
+
+  for (const event of events) {
+    if (
+      event.type === "codex_followup_dispatching" ||
+      event.type === "codex_followup_sent_waiting"
+    ) {
+      state = "dispatched";
+      continue;
+    }
+
+    if (event.type === "codex_followup_completed") {
+      if (state === "dispatched") {
+        state = "completed";
+      }
+      continue;
+    }
+
+    if (event.type === "supervisor_review_completed") {
+      if (state === "completed") {
+        closedLoops += 1;
+        state = "idle";
+      }
+    }
+  }
+
+  return closedLoops;
 }
 
 function isDeliveredTimeoutFailure(event = {}) {

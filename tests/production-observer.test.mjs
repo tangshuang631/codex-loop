@@ -138,6 +138,39 @@ test("production observer treats one complete cycle as trial evidence, not long-
   assert.match(report.nextAction, /再跑至少 1 轮/);
 });
 
+test("production observer only counts ordered dispatch-completion-review cycles", async () => {
+  const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), "codex-loop-observer-"));
+  const logDir = path.join(tempRoot, "runtime", "unordered-loop", "logs");
+  await fs.mkdir(logDir, { recursive: true });
+  await fs.writeFile(
+    path.join(logDir, "events.jsonl"),
+    [
+      { type: "run_started_from_console", at: "2026-06-10T08:00:00.000Z" },
+      { type: "codex_followup_dispatching", at: "2026-06-10T08:01:00.000Z" },
+      { type: "supervisor_review_completed", at: "2026-06-10T08:02:00.000Z" },
+      { type: "codex_followup_completed", at: "2026-06-10T08:03:00.000Z" },
+      { type: "codex_followup_dispatching", at: "2026-06-10T08:04:00.000Z" },
+      { type: "supervisor_review_completed", at: "2026-06-10T08:05:00.000Z" },
+      { type: "codex_followup_completed", at: "2026-06-10T08:06:00.000Z" },
+    ]
+      .map((event) => JSON.stringify(event))
+      .join("\n") + "\n",
+    "utf8",
+  );
+
+  const report = await buildProductionObservation({
+    root: tempRoot,
+    runId: "unordered-loop",
+  });
+
+  assert.equal(report.status, "attention");
+  assert.equal(report.counters.dispatches, 2);
+  assert.equal(report.counters.completions, 2);
+  assert.equal(report.counters.supervisorReviews, 2);
+  assert.equal(report.counters.closedLoops, 0);
+  assert.match(report.summary, /还没有形成发送、完成、NPC 复盘的完整闭环证据/);
+});
+
 test("production observer defaults to config.currentRunId for multi-task consoles", async () => {
   const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), "codex-loop-observer-"));
   await fs.writeFile(
