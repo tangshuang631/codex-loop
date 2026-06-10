@@ -40,6 +40,27 @@ test("production observer builds a readable timeline from real runtime events", 
         summary: "NPC 以产品经理和测试人员视角确认可以继续。",
       },
       {
+        type: "codex_followup_dispatching",
+        at: "2026-06-10T08:13:00.000Z",
+        promptGenerator: "ollama",
+        promptPreview: "继续完成移动端生产观测验收。",
+      },
+      {
+        type: "codex_followup_sent_waiting",
+        at: "2026-06-10T08:13:02.000Z",
+        summary: "消息已送达绑定线程，正在等待 Codex 完成第二轮回复。",
+      },
+      {
+        type: "codex_followup_completed",
+        at: "2026-06-10T08:18:00.000Z",
+        latestAssistantPreview: "Codex 已完成第二轮移动端生产观测展示。",
+      },
+      {
+        type: "supervisor_review_completed",
+        at: "2026-06-10T08:19:00.000Z",
+        summary: "NPC 复盘确认第二轮仍可继续。",
+      },
+      {
         type: "graceful_stop_completed",
         at: "2026-06-10T08:20:00.000Z",
         summary: "循环已停止。",
@@ -61,16 +82,60 @@ test("production observer builds a readable timeline from real runtime events", 
   assert.match(report.finishedAt, /2026|20\d\d/);
   assert.equal(typeof report.durationMs, "number");
   assert.equal(report.loop.runId, "demo-loop");
-  assert.equal(report.timeline.length, 6);
-  assert.equal(report.counters.dispatches, 1);
-  assert.equal(report.counters.completions, 1);
-  assert.equal(report.counters.supervisorReviews, 1);
+  assert.equal(report.timeline.length, 10);
+  assert.equal(report.counters.dispatches, 2);
+  assert.equal(report.counters.completions, 2);
+  assert.equal(report.counters.supervisorReviews, 2);
   assert.equal(report.counters.failures, 0);
   assert.equal(report.counters.stopEvents, 1);
-  assert.match(report.summary, /已观察到发送、等待、Codex 完成和 NPC 复盘/);
+  assert.match(report.summary, /已观察到 2 轮发送、Codex 完成和 NPC 复盘/);
   assert.match(report.nextAction, /可以继续真实任务/);
   assert.match(report.timeline.map((item) => item.label).join("\n"), /Codex 已完成一轮/);
   assert.match(report.timeline.map((item) => item.detail).join("\n"), /移动端历史对话/);
+});
+
+test("production observer treats one complete cycle as trial evidence, not long-run readiness", async () => {
+  const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), "codex-loop-observer-"));
+  const logDir = path.join(tempRoot, "runtime", "single-cycle-loop", "logs");
+  await fs.mkdir(logDir, { recursive: true });
+  await fs.writeFile(
+    path.join(logDir, "events.jsonl"),
+    [
+      {
+        type: "run_started_from_console",
+        at: "2026-06-10T08:00:00.000Z",
+      },
+      {
+        type: "codex_followup_dispatching",
+        at: "2026-06-10T08:01:00.000Z",
+        promptGenerator: "ollama",
+        promptPreview: "继续完成移动端历史对话验收。",
+      },
+      {
+        type: "codex_followup_completed",
+        at: "2026-06-10T08:10:00.000Z",
+        latestAssistantPreview: "Codex 已完成移动端历史对话展示并跑过测试。",
+      },
+      {
+        type: "supervisor_review_completed",
+        at: "2026-06-10T08:12:00.000Z",
+        summary: "NPC 以产品经理和测试人员视角确认可以继续。",
+      },
+    ]
+      .map((event) => JSON.stringify(event))
+      .join("\n") + "\n",
+    "utf8",
+  );
+
+  const report = await buildProductionObservation({
+    root: tempRoot,
+    runId: "single-cycle-loop",
+  });
+
+  assert.equal(report.status, "attention");
+  assert.equal(report.counters.closedLoops, 1);
+  assert.match(report.summary, /只观察到 1 轮完整闭环/);
+  assert.match(report.nextAction, /再跑至少 1 轮/);
 });
 
 test("production observer marks missing or failed long-run evidence as attention", async () => {
@@ -440,6 +505,22 @@ test("production observer judges the latest run cycle while preserving historica
         at: "2026-06-10T09:10:00.000Z",
         summary: "NPC 复盘认为当前轮可以继续。",
       },
+      {
+        type: "codex_followup_dispatching",
+        at: "2026-06-10T09:11:00.000Z",
+        promptGenerator: "ollama",
+        promptPreview: "继续推进第二轮真实长跑验证。",
+      },
+      {
+        type: "codex_followup_completed",
+        at: "2026-06-10T09:18:00.000Z",
+        latestAssistantPreview: "Codex 已完成第二轮真实验证。",
+      },
+      {
+        type: "supervisor_review_completed",
+        at: "2026-06-10T09:20:00.000Z",
+        summary: "NPC 复盘认为第二轮也可以继续。",
+      },
     ]
       .map((event) => JSON.stringify(event))
       .join("\n") + "\n",
@@ -454,7 +535,8 @@ test("production observer judges the latest run cycle while preserving historica
   assert.equal(report.status, "passed");
   assert.equal(report.counters.failures, 0);
   assert.equal(report.history.failureCount, 1);
-  assert.equal(report.history.totalTimelineEvents, 6);
+  assert.equal(report.history.totalTimelineEvents, 9);
+  assert.equal(report.counters.closedLoops, 2);
   assert.match(report.summary, /最近一次运行周期/);
   assert.doesNotMatch(report.timeline.map((item) => item.detail).join("\n"), /旧窗口不可接收/);
 });

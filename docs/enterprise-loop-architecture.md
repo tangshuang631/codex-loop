@@ -43,6 +43,8 @@
 - 失败治理必须先产出用户能理解的原因和下一步动作，再把原始错误留给日志排查，不能把英文调试信息直接当成产品状态。
 - 任何调度、发送、验证、停止相关迁移，都必须跑 `npm run production:check`。它是投入使用前的生产化检查入口，会覆盖环境检查、长跑 smoke 检查、`npm test`、桌面端构建、移动端构建、前端证据检查和 git 差异检查，并写入可追溯报告。前端证据检查会确认桌面端和移动端构建产物仍包含历史对话、发送引导和截图证据，并把结果写入 `runtime/frontend-evidence/`。
 - 真实任务运行后要用 `npm run production:observe` 补齐真实运行观测报告。它只读 `runtime/<runId>/logs/events.jsonl`，整理发送、等待、Codex 完成、NPC 复盘、失败和停止时间线，写入 `runtime/production-observations/`，不启动循环也不向 Codex 发送消息。
+- 真实运行观测至少 2 轮连续闭环才算长期运行基本证据：发送下一轮指令 -> Codex 完成 -> NPC 复盘。单轮闭环只能证明可试用，不能证明适合提高自动化时长。
+- `npm run production:status` 输出生产状态摘要，统一汇总最近生产检查、前端证据、长跑节奏、真实运行观测和下一步建议。默认超过 12 小时的报告会被视为已过期，需要重新运行 npm run production:check 后再判断是否适合长期运行。
 - 当真实状态显示 Codex 已完成但缺少 NPC 监督复盘时，用 `npm run production:recover` 补齐复盘。它是安全恢复入口，只做监督复盘 backfill，不启动循环，也不发送下一轮指令。
 - `npm run loop:smoke` 是 Loop 内核的本地模拟长跑检查，不触碰真实 Codex 线程。它必须证明控制器会在发送后等待 Codex、不会在 Codex 未完成时追发、用户补充会等 Codex 完成后交给 NPC 合并、会先做监督复盘再进入下一轮，能按产品经理 / 测试人员 / 真实用户视角做独立验收并遵守冷却防重复，并在预算到达后停止自动发送。
 

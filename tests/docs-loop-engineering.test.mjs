@@ -159,8 +159,9 @@ test("docs describe frontend evidence as part of production readiness", async ()
 test("docs expose production status summary for long-running operation", async () => {
   const readmeSource = await fs.readFile("README.md", "utf8");
   const checklistSource = await fs.readFile("codex-loop6.7-13-29开发清单.md", "utf8");
+  const architectureSource = await fs.readFile("docs/enterprise-loop-architecture.md", "utf8");
 
-  for (const source of [readmeSource, checklistSource]) {
+  for (const source of [readmeSource, checklistSource, architectureSource]) {
     assert.match(source, /npm run production:status/);
     assert.match(source, /生产状态摘要/);
     assert.match(source, /最近生产检查/);
@@ -169,5 +170,7 @@ test("docs expose production status summary for long-running operation", async (
     assert.match(source, /下一步建议/);
     assert.match(source, /12 小时/);
     assert.match(source, /重新运行 npm run production:check/);
+    assert.match(source, /至少 2 轮|两轮/);
+    assert.match(source, /发送.*Codex 完成.*NPC 复盘|NPC 复盘.*Codex 完成.*发送/);
   }
 });

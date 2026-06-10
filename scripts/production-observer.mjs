@@ -105,10 +105,14 @@ function isTimelineEvent(event = {}) {
 function buildCounters(events) {
   const dispatching = events.filter((event) => event.type === "codex_followup_dispatching").length;
   const sentOnly = events.filter((event) => event.type === "codex_followup_sent_waiting").length;
+  const dispatches = dispatching || sentOnly;
+  const completions = events.filter((event) => event.type === "codex_followup_completed").length;
+  const supervisorReviews = events.filter((event) => event.type === "supervisor_review_completed").length;
   return {
-    dispatches: dispatching || sentOnly,
-    completions: events.filter((event) => event.type === "codex_followup_completed").length,
-    supervisorReviews: events.filter((event) => event.type === "supervisor_review_completed").length,
+    dispatches,
+    completions,
+    supervisorReviews,
+    closedLoops: Math.min(dispatches, completions, supervisorReviews),
     verificationRuns: events.filter((event) => event.type === "supervisor_verification_completed").length,
     failures: events.filter((event) => /failed|stalled|runtime_error/u.test(event.type)).length,
     stopEvents: events.filter((event) => event.type === "graceful_stop_completed").length,
@@ -228,11 +232,19 @@ function deriveStatusAndAdvice(counters, timeline, { waiting = null } = {}) {
     };
   }
 
-  if (counters.dispatches > 0 && counters.completions > 0 && counters.supervisorReviews > 0) {
+  if (counters.closedLoops >= 2) {
     return {
       status: "passed",
-      summary: "最近一次运行周期已观察到发送、等待、Codex 完成和 NPC 复盘，具备继续真实长跑的基本证据。",
+      summary: `最近一次运行周期已观察到 ${counters.closedLoops} 轮发送、Codex 完成和 NPC 复盘，具备继续真实长跑的基本证据。`,
       nextAction: "可以继续真实任务；建议继续保留人工观察，并在多轮完成后再提高自动化时长。",
+    };
+  }
+
+  if (counters.closedLoops === 1) {
+    return {
+      status: "attention",
+      summary: "只观察到 1 轮完整闭环，说明链路可试用，但还不足以证明长期稳定运行。",
+      nextAction: "再跑至少 1 轮真实任务，确认发送、Codex 完成和 NPC 复盘能连续出现后，再提高自动化时长。",
     };
   }
 
