@@ -138,6 +138,55 @@ test("production observer treats one complete cycle as trial evidence, not long-
   assert.match(report.nextAction, /再跑至少 1 轮/);
 });
 
+test("production observer defaults to config.currentRunId for multi-task consoles", async () => {
+  const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), "codex-loop-observer-"));
+  await fs.writeFile(
+    path.join(tempRoot, "config.json"),
+    `${JSON.stringify({ currentRunId: "current-task-run", projectName: "当前任务" }, null, 2)}\n`,
+    "utf8",
+  );
+
+  const oldLogDir = path.join(tempRoot, "runtime", "assistant-loop", "logs");
+  await fs.mkdir(oldLogDir, { recursive: true });
+  await fs.writeFile(
+    path.join(oldLogDir, "events.jsonl"),
+    [
+      { type: "run_started_from_console", at: "2026-06-08T08:00:00.000Z" },
+      { type: "codex_followup_failed", at: "2026-06-08T08:01:00.000Z" },
+    ]
+      .map((event) => JSON.stringify(event))
+      .join("\n") + "\n",
+    "utf8",
+  );
+
+  const logDir = path.join(tempRoot, "runtime", "current-task-run", "logs");
+  await fs.mkdir(logDir, { recursive: true });
+  await fs.writeFile(
+    path.join(logDir, "events.jsonl"),
+    [
+      { type: "run_started_from_console", at: "2026-06-10T08:00:00.000Z" },
+      { type: "codex_followup_dispatching", at: "2026-06-10T08:01:00.000Z" },
+      { type: "codex_followup_completed", at: "2026-06-10T08:05:00.000Z" },
+      { type: "supervisor_review_completed", at: "2026-06-10T08:06:00.000Z" },
+      { type: "codex_followup_dispatching", at: "2026-06-10T08:08:00.000Z" },
+      { type: "codex_followup_completed", at: "2026-06-10T08:12:00.000Z" },
+      { type: "supervisor_review_completed", at: "2026-06-10T08:13:00.000Z" },
+    ]
+      .map((event) => JSON.stringify(event))
+      .join("\n") + "\n",
+    "utf8",
+  );
+
+  const report = await buildProductionObservation({
+    root: tempRoot,
+  });
+
+  assert.equal(report.status, "passed");
+  assert.equal(report.loop.runId, "current-task-run");
+  assert.match(report.loop.logPath, /current-task-run/);
+  assert.equal(report.counters.closedLoops, 2);
+});
+
 test("production observer marks missing or failed long-run evidence as attention", async () => {
   const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), "codex-loop-observer-"));
   const missing = await buildProductionObservation({

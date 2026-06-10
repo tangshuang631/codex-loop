@@ -2,6 +2,8 @@ import fs from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 
+import { loadLoopConfig } from "./lib/config-loader.mjs";
+
 const DEFAULT_LIMIT = 80;
 const DEFAULT_WAIT_ATTENTION_MINUTES = Number(
   process.env.CODEX_LOOP_WAIT_ATTENTION_MINUTES || 15,
@@ -342,12 +344,13 @@ function deriveDiagnosis(counters, timeline, { hasRecovery = false } = {}) {
 
 export async function buildProductionObservation({
   root = process.cwd(),
-  runId = process.env.CODEX_LOOP_OBSERVE_RUN_ID || "assistant-loop",
+  runId = null,
   limit = DEFAULT_LIMIT,
   now = new Date(),
 } = {}) {
   const startedAt = new Date();
-  const logPath = path.join(root, "runtime", runId, "logs", "events.jsonl");
+  const resolvedRunId = runId || await resolveObservedRunId(root);
+  const logPath = path.join(root, "runtime", resolvedRunId, "logs", "events.jsonl");
   const events = await readJsonLines(logPath, limit);
   const timeline = dedupeTimeline(
     events.filter(isTimelineEvent).map((event) => ({
@@ -377,7 +380,7 @@ export async function buildProductionObservation({
     durationMs: Date.now() - startedAt.getTime(),
     generatedAt: new Date().toISOString(),
     loop: {
-      runId,
+      runId: resolvedRunId,
       logPath: path.relative(root, logPath).replace(/\\/g, "/"),
     },
     counters,
@@ -392,6 +395,25 @@ export async function buildProductionObservation({
     nextAction: advice.nextAction,
     timeline: cycles.current,
   };
+}
+
+async function resolveObservedRunId(root = process.cwd()) {
+  if (process.env.CODEX_LOOP_OBSERVE_RUN_ID) {
+    return process.env.CODEX_LOOP_OBSERVE_RUN_ID;
+  }
+
+  try {
+    const { config } = await loadLoopConfig(root);
+    if (config.currentRunId) {
+      return config.currentRunId;
+    }
+  } catch (error) {
+    if (error?.code !== "ENOENT" && !/Missing codex-loop config file/u.test(String(error?.message || ""))) {
+      throw error;
+    }
+  }
+
+  return "assistant-loop";
 }
 
 function dedupeTimeline(timeline) {
