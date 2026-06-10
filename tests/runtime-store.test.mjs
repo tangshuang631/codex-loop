@@ -1102,6 +1102,40 @@ test("runLoopTurn tries ollama by default as the global loop brain", async () =>
   assert.equal(snapshot.thread.latestEventType, "codex_followup_completed");
 });
 
+test("runLoopTurn records readable model source when waiting for Codex", async () => {
+  const configRoot = await createWorkspace();
+  await ensureLoopArtifacts(configRoot);
+  await saveThreadBinding(configRoot, {
+    workspaceName: "demo",
+    threadTitle: "模型来源运行记录",
+    threadId: "thread-readable-source",
+    singleThreadMode: true,
+  });
+  await syncCodexThreadMirror(configRoot, {
+    lastUserInstructionSummary: "继续按产品规则推进",
+    latestCodexSummary: "Codex 已完成上一批任务，等待下一轮。",
+  });
+
+  const snapshot = await runLoopTurn(configRoot, {
+    generateFollowupPrompt: async () =>
+      "以产品经理和测试人员视角，先验收运行记录是否能看懂模型来源。",
+    dispatchThreadMessage: async () => ({
+      deliveryObserved: true,
+      completionObserved: false,
+      lastMessage: "",
+    }),
+  });
+
+  const sentEvent = snapshot.runtimeEvents.find(
+    (event) => event.type === "codex_followup_sent_waiting",
+  );
+
+  assert.equal(snapshot.thread.lastDispatchPromptGenerator, "ollama");
+  assert.ok(sentEvent, "运行记录里应该保留指令送达事件");
+  assert.match(sentEvent.detail, /本地模型生成|Ollama|NPC/);
+  assert.match(sentEvent.detail, /等待 Codex/);
+});
+
 test("milestone review stores supervisor guidance that the next loop turn uses", async () => {
   const configRoot = await createWorkspace();
   await ensureLoopArtifacts(configRoot);
@@ -1536,6 +1570,7 @@ test("runLoopTurn auto fallback keeps pending guidance in the sent prompt before
   assert.match(snapshot.thread.promptGenerationWarning, /Ollama/);
   assert.equal(snapshot.thread.pendingUserGuidance, "");
   assert.equal(snapshot.thread.continuationStatus, "dispatching");
+  assert.match(snapshot.runtimeEvents[0].detail, /模板降级|Ollama|精简/);
 });
 
 test("sendPendingGuidanceOnce sends queued guidance from monitor mode without starting automatic loop", async () => {

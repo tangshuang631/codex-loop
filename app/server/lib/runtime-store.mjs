@@ -304,8 +304,37 @@ function readableRuntimeEventTitle(type, event = {}) {
   return titles[type] || "运行记录";
 }
 
+function readablePromptGeneratorDetail(event = {}) {
+  const promptGenerator = safeText(event.promptGenerator, "");
+  const warning = safeText(event.promptGenerationWarning, "");
+  if (promptGenerator === "ollama") {
+    return "本次指令由本地模型 / NPC 生成。";
+  }
+  if (promptGenerator === "template" && warning) {
+    return "模板降级：" + warning;
+  }
+  if (promptGenerator === "template") {
+    return "本次指令使用精简模板生成。";
+  }
+  return "";
+}
+
 function readableRuntimeEventDetail(event = {}) {
   const type = safeText(event.type, "");
+  if (
+    type === "codex_followup_dispatching" ||
+    type === "codex_followup_dispatched" ||
+    type === "codex_followup_sent_waiting"
+  ) {
+    const sourceDetail = readablePromptGeneratorDetail(event);
+    const eventDetail = firstNonEmpty(
+      event.summary,
+      event.note,
+      event.promptPreview,
+      "正在等待 Codex 完成当前轮。",
+    );
+    return [sourceDetail, eventDetail].filter(Boolean).join(" ");
+  }
   if (type === "codex_followup_completed") {
     return firstNonEmpty(
       event.latestAssistantPreview,
