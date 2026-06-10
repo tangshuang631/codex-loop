@@ -791,6 +791,10 @@ test("exportMobileView exposes customized npc rules and pending mobile guidance"
   assert.match(mobile.supervisor.acceptanceCriteria, /10 秒/);
   assert.equal(mobile.pendingGuidance.text, "下一轮请重点检查移动端实时引导是否清楚。");
   assert.equal(mobile.pendingGuidance.mergeTiming, "codex_completed");
+  assert.equal(mobile.pendingGuidance.mergeProcessor, "ollama_npc");
+  assert.match(mobile.pendingGuidance.mergeProcessorLabel, /本地模型|NPC|Ollama/);
+  assert.match(mobile.pendingGuidance.userMessage, /Codex.*完成/);
+  assert.match(mobile.pendingGuidance.userMessage, /本地模型|NPC|Ollama/);
 });
 
 test("exportMobileView suggests binding a visible thread before starting when thread is missing", async () => {

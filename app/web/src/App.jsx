@@ -1341,7 +1341,7 @@ function MobileTaskApp() {
         guidanceResult?.message ||
           (guidanceResult?.dispatch === "sent"
             ? "已发送引导，正在等待 Codex 完成当前轮。"
-            : "已保存补充引导，会等 Codex 完成后合并。"),
+            : "已保存补充引导，会等 Codex 完成后交给本地模型 / NPC 合并。"),
       );
       await loadProtectedMobileView({ silent: true });
     } catch (error) {
@@ -1455,6 +1455,7 @@ function MobileTaskApp() {
                 <span>待合并</span>
                 <div className="mobile-task-pending-actions">
                   <strong>{mobileView.pendingGuidance.preview || mobileView.pendingGuidance.text}</strong>
+                  {mobileView.pendingGuidance.userMessage ? <small>{mobileView.pendingGuidance.userMessage}</small> : null}
                   <div className="mobile-task-pending-buttons">
                     <button
                       type="button"
