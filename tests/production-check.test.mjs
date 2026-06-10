@@ -315,6 +315,72 @@ test("production status frontend evidence summary uses Chinese evidence names", 
   }
 });
 
+test("production status exposes structured frontend evidence groups for web and app", async () => {
+  const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), "codex-loop-status-"));
+  const writeReport = async (dirLabel, fileName, report) => {
+    const dir = path.join(tempRoot, ...dirLabel.split("/"));
+    await fs.mkdir(dir, { recursive: true });
+    await fs.writeFile(path.join(dir, fileName), `${JSON.stringify(report, null, 2)}\n`, "utf8");
+  };
+  const now = "2026-06-10T14:20:00.000Z";
+  await writeReport("runtime/production-checks", "latest-production-check.json", {
+    status: "passed",
+    finishedAt: now,
+    durationMs: 1,
+    checks: [{ status: "passed" }],
+  });
+  await writeReport("runtime/frontend-evidence", "latest-frontend-evidence.json", {
+    status: "passed",
+    finishedAt: now,
+    durationMs: 1,
+    results: [
+      {
+        name: "桌面端",
+        status: "passed",
+        requiredText: ["历史对话", "发送引导", "conversation-detail-block", "markdown-code-block", "file-path-chip"],
+      },
+      {
+        name: "移动端",
+        status: "passed",
+        requiredText: ["历史对话", "发送引导"],
+        requiredEvidence: ["历史对话", "发送引导", "折叠详情", "代码块", "文件路径"],
+      },
+    ],
+  });
+  await writeReport("runtime/longrun-smoke", "latest-longrun-smoke.json", {
+    status: "passed",
+    finishedAt: now,
+    durationMs: 1,
+    checks: [{ status: "passed" }],
+  });
+
+  const previousCwd = process.cwd();
+  try {
+    process.chdir(tempRoot);
+    const status = await readProductionStatusSummary({
+      refreshObservation: false,
+      now: new Date("2026-06-10T14:20:00.000Z"),
+    });
+    const frontend = status.sections.find((section) => section.label === "前端证据");
+
+    assert.deepEqual(frontend.evidenceGroups, [
+      {
+        name: "桌面端",
+        status: "passed",
+        items: ["历史对话", "发送引导", "折叠详情", "代码块", "文件路径"],
+      },
+      {
+        name: "移动端",
+        status: "passed",
+        items: ["历史对话", "发送引导", "折叠详情", "代码块", "文件路径"],
+      },
+    ]);
+    assert.doesNotMatch(JSON.stringify(frontend.evidenceGroups), /conversation-detail-block|markdown-code-block|file-path-chip/);
+  } finally {
+    process.chdir(previousCwd);
+  }
+});
+
 test("production status summarizes recent production evidence for long-running use", async () => {
   const packageJson = JSON.parse(await read("package.json"));
   const source = await read("scripts/production-status.mjs");

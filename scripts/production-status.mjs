@@ -57,6 +57,32 @@ function readableFrontendEvidence(text) {
   return frontendEvidenceLabels[value] || value;
 }
 
+function collectFrontendEvidenceItems(item = {}) {
+  const source = Array.isArray(item.requiredEvidence) && item.requiredEvidence.length
+    ? item.requiredEvidence
+    : Array.isArray(item.requiredText)
+      ? item.requiredText
+      : [];
+  return [
+    ...new Set(
+      source
+        .map(readableFrontendEvidence)
+        .filter(Boolean),
+    ),
+  ];
+}
+
+function buildFrontendEvidenceGroups(report = {}) {
+  const results = Array.isArray(report.results) ? report.results : [];
+  return results
+    .map((item) => ({
+      name: cleanText(item.name, "前端"),
+      status: cleanText(item.status, "unknown"),
+      items: collectFrontendEvidenceItems(item),
+    }))
+    .filter((group) => group.items.length);
+}
+
 function formatTargetLabel(target = {}) {
   return [
     cleanText(target.threadTitle, cleanText(target.workspaceName, cleanText(target.runId, "当前任务"))),
@@ -116,8 +142,11 @@ async function readLatestReport(kind, {
   const ageHours = getReportAgeHours(finishedAt, latest.stat.mtimeMs, now);
   const isStale = ageHours > MAX_REPORT_AGE_HOURS;
   const summary = summarizeReport(kind, report);
+  const evidenceGroups = kind.key === "frontendEvidence"
+    ? buildFrontendEvidenceGroups(report)
+    : null;
 
-  return {
+  const item = {
     label: kind.label,
     status: isStale ? "stale" : report.status || "unknown",
     rawStatus: report.status || "unknown",
@@ -133,6 +162,10 @@ async function readLatestReport(kind, {
     counters: report.counters || null,
     guidance: report.guidance || null,
   };
+  if (evidenceGroups?.length) {
+    item.evidenceGroups = evidenceGroups;
+  }
+  return item;
 }
 
 async function readLiveProductionObservation(kind, {
@@ -202,12 +235,7 @@ function summarizeReport(kind, report) {
     const requiredTexts = [
       ...new Set(
         results
-          .flatMap((item) => {
-            if (Array.isArray(item.requiredEvidence) && item.requiredEvidence.length) {
-              return item.requiredEvidence;
-            }
-            return Array.isArray(item.requiredText) ? item.requiredText.map(readableFrontendEvidence) : [];
-          })
+          .flatMap(collectFrontendEvidenceItems)
           .filter(Boolean),
       ),
     ];
