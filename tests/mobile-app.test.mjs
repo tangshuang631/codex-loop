@@ -79,6 +79,17 @@ test("mobile app shows production status and stale observation guidance", async 
   assert.match(source, /已过期|重新启动一次真实任务|重新运行 npm run production:observe/);
 });
 
+test("mobile app shows structured maturity and remaining production gaps", async () => {
+  const source = await read("app/mobile/src/main.jsx");
+
+  assert.match(source, /productionStatus\?\.maturity/);
+  assert.match(source, /maturity\?\.label/);
+  assert.match(source, /maturity\?\.percent/);
+  assert.match(source, /maturity\?\.canLongRun/);
+  assert.match(source, /生产成熟度/);
+  assert.match(source, /剩余缺口/);
+});
+
 test("mobile app shows supervisor screenshot evidence without adding noisy cards", async () => {
   const source = await read("app/mobile/src/main.jsx");
   const styleSource = await read("app/mobile/src/styles.css");

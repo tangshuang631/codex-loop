@@ -362,6 +362,92 @@ function deriveReadiness(items, target = {}) {
   };
 }
 
+function deriveMaturity(items, readiness = {}) {
+  const stage = readiness.stage || "blocked";
+  const observation = items.find((item) => item.label === "真实运行观测") || {};
+  const codeGateLabels = new Set(["最近生产检查", "前端证据", "长跑节奏"]);
+  const codeGatesPassed = items
+    .filter((item) => codeGateLabels.has(item.label))
+    .every((item) => item.status === "passed");
+  const partialClosedLoop = hasPartialClosedLoopEvidence(observation);
+  const gaps = [];
+  const evidence = [];
+
+  if (codeGatesPassed) {
+    evidence.push("代码闸门已通过。");
+  } else {
+    gaps.push("代码闸门还没有全部通过。");
+  }
+
+  if (stage === "production") {
+    evidence.push("已观察到至少 2 轮真实闭环。");
+    return {
+      label: "可长跑",
+      percent: 90,
+      canTrial: true,
+      canLongRun: true,
+      summary: "代码闸门和真实 2 轮闭环证据都已通过，可以进入有人工观察的长期运行。",
+      gaps,
+      evidence,
+    };
+  }
+
+  if (stage === "observing") {
+    evidence.push("真实任务正在运行观测中。");
+    gaps.push("等待 Codex 完成当前轮并形成 NPC 复盘。");
+    gaps.push("还缺少第 2 轮真实闭环证据。");
+    return {
+      label: "观察中",
+      percent: codeGatesPassed ? 70 : 45,
+      canTrial: codeGatesPassed,
+      canLongRun: false,
+      summary: "代码闸门已通过，但真实任务仍在等待当前轮结果，还不能判断长期稳定性。",
+      gaps,
+      evidence,
+    };
+  }
+
+  if (stage === "trial") {
+    if (partialClosedLoop) {
+      evidence.push("已观察到 1 轮真实闭环。");
+      gaps.push("还缺少第 2 轮真实闭环证据。");
+      gaps.push("长时间运行前仍需要连续发送、Codex 完成和 NPC 复盘证据。");
+      return {
+        label: "短时试用",
+        percent: 75,
+        canTrial: true,
+        canLongRun: false,
+        summary: "代码闸门已通过，并已观察到 1 轮真实闭环；适合短时试用，但还缺少第 2 轮连续闭环证据。",
+        gaps,
+        evidence,
+      };
+    }
+
+    gaps.push("还缺少真实 2 轮闭环证据。");
+    gaps.push("需要先观察发送、Codex 完成和 NPC 复盘是否连续出现。");
+    return {
+      label: "短时试用",
+      percent: codeGatesPassed ? 65 : 40,
+      canTrial: codeGatesPassed,
+      canLongRun: false,
+      summary: "代码闸门已通过，适合短时真实试用；但还缺少真实 2 轮闭环证据。",
+      gaps,
+      evidence,
+    };
+  }
+
+  gaps.push(readiness.nextAction || readiness.summary || "先处理生产检查失败项。");
+  return {
+    label: "需处理",
+    percent: codeGatesPassed ? 55 : 35,
+    canTrial: false,
+    canLongRun: false,
+    summary: readiness.summary || "生产检查还不能通过，暂不适合投入真实任务。",
+    gaps,
+    evidence,
+  };
+}
+
 export async function readProductionStatusSummary({
   refreshObservation = true,
   runId = null,
@@ -389,13 +475,15 @@ export async function readProductionStatusSummary({
   }
 
   const status = deriveOverallStatus(items);
+  const readiness = deriveReadiness(items, target);
   return {
     title: "codex-loop 生产状态摘要",
     status,
     startedAt: startedAt.toISOString(),
     finishedAt: new Date().toISOString(),
     target,
-    readiness: deriveReadiness(items, target),
+    readiness,
+    maturity: deriveMaturity(items, readiness),
     sections: items,
     nextActionLabel: "下一步建议",
     nextAction: deriveNextAction(items, target),

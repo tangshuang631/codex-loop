@@ -246,8 +246,19 @@ function StatusBlock({ mobileView, productionStatus, productionPreflight, status
     (section) => section.label === "真实运行观测",
   );
   const readiness = productionStatus?.readiness || {};
+  const maturity = productionStatus?.maturity || {};
   const productionTarget = formatProductionTarget(productionPreflight?.target || productionStatus?.target);
-  const readinessLabel = formatReadinessStage(readiness);
+  const readinessLabel = maturity?.label || formatReadinessStage(readiness);
+  const maturityPercent = Number(maturity?.percent);
+  const maturityLabel = Number.isFinite(maturityPercent)
+    ? `${readinessLabel} · ${maturityPercent}%`
+    : readinessLabel;
+  const maturityGaps = Array.isArray(maturity?.gaps) ? maturity.gaps.filter(Boolean) : [];
+  const maturityGapText = maturityGaps.length
+    ? maturityGaps.slice(0, 2).join("；")
+    : maturity?.canLongRun
+      ? "已达到长期运行基本证据。"
+      : "等待更多真实闭环证据。";
   const preflightLabel = productionPreflight?.canDispatch
     ? "可以启动"
     : productionPreflight?.status === "waiting"
@@ -274,16 +285,16 @@ function StatusBlock({ mobileView, productionStatus, productionPreflight, status
     ["下一步", process.nextAction || mobileView?.suggestedAction || "等待下一轮更新"],
     productionTarget ? ["验证目标", productionTarget] : null,
     productionPreflight ? ["启动预检", `${preflightLabel} · ${preflightDetail}`] : null,
-    productionStatus ? ["生产阶段", `${readinessLabel} · ${readinessDetail}`] : null,
+    productionStatus ? ["生产阶段", `${maturityLabel} · ${maturity?.summary || readinessDetail}`] : null,
     productionStatus ? ["生产观测", `${productionLabel} · ${productionDetail}`] : null,
     ["最近指令", process.latestInstructionSourceLabel || "等待生成"],
   ].filter(Boolean);
   const details = [
     productionStatus
       ? [
-          "生产状态",
+          "生产成熟度",
           [
-            readinessLabel,
+            maturityLabel,
             productionStatus.title || "生产状态摘要",
             productionStatus.nextAction || productionObservation?.summary,
           ]
@@ -291,6 +302,7 @@ function StatusBlock({ mobileView, productionStatus, productionPreflight, status
             .join("："),
         ]
       : null,
+    productionStatus?.maturity ? ["剩余缺口", maturityGapText] : null,
     productionObservation
       ? [
           "真实运行观测",

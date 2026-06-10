@@ -132,11 +132,26 @@ test("dashboard keeps production status inside folded status details", async () 
   assert.match(appSource, /生产观测/);
   assert.match(appSource, /真实运行观测/);
   assert.match(appSource, /真实闭环|长期运行基本证据/);
-  assert.match(appSource, /生产状态摘要/);
+  assert.match(appSource, /生产成熟度/);
   assert.match(appSource, /最近生产检查/);
   assert.match(appSource, /下一步建议/);
   assert.match(appSource, /status-detail-fold/);
   assert.doesNotMatch(appSource, /production-status-card/);
+});
+
+test("dashboard uses structured maturity instead of parsing production prose", async () => {
+  const appSource = await fs.readFile("app/web/src/App.jsx", "utf8");
+  const statusStart = appSource.indexOf("function StatusSummaryPanel");
+  const statusEnd = appSource.indexOf("const StatusSummaryPanelV2", statusStart);
+  const statusSource = appSource.slice(statusStart, statusEnd);
+
+  assert.notEqual(statusStart, -1);
+  assert.match(statusSource, /productionStatus\?\.maturity/);
+  assert.match(statusSource, /maturity\?\.label/);
+  assert.match(statusSource, /maturity\?\.percent/);
+  assert.match(statusSource, /maturity\?\.canLongRun/);
+  assert.match(statusSource, /生产成熟度/);
+  assert.match(statusSource, /剩余缺口/);
 });
 
 test("dashboard surfaces supervisor review without adding noisy debug cards", async () => {
