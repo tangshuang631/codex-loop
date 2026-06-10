@@ -3251,6 +3251,40 @@ function buildVisibleThreadPrompt(snapshot) {
   ].filter(Boolean).join("\n");
 }
 
+function promptContainsGuidance(prompt, guidance) {
+  const cleanPrompt = safeText(prompt, "").replace(/\s+/g, " ");
+  const cleanGuidance = safeText(guidance, "").replace(/\s+/g, " ");
+  if (!cleanPrompt || !cleanGuidance) return false;
+  if (cleanPrompt.includes(cleanGuidance)) return true;
+
+  const meaningfulTokens = cleanGuidance
+    .split(/[，。；：、,.!?！？\s]+/u)
+    .map((token) => token.trim())
+    .filter((token) => token.length >= 4);
+  if (!meaningfulTokens.length) return false;
+  return meaningfulTokens.some((token) => cleanPrompt.includes(token));
+}
+
+function ensurePromptIncludesPendingGuidance(prompt, snapshot) {
+  const pendingGuidance = safeText(snapshot?.thread?.pendingUserGuidance, "");
+  if (!pendingGuidance || promptContainsGuidance(prompt, pendingGuidance)) {
+    return prompt;
+  }
+
+  const language = safeText(
+    snapshot.profile?.resolved?.conversation?.language,
+    snapshot.profile?.overrides?.conversation?.language || "zh-CN",
+  ).toLowerCase();
+  const englishPreferred = language.startsWith("en");
+  const guidance = summarizeForFollowup(pendingGuidance, 220);
+  return [
+    safeText(prompt, ""),
+    englishPreferred
+      ? "User added guidance to merge into this next turn: " + guidance
+      : "用户临时补充：" + guidance,
+  ].filter(Boolean).join("\n");
+}
+
 async function fileHealth(filePath, label) {
   try {
     const stat = await fs.stat(filePath);
@@ -4301,7 +4335,10 @@ async function runLoopTurnLegacy(
     throw new Error("还没有绑定 Codex 线程，请先绑定目标窗口再开始循环。");
   }
 
-  const prompt = buildVisibleThreadPrompt(snapshot);
+  const prompt = ensurePromptIncludesPendingGuidance(
+    buildVisibleThreadPrompt(snapshot),
+    snapshot,
+  );
   const dispatchAt = nowIso();
   await markDispatchWaiting(snapshot, {
     prompt,
@@ -4456,6 +4493,7 @@ export async function runLoopTurn(
     throw new Error("本地模型生成续跑指令失败，请检查 Ollama 和模型配置。");
     }
   }
+  prompt = ensurePromptIncludesPendingGuidance(prompt, snapshot);
 
   const dispatchAt = nowIso();
   await markDispatchWaiting(snapshot, {

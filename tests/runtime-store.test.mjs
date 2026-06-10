@@ -1888,6 +1888,50 @@ test("pending user guidance is saved for the next ollama continuation and cleare
   assert.equal(snapshot.thread.latestEventType, "codex_followup_sent_waiting");
 });
 
+test("runLoopTurn appends pending guidance when ollama output omits it", async () => {
+  const configRoot = await createWorkspace();
+  await ensureLoopArtifacts(configRoot);
+  await saveUserOverrides(configRoot, {
+    conversation: {
+      language: "zh-CN",
+      promptGenerator: {
+        enabled: true,
+        provider: "ollama",
+        model: "qwen2.5:7b",
+      },
+    },
+  });
+  await saveThreadBinding(configRoot, {
+    workspaceName: "demo",
+    threadTitle: "补充兜底线程",
+    threadId: "thread-guidance-guard",
+    singleThreadMode: true,
+  });
+  await syncCodexThreadMirror(configRoot, {
+    latestCodexSummary: "上一轮已完成移动端对话流，等待下一条指令。",
+  });
+  await savePendingGuidance(configRoot, {
+    text: "下一轮必须优先检查安卓 App 远程查看体验。",
+  });
+
+  let dispatchedPrompt = "";
+  const snapshot = await runLoopTurn(configRoot, {
+    generateFollowupPrompt: async () => "继续做一小批可验证改动，完成后报告验证结果。",
+    dispatchThreadMessage: async ({ prompt }) => {
+      dispatchedPrompt = prompt;
+      return {
+        deliveryObserved: true,
+        completionObserved: false,
+        lastMessage: "",
+      };
+    },
+  });
+
+  assert.match(dispatchedPrompt, /用户临时补充/);
+  assert.match(dispatchedPrompt, /安卓 App 远程查看体验/);
+  assert.equal(snapshot.thread.pendingUserGuidance, "");
+});
+
 test("pending guidance added while Codex is working survives completion and is cleared only after next dispatch", async () => {
   const configRoot = await createWorkspace();
   await ensureLoopArtifacts(configRoot);
