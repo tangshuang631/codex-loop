@@ -234,7 +234,7 @@ function hasPartialClosedLoopEvidence(item = {}) {
   );
 }
 
-function deriveNextAction(items) {
+function deriveNextAction(items, target = {}) {
   const stale = items.find((item) => item.status === "stale");
   if (stale) {
     if (stale.label === "真实运行观测") {
@@ -257,11 +257,14 @@ function deriveNextAction(items) {
   const failed = items.find((item) => item.status && item.status !== "passed");
   if (failed) {
     if (failed.label === "真实运行观测" && hasPartialClosedLoopEvidence(failed)) {
-      return failed.nextAction || failed.summary;
+      return appendTargetConfirmation(failed.nextAction || failed.summary, target);
     }
     return `先处理${failed.label}：${failed.nextAction || failed.summary}`;
   }
-  return "可以进入真实任务使用；长时间运行仍建议保留人工观察和运行日志。";
+  return appendTargetConfirmation(
+    "可以进入真实任务使用；长时间运行仍建议保留人工观察和运行日志。",
+    target,
+  );
 }
 
 function deriveOverallStatus(items) {
@@ -395,7 +398,7 @@ export async function readProductionStatusSummary({
     readiness: deriveReadiness(items, target),
     sections: items,
     nextActionLabel: "下一步建议",
-    nextAction: deriveNextAction(items),
+    nextAction: deriveNextAction(items, target),
   };
 }
 

@@ -827,6 +827,8 @@ test("production status includes the bound task target before asking for another
     assert.match(status.readiness.nextAction, /当前验证目标：按清单继续开发/);
     assert.match(status.readiness.nextAction, /E:\\2026\\opencow/);
     assert.match(status.readiness.nextAction, /确认这就是要继续的任务/);
+    assert.match(status.nextAction, /当前验证目标：按清单继续开发/);
+    assert.match(status.nextAction, /确认这就是要继续的任务/);
   } finally {
     process.chdir(previousCwd);
   }
