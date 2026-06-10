@@ -153,6 +153,7 @@ test("docs describe frontend evidence as part of production readiness", async ()
     assert.match(source, /历史对话/);
     assert.match(source, /发送引导/);
     assert.match(source, /截图证据/);
+    assert.match(source, /启动预检/);
   }
 });
 

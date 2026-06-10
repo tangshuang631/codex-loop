@@ -10,13 +10,13 @@ const targets = [
     name: "桌面端",
     distLabel: "dist/web",
     distDir: path.join(root, "dist", "web"),
-    requiredText: ["历史对话", "发送引导", "截图证据", "生产阶段", "验证目标"],
+    requiredText: ["历史对话", "发送引导", "截图证据", "生产阶段", "验证目标", "启动预检"],
   },
   {
     name: "移动端",
     distLabel: "dist/mobile",
     distDir: path.join(root, "dist", "mobile"),
-    requiredText: ["历史对话", "发送引导", "截图证据", "生产阶段", "验证目标"],
+    requiredText: ["历史对话", "发送引导", "截图证据", "生产阶段", "验证目标", "启动预检"],
   },
 ];
 
@@ -99,8 +99,8 @@ async function main() {
     scope: "检查桌面端和移动端构建产物是否包含关键中文产品界面信号。",
     results,
     nextAction: failed
-      ? "先确认桌面端和移动端构建产物是否包含历史对话、发送引导、截图证据、生产阶段和验证目标。"
-      : "前端关键状态、历史对话、生产阶段、验证目标和引导入口已进入构建产物。",
+      ? "先确认桌面端和移动端构建产物是否包含历史对话、发送引导、截图证据、生产阶段、验证目标和启动预检。"
+      : "前端关键状态、历史对话、生产阶段、验证目标、启动预检和引导入口已进入构建产物。",
   };
   const reportPath = await writeReport(report);
   process.stdout.write(`报告路径: ${reportPath}\n`);

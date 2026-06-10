@@ -122,6 +122,7 @@ test("frontend evidence check verifies built desktop and mobile product surfaces
   assert.match(source, /截图证据/);
   assert.match(source, /生产阶段/);
   assert.match(source, /验证目标/);
+  assert.match(source, /启动预检/);
   assert.match(source, /runtime[\\/]frontend-evidence/);
 });
 
@@ -147,12 +148,12 @@ test("production status frontend evidence summary includes production stage", as
       {
         name: "桌面端",
         status: "passed",
-        requiredText: ["历史对话", "发送引导", "截图证据", "生产阶段", "验证目标"],
+        requiredText: ["历史对话", "发送引导", "截图证据", "生产阶段", "验证目标", "启动预检"],
       },
       {
         name: "移动端",
         status: "passed",
-        requiredText: ["历史对话", "发送引导", "截图证据", "生产阶段", "验证目标"],
+        requiredText: ["历史对话", "发送引导", "截图证据", "生产阶段", "验证目标", "启动预检"],
       },
     ],
   });

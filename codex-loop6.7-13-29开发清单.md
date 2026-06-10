@@ -144,7 +144,7 @@
 - `npm test`
 - `npm run build:web`
 - `npm run build:mobile`
-- 生产就绪检查入口：`npm run production:check`，会顺序执行环境检查、长跑 smoke 检查、测试、桌面端构建、移动端构建、前端证据检查和 git 差异检查，并写入 `runtime/production-checks/` 报告。前端证据检查会确认构建产物仍包含历史对话、发送引导和截图证据，并把结果写入 `runtime/frontend-evidence/`。
+- 生产就绪检查入口：`npm run production:check`，会顺序执行环境检查、长跑 smoke 检查、测试、桌面端构建、移动端构建、前端证据检查和 git 差异检查，并写入 `runtime/production-checks/` 报告。前端证据检查会确认构建产物仍包含历史对话、发送引导、截图证据、生产阶段、验证目标和启动预检，并把结果写入 `runtime/frontend-evidence/`。
 - 生产状态摘要入口：`npm run production:status`，会读取最近生产检查、前端证据、长跑节奏和真实运行观测报告，输出当前是否可继续使用以及下一步建议；它只读本地报告，不启动循环也不向 Codex 发送消息。摘要会额外输出 `readiness.stage`：`trial` 表示代码闸门通过但缺少真实 2 轮闭环证据，`observing` 表示真实任务正在等待 Codex 或 NPC 复盘，`production` 表示代码闸门和真实 2 轮闭环证据都通过，`blocked` 表示必须先处理失败项。默认超过 12 小时的报告会被视为已过期，需要重新运行 npm run production:check 后再判断是否适合长期运行。
 - 真实运行观测入口：`npm run production:observe`，会读取真实任务的本地运行日志，整理发送、等待、Codex 完成、NPC 复盘、失败和停止时间线，并写入 `runtime/production-observations/`；它只读日志，不启动循环也不向 Codex 发送消息，用于补足本地 smoke 无法证明的长期运行证据。
 - 长期运行基本证据要求至少 2 轮连续真实闭环：发送下一轮指令 -> Codex 完成 -> NPC 复盘。只有 1 轮闭环时只说明链路可试用，还不能证明适合提高自动化时长。
