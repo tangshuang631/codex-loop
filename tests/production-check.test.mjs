@@ -1413,6 +1413,8 @@ test("production status exposes structured maturity and remaining gaps", async (
     assert.equal(status.maturity.canLongRun, false);
     assert.match(status.maturity.summary, /还缺少第 2 轮连续闭环证据/);
     assert.ok(status.maturity.gaps.some((gap) => /第 2 轮真实闭环/.test(gap)));
+    assert.ok(status.maturity.gaps.some((gap) => /用户补充|补充引导|合并/.test(gap)));
+    assert.match(status.nextAction, /第 2 轮|补充引导|合并/);
     assert.ok(status.maturity.evidence.some((item) => /代码闸门已通过/.test(item)));
     assert.ok(status.maturity.evidence.some((item) => /已观察到 1 轮真实闭环/.test(item)));
     assert.equal(status.closedLoopEvidence.current, 1);

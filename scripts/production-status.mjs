@@ -353,7 +353,10 @@ function deriveNextAction(items, target = {}) {
       return supervisorRecoveryAction();
     }
     if (failed.label === "真实运行观测" && hasPartialClosedLoopEvidence(failed)) {
-      return appendTargetConfirmation(failed.nextAction || failed.summary, target);
+      const action = hasMergedGuidanceEvidence(failed)
+        ? failed.nextAction || "再跑至少 1 轮真实任务，确认发送、Codex 完成和 NPC 复盘能连续出现。"
+        : "再跑至少 1 轮真实任务，确认发送、Codex 完成和 NPC 复盘能连续出现；同时从桌面端或移动端补充一次引导，确认它会被本地模型 / NPC 合并进下一条指令。";
+      return appendTargetConfirmation(action, target);
     }
     return `先处理${failed.label}：${failed.nextAction || failed.summary}`;
   }
@@ -570,6 +573,9 @@ function deriveMaturity(items, readiness = {}) {
     if (partialClosedLoop) {
       evidence.push("已观察到 1 轮真实闭环。");
       gaps.push("还缺少第 2 轮真实闭环证据。");
+      if (!hasMergedGuidanceEvidence(observation)) {
+        gaps.push("还缺少用户补充引导经本地模型 / NPC 合并进下一条指令的真实证据。");
+      }
       gaps.push("长时间运行前仍需要连续发送、Codex 完成和 NPC 复盘证据。");
       return {
         label: "短时试用",
