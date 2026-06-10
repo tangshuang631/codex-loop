@@ -5127,8 +5127,9 @@ export async function syncCodexThreadMirror(
   const at = nowIso();
   const codexSummaryChanged =
     nextCodexSummary && nextCodexSummary !== safeText(snapshot.thread.latestCodexSummary, "");
+  const forceCompletion = Boolean(payload.forceCompletion && nextCodexSummary);
   const completedCurrentDispatch =
-    snapshot.thread.continuationStatus === "dispatching" && codexSummaryChanged;
+    forceCompletion || (snapshot.thread.continuationStatus === "dispatching" && codexSummaryChanged);
   const nextPendingGuidance = completedCurrentDispatch
     ? pendingGuidanceAfterDispatch(snapshot.thread, consumedPendingGuidance)
     : {
@@ -5195,7 +5196,7 @@ export async function syncCodexThreadMirror(
       at,
       activeTask: snapshot.state.activeTask,
       note:
-        snapshot.thread.continuationStatus === "dispatching"
+        completedCurrentDispatch
           ? "codex_followup_completed"
           : "codex_thread_mirror_synced",
       summary: nextCodexSummary,

@@ -5,6 +5,7 @@ import os from "node:os";
 import path from "node:path";
 
 import { readProductionStatusSummary } from "../scripts/production-status.mjs";
+import { runProductionRecovery } from "../scripts/production-recover.mjs";
 
 async function read(path) {
   return fs.readFile(path, "utf8");
@@ -150,6 +151,61 @@ test("production recovery backfills supervisor review without sending another tu
   assert.match(source, /生产恢复/);
   assert.match(source, /不会发送下一轮/);
   assert.doesNotMatch(source, /runLoopTurn|sendPendingGuidanceOnce|startRun/);
+});
+
+test("production recovery consumes recovered observation replies before supervisor review", async () => {
+  const calls = [];
+  const result = await runProductionRecovery("/demo/root", {
+    ensureSupervisorReview: async () => {
+      calls.push("ensure");
+      return calls.length === 1
+        ? {
+            reviewed: false,
+            reason: "当前没有需要监督复盘的 Codex 完成结果。",
+            thread: {
+              threadId: "thread-a",
+              threadTitle: "恢复测试",
+              latestEventType: "pending_guidance_cleared",
+            },
+          }
+        : {
+            reviewed: true,
+            reason: "已补齐当前 Codex 完成结果的监督复盘。",
+            thread: {
+              threadId: "thread-a",
+              threadTitle: "恢复测试",
+              latestEventType: "supervisor_review_completed",
+              lastSupervisorSource: "template",
+              lastSupervisorReviewAt: "2026-06-10T12:20:00.000Z",
+            },
+          };
+    },
+    buildProductionObservation: async () => ({
+      diagnosis: { category: "codex_reply_recovered_after_timeout" },
+      timeline: [
+        {
+          type: "codex_followup_completed",
+          at: "2026-06-10T12:10:00.000Z",
+          detail: "Codex 已完成恢复后的真实回复。",
+          recoveredFromTimeout: true,
+        },
+      ],
+    }),
+    syncCodexThreadMirror: async (root, payload) => {
+      calls.push(["sync", root, payload.latestCodexSummary, payload.forceCompletion]);
+      return {};
+    },
+  });
+
+  assert.deepEqual(calls, [
+    "ensure",
+    ["sync", "/demo/root", "Codex 已完成恢复后的真实回复。", true],
+    "ensure",
+  ]);
+  assert.equal(result.status, "recovered");
+  assert.equal(result.reviewed, true);
+  assert.match(result.reason, /已补齐/);
+  assert.match(result.safety, /不会发送下一轮指令/);
 });
 
 test("production status treats stale reports as attention instead of current health", async () => {
@@ -626,6 +682,69 @@ test("production status separates passed code gates from missing live long-run e
     assert.match(status.readiness.nextAction, /启动真实任务/);
     assert.match(status.readiness.nextAction, /发送、Codex 完成、NPC 复盘/);
     assert.doesNotMatch(status.readiness.summary, /长期无人值守/);
+  } finally {
+    process.chdir(previousCwd);
+  }
+});
+
+test("production status treats one real closed loop as trial evidence instead of blocked", async () => {
+  const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), "codex-loop-status-"));
+  const writeReport = async (dirLabel, fileName, report) => {
+    const dir = path.join(tempRoot, ...dirLabel.split("/"));
+    await fs.mkdir(dir, { recursive: true });
+    await fs.writeFile(path.join(dir, fileName), `${JSON.stringify(report, null, 2)}\n`, "utf8");
+  };
+  const now = "2026-06-10T14:20:00.000Z";
+  await writeReport("runtime/production-checks", "latest-production-check.json", {
+    status: "passed",
+    finishedAt: now,
+    durationMs: 1,
+    checks: [{ status: "passed" }],
+  });
+  await writeReport("runtime/frontend-evidence", "latest-frontend-evidence.json", {
+    status: "passed",
+    finishedAt: now,
+    durationMs: 1,
+    results: [{ status: "passed" }],
+  });
+  await writeReport("runtime/longrun-smoke", "latest-longrun-smoke.json", {
+    status: "passed",
+    finishedAt: now,
+    durationMs: 1,
+    checks: [{ status: "passed" }],
+  });
+  await writeReport("runtime/production-observations", "one-cycle-production-observation.json", {
+    status: "attention",
+    finishedAt: now,
+    durationMs: 1,
+    summary: "只观察到 1 轮完整闭环，说明链路可试用，但还不足以证明长期稳定运行。",
+    nextAction: "再跑至少 1 轮真实任务，确认发送、Codex 完成和 NPC 复盘能连续出现。",
+    diagnosis: {
+      category: "partial_closed_loop_observed",
+      userMessage: "已经观察到 1 轮发送、Codex 完成和 NPC 复盘。",
+      nextAction: "再跑至少 1 轮真实任务，确认发送、Codex 完成和 NPC 复盘能连续出现。",
+    },
+    counters: {
+      dispatches: 1,
+      completions: 1,
+      supervisorReviews: 1,
+      closedLoops: 1,
+    },
+  });
+
+  const previousCwd = process.cwd();
+  try {
+    process.chdir(tempRoot);
+    const status = await readProductionStatusSummary({
+      refreshObservation: false,
+      now: new Date("2026-06-10T14:20:00.000Z"),
+    });
+
+    assert.equal(status.status, "attention");
+    assert.equal(status.readiness.stage, "trial");
+    assert.match(status.readiness.summary, /1 轮真实闭环/);
+    assert.match(status.readiness.nextAction, /再跑至少 1 轮/);
+    assert.doesNotMatch(status.readiness.summary, /不能通过|需要处理/);
   } finally {
     process.chdir(previousCwd);
   }

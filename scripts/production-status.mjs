@@ -244,20 +244,26 @@ function deriveOverallStatus(items) {
 }
 
 function deriveReadiness(items) {
-  const failed = items.find((item) => item.status && !["passed", "waiting", "stale"].includes(item.status));
-  if (failed) {
-    return {
-      stage: "blocked",
-      summary: `生产检查还不能通过：${failed.label}需要处理。`,
-      nextAction: failed.nextAction || failed.summary || "先处理失败项，再重新运行 npm run production:check。",
-    };
-  }
-
   const codeGateLabels = new Set(["最近生产检查", "前端证据", "长跑节奏"]);
   const codeGatesPassed = items
     .filter((item) => codeGateLabels.has(item.label))
     .every((item) => item.status === "passed");
   const observation = items.find((item) => item.label === "真实运行观测");
+  const failed = items.find((item) => item.status && !["passed", "waiting", "stale"].includes(item.status));
+  const failedCodeGate = items.find((item) =>
+    codeGateLabels.has(item.label) &&
+    item.status &&
+    !["passed", "waiting", "stale"].includes(item.status),
+  );
+
+  if (failedCodeGate || (failed && !codeGatesPassed)) {
+    const item = failedCodeGate || failed;
+    return {
+      stage: "blocked",
+      summary: `生产检查还不能通过：${item.label}需要处理。`,
+      nextAction: item.nextAction || item.summary || "先处理失败项，再重新运行 npm run production:check。",
+    };
+  }
 
   if (codeGatesPassed && observation?.status === "passed") {
     return {
@@ -272,6 +278,38 @@ function deriveReadiness(items) {
       stage: "observing",
       summary: "代码闸门已通过，真实任务正在等待 Codex 完成这一轮，还不能判断长期稳定性。",
       nextAction: observation.nextAction || "等待 Codex 完成后，让 NPC 复盘并继续观察是否形成 2 轮闭环。",
+    };
+  }
+
+  if (
+    codeGatesPassed &&
+    observation?.status === "attention" &&
+    (
+      observation.rawStatus === "attention" ||
+      observation.summary ||
+      observation.nextAction
+    )
+  ) {
+    const closedLoops = Number(observation.counters?.closedLoops || 0);
+    const partialClosedLoop =
+      closedLoops > 0 ||
+      /1 轮真实闭环|1 轮完整闭环|已经观察到 1 轮/u.test(
+        `${observation.summary || ""}\n${observation.nextAction || ""}`,
+      );
+    if (partialClosedLoop) {
+      return {
+        stage: "trial",
+        summary: "代码闸门已通过，并已观察到 1 轮真实闭环；适合短时试用，但还缺少第 2 轮连续闭环证据。",
+        nextAction: observation.nextAction || "再跑至少 1 轮真实任务，确认发送、Codex 完成和 NPC 复盘能连续出现。",
+      };
+    }
+  }
+
+  if (failed) {
+    return {
+      stage: "blocked",
+      summary: `生产检查还不能通过：${failed.label}需要处理。`,
+      nextAction: failed.nextAction || failed.summary || "先处理失败项，再重新运行 npm run production:check。",
     };
   }
 

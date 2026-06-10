@@ -345,9 +345,56 @@ test("production observer treats later Codex mirror replies as timeout recovery 
   assert.equal(report.diagnosis.category, "codex_reply_recovered_after_timeout");
   assert.equal(report.counters.failures, 0);
   assert.equal(report.counters.completions, 1);
-  assert.match(report.summary, /还没有形成发送、完成、NPC 复盘/);
+  assert.match(report.summary, /缺少 NPC 监督复盘/);
+  assert.match(report.nextAction, /production:recover/);
+  assert.match(report.diagnosis.nextAction, /production:recover/);
   assert.doesNotMatch(report.nextAction, /不要立即连续补发/);
   assert.match(report.timeline.map((item) => item.detail).join("\n"), /Codex 已经完成这一轮开发/);
+});
+
+test("production observer stops asking for recovery after recovered replies are reviewed", async () => {
+  const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), "codex-loop-observer-"));
+  const logDir = path.join(tempRoot, "runtime", "timeout-reviewed-loop", "logs");
+  await fs.mkdir(logDir, { recursive: true });
+  await fs.writeFile(
+    path.join(logDir, "events.jsonl"),
+    [
+      { type: "run_started_from_console", at: "2026-06-10T11:00:00.000Z" },
+      {
+        type: "codex_followup_dispatching",
+        at: "2026-06-10T11:01:00.000Z",
+        promptPreview: "继续完成真实链路验证。",
+      },
+      {
+        type: "codex_followup_failed",
+        at: "2026-06-10T11:11:00.000Z",
+        message: "Codex 已收到指令，但等待这一轮回复超时。",
+      },
+      {
+        type: "codex_conversation_mirror_synced",
+        at: "2026-06-10T11:30:00.000Z",
+        latestAssistantAt: "2026-06-10T11:29:00.000Z",
+        latestAssistantPreview: "Codex 已经完成这一轮开发，并给出验证结果。",
+      },
+      {
+        type: "supervisor_review_completed",
+        at: "2026-06-10T11:31:00.000Z",
+        summary: "NPC 复盘确认恢复后的回复可以继续观察。",
+      },
+    ].map((event) => JSON.stringify(event)).join("\n") + "\n",
+    "utf8",
+  );
+
+  const report = await buildProductionObservation({
+    root: tempRoot,
+    runId: "timeout-reviewed-loop",
+  });
+
+  assert.equal(report.counters.closedLoops, 1);
+  assert.notEqual(report.diagnosis.category, "codex_reply_recovered_after_timeout");
+  assert.doesNotMatch(report.diagnosis.nextAction, /production:recover/);
+  assert.doesNotMatch(report.nextAction, /production:recover/);
+  assert.match(report.nextAction, /再跑至少 1 轮/);
 });
 
 test("production observer reports delivered turns that are still waiting as waiting instead of failure", async () => {

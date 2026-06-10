@@ -281,6 +281,14 @@ function deriveStatusAndAdvice(counters, timeline, { waiting = null } = {}) {
     };
   }
 
+  if ((counters.completions || 0) > (counters.supervisorReviews || 0)) {
+    return {
+      status: "attention",
+      summary: "Codex 已有完成回复，但还缺少 NPC 监督复盘，暂时不能算完整闭环。",
+      nextAction: "先运行 npm run production:recover 补齐监督复盘；该命令不会发送下一轮指令。恢复后再运行 npm run production:status。",
+    };
+  }
+
   return {
     status: "attention",
     summary: "已有运行记录，但还没有形成发送、完成、NPC 复盘的完整闭环证据。",
@@ -298,11 +306,21 @@ function deriveDiagnosis(counters, timeline, { hasRecovery = false } = {}) {
   }
 
   if (counters.failures <= 0) {
+    if ((counters.closedLoops || 0) > 0) {
+      return {
+        category: "partial_closed_loop_observed",
+        userMessage: `已经观察到 ${counters.closedLoops} 轮发送、Codex 完成和 NPC 复盘。`,
+        nextAction:
+          counters.closedLoops >= 2
+            ? "真实闭环证据已经达到长期运行基础要求，继续保留日志和人工观察。"
+            : "再跑至少 1 轮真实任务，确认发送、Codex 完成和 NPC 复盘能连续出现。",
+      };
+    }
     if (hasRecovery || timeline.some((event) => event.recoveredFromTimeout)) {
       return {
         category: "codex_reply_recovered_after_timeout",
         userMessage: "上一轮等待超时后已经同步到 Codex 回复。",
-        nextAction: "先查看这条 Codex 回复和本地监督复盘；不要因为旧超时重复发送同一条指令。",
+        nextAction: "先运行 npm run production:recover 补齐本地监督复盘；不要因为旧超时重复发送同一条指令。",
       };
     }
     const types = new Set(timeline.map((event) => event.type));

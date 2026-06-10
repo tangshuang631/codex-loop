@@ -1,7 +1,11 @@
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 
-import { ensureSupervisorReview } from "../app/server/lib/runtime-store.mjs";
+import {
+  ensureSupervisorReview,
+  syncCodexThreadMirror,
+} from "../app/server/lib/runtime-store.mjs";
+import { buildProductionObservation } from "./production-observer.mjs";
 
 function buildResult(snapshot) {
   return {
@@ -23,9 +27,51 @@ function buildResult(snapshot) {
   };
 }
 
+function findRecoveredCompletion(observation = {}) {
+  const timeline = Array.isArray(observation.timeline) ? observation.timeline : [];
+  const recovered = timeline.findLast((event) =>
+    event?.type === "codex_followup_completed" &&
+    event?.recoveredFromTimeout &&
+    String(event?.detail || "").trim(),
+  );
+  if (recovered) {
+    return {
+      latestCodexSummary: String(recovered.detail || "").trim(),
+      latestAssistantAt: recovered.at || "",
+    };
+  }
+
+  return null;
+}
+
+export async function runProductionRecovery(
+  startDir = process.cwd(),
+  {
+    ensureSupervisorReview: ensureReview = ensureSupervisorReview,
+    buildProductionObservation: buildObservation = buildProductionObservation,
+    syncCodexThreadMirror: syncThreadMirror = syncCodexThreadMirror,
+  } = {},
+) {
+  const firstAttempt = await ensureReview(startDir);
+  if (firstAttempt.reviewed) {
+    return buildResult(firstAttempt);
+  }
+
+  const observation = await buildObservation({ root: startDir });
+  const recoveredCompletion = findRecoveredCompletion(observation);
+  if (!recoveredCompletion) {
+    return buildResult(firstAttempt);
+  }
+
+  await syncThreadMirror(startDir, {
+    ...recoveredCompletion,
+    forceCompletion: true,
+  });
+  return buildResult(await ensureReview(startDir));
+}
+
 async function main() {
-  const recovered = await ensureSupervisorReview(process.cwd());
-  const result = buildResult(recovered);
+  const result = await runProductionRecovery(process.cwd());
   process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
 }
 
