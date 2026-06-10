@@ -1320,6 +1320,7 @@ test("frontend evidence check requires closed-loop evidence progress on desktop 
   assert.match(source, /本地模型/);
   assert.match(source, /NPC/);
   assert.match(source, /待合并/);
+  assert.match(source, /已合并补充/);
   assert.match(source, /先确认桌面端和移动端构建产物是否包含/);
   assert.match(source, /闭环证据/);
   assert.match(readme, /闭环证据/);
