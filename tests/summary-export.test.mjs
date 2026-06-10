@@ -531,6 +531,44 @@ test("exportMobileView exposes independent supervisor verification result", asyn
   assert.equal(mobile.processStatus.supervisorVerificationCommandCount, 1);
 });
 
+test("exportMobileView exposes screenshot evidence from independent verification", async () => {
+  const configRoot = await createWorkspace();
+  await ensureLoopArtifacts(configRoot);
+  await saveThreadBinding(configRoot, {
+    workspaceName: "demo",
+    threadTitle: "移动端截图验收",
+    threadId: "thread-mobile-screenshot-evidence",
+    singleThreadMode: true,
+  });
+
+  await reviewCodexMilestone(configRoot, {
+    generateMilestoneReview: async () => ({
+      summary: "监督复盘：需要截图验收移动端首页。",
+      nextInstruction: "下一轮根据截图验收继续优化移动端。",
+      shouldContinue: true,
+      needsIndependentVerification: true,
+      verificationCommands: ["npm run visual:mobile"],
+      acceptanceFocus: ["移动端首页是否清楚"],
+      risks: [],
+    }),
+    runVerificationCommand: async ({ command }) => ({
+      command,
+      ok: true,
+      exitCode: 0,
+      output: "截图已保存 runtime/screenshots/mobile-home-2026-06-10.png",
+    }),
+  });
+
+  const mobile = await exportMobileView(configRoot);
+
+  assert.equal(mobile.processStatus.supervisorVerificationStatus, "passed");
+  assert.equal(mobile.processStatus.supervisorVerificationEvidenceCount, 1);
+  assert.match(
+    mobile.processStatus.supervisorVerificationEvidencePreview,
+    /mobile-home-2026-06-10\.png/,
+  );
+});
+
 test("exportMobileView labels missing independent verification evidence", async () => {
   const configRoot = await createWorkspace();
   await ensureLoopArtifacts(configRoot);

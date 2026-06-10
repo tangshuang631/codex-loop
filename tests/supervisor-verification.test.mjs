@@ -48,6 +48,34 @@ test("supervisor verification returns failed summaries for failed checks", async
   assert.equal(result.results[0].status, "failed");
 });
 
+test("supervisor verification extracts screenshot evidence paths from command output", async () => {
+  const snapshot = {
+    paths: { workspaceRoot: process.cwd() },
+    thread: {},
+  };
+  const review = {
+    shouldContinue: true,
+    needsIndependentVerification: true,
+    verificationCommands: ["npm run visual:mobile"],
+  };
+
+  const result = await runSupervisorIndependentVerification(snapshot, review, {
+    runVerificationCommand: async ({ command }) => ({
+      command,
+      ok: true,
+      exitCode: 0,
+      output:
+        "移动端截图已保存: runtime/screenshots/mobile-home-2026-06-10.png\n桌面截图: E:\\2026\\codex-loop\\runtime\\screenshots\\dashboard-home.png",
+    }),
+  });
+
+  assert.equal(result.status, "passed");
+  assert.equal(result.evidence.screenshots.length, 2);
+  assert.match(result.evidence.screenshots[0], /mobile-home-2026-06-10\.png/);
+  assert.match(result.summary, /截图证据/);
+  assert.equal(result.results[0].evidence.screenshots.length, 2);
+});
+
 test("supervisor verification skips repeated passed commands inside the cooldown window", async () => {
   const snapshot = {
     paths: { workspaceRoot: process.cwd() },

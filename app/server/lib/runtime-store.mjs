@@ -2222,6 +2222,24 @@ function deriveLatestInstructionSourceView(source, warning) {
   };
 }
 
+function collectSupervisorVerificationEvidence(results = []) {
+  const screenshots = [
+    ...new Set(
+      (Array.isArray(results) ? results : []).flatMap((result) =>
+        Array.isArray(result?.evidence?.screenshots)
+          ? result.evidence.screenshots
+          : [],
+      ),
+    ),
+  ];
+
+  return {
+    screenshots,
+    evidenceCount: screenshots.length,
+    evidencePreview: screenshots.slice(0, 3).join(" · "),
+  };
+}
+
 function buildProcessStatus(snapshot) {
   const mode = snapshot.state.mode || "stopped";
   const continuationStatus = snapshot.thread.continuationStatus || "idle";
@@ -2257,6 +2275,8 @@ function buildProcessStatus(snapshot) {
     5,
     120,
   );
+  const supervisorVerificationEvidence =
+    collectSupervisorVerificationEvidence(supervisorVerificationResults);
   const supervisorVerificationView = deriveSupervisorVerificationView(
     supervisorVerificationStatus,
     supervisorVerificationSummary,
@@ -2394,6 +2414,10 @@ function buildProcessStatus(snapshot) {
       ? summarizeForFollowup(supervisorVerificationSummary, 180)
       : "",
     supervisorVerificationCommandCount: supervisorVerificationResults.length,
+    supervisorVerificationEvidenceCount: supervisorVerificationEvidence.evidenceCount,
+    supervisorVerificationEvidencePreview:
+      supervisorVerificationEvidence.evidencePreview,
+    supervisorVerificationScreenshots: supervisorVerificationEvidence.screenshots,
     supervisorVerificationAt: snapshot.thread.lastSupervisorVerificationAt || "",
     supervisorReviewWarning,
     promptGenerationWarning,

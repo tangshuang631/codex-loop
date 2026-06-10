@@ -56,6 +56,18 @@ function normalizeTextList(value, maxItems = 5, maxLength = 120) {
     .slice(0, maxItems);
 }
 
+function extractScreenshotEvidence(value) {
+  const text = safeText(value, "");
+  if (!text) {
+    return [];
+  }
+
+  const matches = text.match(
+    /(?:[A-Za-z]:[\\/][^\s"'<>]+|(?:\.{1,2}[\\/])?[A-Za-z0-9_.-]+(?:[\\/][A-Za-z0-9_.-]+)*[\\/][A-Za-z0-9_.-]+\.(?:png|jpe?g|webp))/giu,
+  );
+  return [...new Set(matches || [])].slice(0, 8);
+}
+
 async function readJson(filePath, fallbackValue = null) {
   try {
     return JSON.parse(await fs.readFile(filePath, "utf8"));
@@ -120,6 +132,7 @@ function normalizeVerificationResult(command, result = {}) {
     result.reason,
     status === "passed" ? "命令执行通过。" : "命令执行失败。",
   );
+  const screenshots = extractScreenshotEvidence(output);
 
   return {
     command,
@@ -129,6 +142,9 @@ function normalizeVerificationResult(command, result = {}) {
     exitCode: Number.isFinite(Number(result.exitCode)) ? Number(result.exitCode) : "",
     summary: summarizeForFollowup(output, 220),
     reason: safeText(result.reason, ""),
+    evidence: {
+      screenshots,
+    },
   };
 }
 
@@ -330,11 +346,20 @@ export async function runSupervisorIndependentVerification(
           skipped
             .map((result) => result.command + "：" + (result.reason || result.summary))
             .join("；");
+  const screenshots = [
+    ...new Set(results.flatMap((result) => result.evidence?.screenshots || [])),
+  ];
+  const evidenceSummary = screenshots.length
+    ? ` 截图证据：${screenshots.slice(0, 3).join("、")}`
+    : "";
 
   return {
     status,
-    summary: summarizeForFollowup(summary, 420),
+    summary: summarizeForFollowup(summary + evidenceSummary, 420),
     results,
+    evidence: {
+      screenshots,
+    },
     ranAt: nowIso(),
   };
 }
