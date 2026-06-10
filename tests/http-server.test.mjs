@@ -1433,6 +1433,56 @@ test("handler dispatches start route and reports whether controller was newly st
   assert.match(second.text, /"loopControllerStarted":false/);
 });
 
+test("handler blocks start route when production preflight is not dispatchable", async () => {
+  let startRunCalls = 0;
+  let controllerStartCalls = 0;
+  const handler = buildHandler({
+    loopController: {
+      start: async () => {
+        controllerStartCalls += 1;
+        return true;
+      },
+      stop: () => true,
+    },
+    operations: {
+      readProductionPreflight: async () => ({
+        title: "codex-loop 真实循环前预检",
+        canDispatch: false,
+        nextAction: "真实任务仍在观察中，暂时不要重复发送下一轮。",
+      }),
+      startRun: async () => {
+        startRunCalls += 1;
+        return { started: true };
+      },
+    },
+  });
+
+  const chunks = [];
+  const response = {
+    writeHead(statusCode) {
+      this.statusCode = statusCode;
+    },
+    end(text) {
+      chunks.push(text);
+    },
+  };
+
+  await handler(
+    {
+      method: "POST",
+      url: "/api/start",
+      [Symbol.asyncIterator]: async function* iterator() {},
+    },
+    response,
+  );
+
+  assert.equal(response.statusCode, 409);
+  assert.equal(startRunCalls, 0);
+  assert.equal(controllerStartCalls, 0);
+  assert.match(chunks.join(""), /暂不建议启动真实循环/);
+  assert.match(chunks.join(""), /真实任务仍在观察中/);
+});
+
 test("handler dispatches shutdown route and stops loop controller first", async () => {
   let stopCalls = 0;
   let shutdownPayload = null;

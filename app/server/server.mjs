@@ -430,6 +430,20 @@ export function buildHandler({
       }
 
       if (request.method === "POST" && request.url === "/api/start") {
+        if (typeof operations.readProductionPreflight === "function") {
+          const preflight = await operations.readProductionPreflight();
+          if (!preflight.canDispatch) {
+            const detail = preflight.nextAction || preflight.summary || "";
+            sendJson(response, 409, {
+              error: detail
+                ? `暂不建议启动真实循环：${detail}`
+                : "暂不建议启动真实循环。",
+              kind: "production_preflight_blocked",
+              preflight,
+            });
+            return;
+          }
+        }
         const snapshot = await operations.startRun(process.cwd());
         const loopStarted = await loopController.start(process.cwd());
         sendJson(response, 200, {
