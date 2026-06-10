@@ -1,0 +1,220 @@
+import fs from "node:fs/promises";
+import { fileURLToPath } from "node:url";
+import path from "node:path";
+
+const DEFAULT_LIMIT = 80;
+const reportRootLabel = "runtime/production-observations";
+
+function nowForFile() {
+  return new Date().toISOString().replace(/[:.]/g, "-");
+}
+
+function safeText(value, fallback = "") {
+  if (value === null || value === undefined) return fallback;
+  const text = String(value).trim();
+  return text || fallback;
+}
+
+async function readJsonLines(filePath, limit = DEFAULT_LIMIT) {
+  try {
+    const text = await fs.readFile(filePath, "utf8");
+    return text
+      .split(/\r?\n/u)
+      .map((line) => line.trim())
+      .filter(Boolean)
+      .slice(-limit)
+      .map((line) => {
+        try {
+          return JSON.parse(line);
+        } catch {
+          return null;
+        }
+      })
+      .filter(Boolean);
+  } catch (error) {
+    if (error?.code === "ENOENT") return [];
+    throw error;
+  }
+}
+
+function eventLabel(type) {
+  const labels = {
+    run_started_from_console: "循环已启动",
+    codex_followup_dispatching: "正在发送指令",
+    codex_followup_dispatched: "正在等待 Codex",
+    codex_followup_sent_waiting: "指令已送达，等待 Codex",
+    codex_followup_completed: "Codex 已完成一轮",
+    supervisor_review_started: "NPC 复盘中",
+    supervisor_review_completed: "NPC 复盘完成",
+    supervisor_review_skipped: "NPC 复盘跳过",
+    supervisor_verification_completed: "独立验收完成",
+    codex_followup_failed: "续跑失败",
+    codex_followup_stalled: "等待超时",
+    graceful_stop_requested: "已请求停止",
+    graceful_stop_completed: "已停止循环",
+    graceful_stop_wait_elapsed: "停止等待结束",
+    runtime_error: "运行异常",
+  };
+  return labels[type] || "运行记录";
+}
+
+function eventDetail(event = {}) {
+  const detail = safeText(
+    event.latestAssistantPreview ||
+      event.summary ||
+      event.promptPreview ||
+      event.message ||
+      event.note ||
+      event.reason,
+    "未记录详情。",
+  );
+  if (/^\?+([,，\s]*\?+)*[。.!！?？,，\s]*$/u.test(detail)) {
+    return "旧日志详情不可读，请查看原始日志确认当时的停止原因。";
+  }
+  if (/^graceful stop completed$/iu.test(detail)) {
+    return "循环已停止。";
+  }
+  return detail;
+}
+
+function isTimelineEvent(event = {}) {
+  return [
+    "run_started_from_console",
+    "codex_followup_dispatching",
+    "codex_followup_dispatched",
+    "codex_followup_sent_waiting",
+    "codex_followup_completed",
+    "supervisor_review_started",
+    "supervisor_review_completed",
+    "supervisor_review_skipped",
+    "supervisor_verification_completed",
+    "codex_followup_failed",
+    "codex_followup_stalled",
+    "graceful_stop_requested",
+    "graceful_stop_completed",
+    "graceful_stop_wait_elapsed",
+    "runtime_error",
+  ].includes(safeText(event.type));
+}
+
+function buildCounters(events) {
+  const dispatching = events.filter((event) => event.type === "codex_followup_dispatching").length;
+  const sentOnly = events.filter((event) => event.type === "codex_followup_sent_waiting").length;
+  return {
+    dispatches: dispatching || sentOnly,
+    completions: events.filter((event) => event.type === "codex_followup_completed").length,
+    supervisorReviews: events.filter((event) => event.type === "supervisor_review_completed").length,
+    verificationRuns: events.filter((event) => event.type === "supervisor_verification_completed").length,
+    failures: events.filter((event) => /failed|stalled|runtime_error/u.test(event.type)).length,
+    stopEvents: events.filter((event) => event.type === "graceful_stop_completed").length,
+  };
+}
+
+function deriveStatusAndAdvice(counters, timeline) {
+  if (!timeline.length) {
+    return {
+      status: "attention",
+      summary: "还没有可用的真实运行记录。",
+      nextAction: "先启动一次真实任务，让 codex-loop 产生发送、等待、完成和复盘记录后再判断长跑稳定性。",
+    };
+  }
+
+  if (counters.failures > 0) {
+    return {
+      status: "attention",
+      summary: `发现 ${counters.failures} 条失败记录，需要先排查后再长时间运行。`,
+      nextAction: "先处理失败记录，确认线程绑定、Codex 桌面端连接和 Ollama 配置后再重新开始循环。",
+    };
+  }
+
+  if (counters.dispatches > 0 && counters.completions > 0 && counters.supervisorReviews > 0) {
+    return {
+      status: "passed",
+      summary: "已观察到发送、等待、Codex 完成和 NPC 复盘，具备继续真实长跑的基本证据。",
+      nextAction: "可以继续真实任务；建议继续保留人工观察，并在多轮完成后再提高自动化时长。",
+    };
+  }
+
+  return {
+    status: "attention",
+    summary: "已有运行记录，但还没有形成发送、完成、NPC 复盘的完整闭环证据。",
+    nextAction: "继续观察到至少一轮 Codex 完成和 NPC 复盘后，再判断是否适合长期运行。",
+  };
+}
+
+export async function buildProductionObservation({
+  root = process.cwd(),
+  runId = process.env.CODEX_LOOP_OBSERVE_RUN_ID || "assistant-loop",
+  limit = DEFAULT_LIMIT,
+} = {}) {
+  const startedAt = new Date();
+  const logPath = path.join(root, "runtime", runId, "logs", "events.jsonl");
+  const events = await readJsonLines(logPath, limit);
+  const timeline = dedupeTimeline(
+    events.filter(isTimelineEvent).map((event) => ({
+      at: safeText(event.at),
+      type: safeText(event.type),
+      label: eventLabel(event.type),
+      detail: eventDetail(event).slice(0, 220),
+      promptGenerator: safeText(event.promptGenerator),
+    })),
+  );
+  const counters = buildCounters(timeline);
+  const advice = deriveStatusAndAdvice(counters, timeline);
+
+  return {
+    title: "codex-loop 真实运行观测报告",
+    status: advice.status,
+    startedAt: startedAt.toISOString(),
+    finishedAt: new Date().toISOString(),
+    durationMs: Date.now() - startedAt.getTime(),
+    generatedAt: new Date().toISOString(),
+    loop: {
+      runId,
+      logPath: path.relative(root, logPath).replace(/\\/g, "/"),
+    },
+    counters,
+    summary: advice.summary,
+    nextAction: advice.nextAction,
+    timeline,
+  };
+}
+
+function dedupeTimeline(timeline) {
+  const seen = new Set();
+  return timeline.filter((item) => {
+    const detailKey = item.detail.replace(/\s+/gu, " ").trim();
+    const minuteKey = safeText(item.at).slice(0, 16);
+    const key = [item.type, detailKey, minuteKey].join("|");
+    if (seen.has(key)) {
+      return false;
+    }
+    seen.add(key);
+    return true;
+  });
+}
+
+async function writeReport(root, report) {
+  const reportRoot = path.join(root, ...reportRootLabel.split("/"));
+  await fs.mkdir(reportRoot, { recursive: true });
+  const reportPath = path.join(reportRoot, `${nowForFile()}-production-observation.json`);
+  await fs.writeFile(reportPath, `${JSON.stringify(report, null, 2)}\n`, "utf8");
+  return reportPath;
+}
+
+async function main() {
+  const report = await buildProductionObservation();
+  const reportPath = await writeReport(process.cwd(), report);
+  process.stdout.write(`${JSON.stringify(report, null, 2)}\n`);
+  process.stdout.write(`报告路径: ${reportPath}\n`);
+  if (report.status !== "passed") {
+    process.exitCode = 1;
+  }
+}
+
+if (process.argv[1] && fileURLToPath(import.meta.url) === path.resolve(process.argv[1])) {
+  main().catch((error) => {
+    process.stderr.write(`${error.stack || error.message}\n`);
+    process.exitCode = 1;
+  });
+}

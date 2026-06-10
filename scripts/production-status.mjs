@@ -24,6 +24,12 @@ const reportKinds = [
     dirLabel: "runtime/longrun-smoke",
     suffix: "longrun-smoke.json",
   },
+  {
+    key: "productionObservation",
+    label: "真实运行观测",
+    dirLabel: "runtime/production-observations",
+    suffix: "production-observation.json",
+  },
 ];
 
 function resolveLabel(label) {
@@ -114,6 +120,13 @@ function summarizeReport(kind, report) {
     return report.status === "passed"
       ? `本地长跑节奏通过：${checks.length || 0} 项护栏`
       : report.error || "长跑节奏检查未通过";
+  }
+
+  if (kind.key === "productionObservation") {
+    const counters = report.counters || {};
+    return report.status === "passed"
+      ? `真实运行已形成闭环：发送 ${counters.dispatches || 0} 次，完成 ${counters.completions || 0} 次，NPC 复盘 ${counters.supervisorReviews || 0} 次`
+      : report.summary || "真实运行观测需要留意";
   }
 
   return report.nextAction || report.summary || "未记录摘要。";

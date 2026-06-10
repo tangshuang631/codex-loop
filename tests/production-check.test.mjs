@@ -67,13 +67,16 @@ test("production status summarizes recent production evidence for long-running u
   const source = await read("scripts/production-status.mjs");
 
   assert.equal(packageJson.scripts["production:status"], "node scripts/production-status.mjs");
+  assert.equal(packageJson.scripts["production:observe"], "node scripts/production-observer.mjs");
   assert.match(source, /codex-loop 生产状态摘要/);
   assert.match(source, /runtime[\\/]production-checks/);
   assert.match(source, /runtime[\\/]frontend-evidence/);
   assert.match(source, /runtime[\\/]longrun-smoke/);
+  assert.match(source, /runtime[\\/]production-observations/);
   assert.match(source, /最近生产检查/);
   assert.match(source, /前端证据/);
   assert.match(source, /长跑节奏/);
+  assert.match(source, /真实运行观测/);
   assert.match(source, /下一步建议/);
 });
 
@@ -93,6 +96,7 @@ test("docs make production readiness check the pre-use gate", async () => {
 
   for (const source of [readme, checklist, architecture]) {
     assert.match(source, /npm run production:check/);
+    assert.match(source, /npm run production:observe/);
     assert.match(source, /生产就绪检查|投入使用前|生产化检查/);
   }
 });
