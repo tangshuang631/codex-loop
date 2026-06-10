@@ -2081,6 +2081,68 @@ function deriveMonitorStatus(processState) {
   };
 }
 
+function deriveSupervisorVerificationView(status, summary) {
+  const cleanStatus = safeText(status, "");
+  const cleanSummary = safeText(summary, "");
+
+  if (!cleanStatus || cleanStatus === "not_requested") {
+    return {
+      supervisorVerificationKind: "not_requested",
+      supervisorVerificationLabel: "",
+      supervisorVerificationTone: "soft",
+      supervisorVerificationAction: "",
+    };
+  }
+
+  if (cleanStatus === "failed") {
+    return {
+      supervisorVerificationKind: "failed",
+      supervisorVerificationLabel: "未通过",
+      supervisorVerificationTone: "danger",
+      supervisorVerificationAction: "先修复独立验收失败项，再发送下一轮。",
+    };
+  }
+
+  if (cleanStatus === "passed") {
+    return {
+      supervisorVerificationKind: "passed",
+      supervisorVerificationLabel: "已通过",
+      supervisorVerificationTone: "ready",
+      supervisorVerificationAction: "可以复用本轮验收结论继续推进。",
+    };
+  }
+
+  if (/冷却期|近期已完成|不重复执行|已经做过独立验收|等待新的 Codex 完成/u.test(cleanSummary)) {
+    return {
+      supervisorVerificationKind: "reused_recent",
+      supervisorVerificationLabel: "复用最近验收",
+      supervisorVerificationTone: "soft",
+      supervisorVerificationAction:
+        "复用最近验收结论继续推进；等待新的 Codex 完成后再做下一次验收。",
+    };
+  }
+
+  if (
+    /没有可执行命令|验收命令为空|没有找到对应|高风险命令|已跳过该命令|未执行|补齐|可验证证据/u.test(
+      cleanSummary,
+    )
+  ) {
+    return {
+      supervisorVerificationKind: "missing_evidence",
+      supervisorVerificationLabel: "未执行",
+      supervisorVerificationTone: "warning",
+      supervisorVerificationAction: "补齐或说明可验证证据，再继续下一步。",
+    };
+  }
+
+  return {
+    supervisorVerificationKind: "skipped",
+    supervisorVerificationLabel: "已跳过",
+    supervisorVerificationTone: "warning",
+    supervisorVerificationAction: "查看跳过原因；必要时补充验收命令后再继续。",
+  };
+}
+
 function buildProcessStatus(snapshot) {
   const mode = snapshot.state.mode || "stopped";
   const continuationStatus = snapshot.thread.continuationStatus || "idle";
@@ -2110,6 +2172,10 @@ function buildProcessStatus(snapshot) {
     snapshot.thread.lastSupervisorVerificationCommands || [],
     5,
     120,
+  );
+  const supervisorVerificationView = deriveSupervisorVerificationView(
+    supervisorVerificationStatus,
+    supervisorVerificationSummary,
   );
   const acceptanceFocus = normalizeTextList(
     snapshot.thread.lastSupervisorAcceptanceFocus || [],
@@ -2232,6 +2298,7 @@ function buildProcessStatus(snapshot) {
     verificationCommandPreview: verificationCommands.join(" · "),
     acceptanceFocusPreview: acceptanceFocus.join(" · "),
     supervisorVerificationStatus,
+    ...supervisorVerificationView,
     supervisorVerificationSummary: supervisorVerificationSummary
       ? summarizeForFollowup(supervisorVerificationSummary, 180)
       : "",

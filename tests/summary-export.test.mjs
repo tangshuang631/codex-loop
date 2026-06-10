@@ -437,6 +437,81 @@ test("exportMobileView exposes independent supervisor verification result", asyn
   assert.equal(mobile.processStatus.supervisorVerificationCommandCount, 1);
 });
 
+test("exportMobileView labels missing independent verification evidence", async () => {
+  const configRoot = await createWorkspace();
+  await ensureLoopArtifacts(configRoot);
+  await saveThreadBinding(configRoot, {
+    workspaceName: "demo",
+    threadTitle: "移动端缺少独立验收",
+    threadId: "thread-mobile-verification-missing",
+    singleThreadMode: true,
+  });
+
+  await reviewCodexMilestone(configRoot, {
+    generateMilestoneReview: async () => ({
+      summary: "监督复盘：需要独立验收，但还没有找到可执行命令。",
+      nextInstruction: "下一轮先补齐可验证证据，再继续推进。",
+      shouldContinue: true,
+      needsIndependentVerification: true,
+      verificationCommands: [],
+      acceptanceFocus: ["移动端要能判断验收是否真的执行"],
+      risks: [],
+    }),
+  });
+
+  const mobile = await exportMobileView(configRoot);
+
+  assert.equal(mobile.processStatus.supervisorVerificationStatus, "skipped");
+  assert.equal(mobile.processStatus.supervisorVerificationKind, "missing_evidence");
+  assert.equal(mobile.processStatus.supervisorVerificationLabel, "未执行");
+  assert.equal(mobile.processStatus.supervisorVerificationTone, "warning");
+  assert.match(mobile.processStatus.supervisorVerificationAction, /补齐|说明可验证证据/);
+});
+
+test("exportMobileView labels reused independent verification as intentional", async () => {
+  const configRoot = await createWorkspace();
+  await ensureLoopArtifacts(configRoot);
+  await saveThreadBinding(configRoot, {
+    workspaceName: "demo",
+    threadTitle: "移动端复用独立验收",
+    threadId: "thread-mobile-verification-reused",
+    singleThreadMode: true,
+  });
+
+  const review = {
+    summary: "监督复盘：继续根据最近验收结果推进。",
+    nextInstruction: "下一轮复用最近验收结论继续推进。",
+    shouldContinue: true,
+    needsIndependentVerification: true,
+    verificationCommands: ["node --version"],
+    acceptanceFocus: ["不要因为冷却期跳过验收而误判为缺证据"],
+    risks: [],
+  };
+  await reviewCodexMilestone(configRoot, {
+    generateMilestoneReview: async () => review,
+    runVerificationCommand: async ({ command }) => ({
+      command,
+      ok: true,
+      exitCode: 0,
+      output: "v24.0.0",
+    }),
+  });
+  await reviewCodexMilestone(configRoot, {
+    generateMilestoneReview: async () => review,
+    runVerificationCommand: async ({ command }) => {
+      throw new Error(`不应该重复执行验收命令：${command}`);
+    },
+  });
+
+  const mobile = await exportMobileView(configRoot);
+
+  assert.equal(mobile.processStatus.supervisorVerificationStatus, "skipped");
+  assert.equal(mobile.processStatus.supervisorVerificationKind, "reused_recent");
+  assert.equal(mobile.processStatus.supervisorVerificationLabel, "复用最近验收");
+  assert.equal(mobile.processStatus.supervisorVerificationTone, "soft");
+  assert.match(mobile.processStatus.supervisorVerificationAction, /复用最近验收结论|等待新的 Codex 完成/);
+});
+
 test("exportMobileView gives clear mobile guidance while supervisor review is in progress", async () => {
   const configRoot = await createWorkspace();
   await ensureLoopArtifacts(configRoot);

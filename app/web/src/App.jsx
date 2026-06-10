@@ -1466,13 +1466,22 @@ function StatusSummaryPanel({
   const processDetail = processStatus?.detail || codexWorkStatus;
   const monitorText = processStatus?.monitorLabel || processStatus?.headline || continuationStatus;
   const verificationStatus = processStatus?.supervisorVerificationStatus || "";
+  const verificationLabel =
+    processStatus?.supervisorVerificationLabel ||
+    (verificationStatus === "failed"
+      ? "未通过"
+      : verificationStatus === "passed"
+        ? "已通过"
+        : "已跳过");
   const verificationText =
     verificationStatus && verificationStatus !== "not_requested"
-      ? `${verificationStatus === "failed" ? "未通过" : verificationStatus === "passed" ? "已通过" : "已跳过"}${
-          processStatus?.supervisorVerificationSummary
-            ? "：" + processStatus.supervisorVerificationSummary
-            : ""
-        }`
+      ? [
+          verificationLabel,
+          processStatus?.supervisorVerificationSummary,
+          processStatus?.supervisorVerificationAction,
+        ]
+          .filter(Boolean)
+          .join("：")
       : "";
   const rows = [
     ["当前", `${modeText} · ${monitorText}`],
