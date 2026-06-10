@@ -1581,6 +1581,13 @@ function StatusSummaryPanel({
     (closedLoopCount >= closedLoopTarget
       ? "已达到长期运行基本证据"
       : `还差 ${closedLoopTarget - closedLoopCount} 轮真实闭环`);
+  const guidanceEvidence = productionStatus?.guidanceEvidence || {};
+  const guidanceEvidenceCount = Math.max(0, Number(guidanceEvidence.current ?? 0));
+  const guidanceEvidenceTarget = Math.max(1, Number(guidanceEvidence.target ?? 1));
+  const guidanceEvidenceText = guidanceEvidence.label ||
+    (guidanceEvidenceCount >= guidanceEvidenceTarget
+      ? "已观察到用户补充合并证据"
+      : "还差 1 次用户补充合并证据");
   const closedLoopEvidencePlan = closedLoopEvidence.evidencePlan || {};
   const fallbackEvidencePlanSteps = [
     { label: "确认目标", detail: "确认当前任务、工作区和线程就是要继续验证的对象。" },
@@ -1744,6 +1751,12 @@ function StatusSummaryPanel({
         ]
       : null,
     productionStatus?.maturity ? ["剩余缺口", maturityGapText] : null,
+    productionStatus?.guidanceEvidence
+      ? [
+          "补充合并证据",
+          `${guidanceEvidenceCount}/${guidanceEvidenceTarget} · ${guidanceEvidenceText}。${guidanceEvidence.summary || "确认用户补充引导会等 Codex 完成后由本地模型 / NPC 合并。"}`
+        ]
+      : null,
     evidencePlanText
       ? ["下一轮验证", `${closedLoopEvidencePlan.summary || "按真实闭环验证计划推进。"} ${evidencePlanText}`]
       : null,

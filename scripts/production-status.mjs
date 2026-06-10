@@ -289,6 +289,18 @@ function hasPartialClosedLoopEvidence(item = {}) {
   );
 }
 
+function countMergedGuidanceEvidence(item = {}) {
+  return Math.max(
+    0,
+    Number(item.counters?.mergedGuidance || 0),
+    Number(item.guidance?.mergedCount || 0),
+  );
+}
+
+function hasMergedGuidanceEvidence(item = {}) {
+  return countMergedGuidanceEvidence(item) > 0;
+}
+
 function needsSupervisorRecovery(item = {}) {
   if (item.status === "stale") {
     return false;
@@ -345,6 +357,17 @@ function deriveNextAction(items, target = {}) {
     }
     return `先处理${failed.label}：${failed.nextAction || failed.summary}`;
   }
+  const observation = items.find((item) => item.label === "真实运行观测");
+  if (
+    observation?.status === "passed" &&
+    Number(observation.counters?.closedLoops || 0) >= 2 &&
+    !hasMergedGuidanceEvidence(observation)
+  ) {
+    return appendTargetConfirmation(
+      "真实闭环已经达标，但还缺少用户补充引导被本地模型 / NPC 合并进下一条指令的证据。请从桌面端或移动端写入一次补充引导，等 Codex 完成后确认它被合并发送。",
+      target,
+    );
+  }
   return appendTargetConfirmation(
     "可以进入真实任务使用；长时间运行仍建议保留人工观察和运行日志。",
     target,
@@ -393,9 +416,19 @@ function deriveReadiness(items, target = {}) {
   }
 
   if (codeGatesPassed && observation?.status === "passed") {
+    if (!hasMergedGuidanceEvidence(observation)) {
+      return {
+        stage: "trial",
+        summary: "代码闸门和真实 2 轮闭环证据已通过，但还缺少用户补充经本地模型 / NPC 合并进下一条指令的真实证据。",
+        nextAction: appendTargetConfirmation(
+          "在真实任务中从桌面端或移动端写入一次补充引导，等 Codex 完成后确认补充被本地模型 / NPC 合并进下一条指令。",
+          target,
+        ),
+      };
+    }
     return {
       stage: "production",
-      summary: "代码闸门和真实 2 轮闭环证据都已通过，可以进入有人工观察的长期运行。",
+      summary: "代码闸门、真实 2 轮闭环证据和用户补充合并证据都已通过，可以进入有人工观察的长期运行。",
       nextAction: "继续保留运行日志和人工观察，再逐步提高自动化时长。",
     };
   }
@@ -463,6 +496,7 @@ function deriveMaturity(items, readiness = {}) {
     .filter((item) => codeGateLabels.has(item.label))
     .every((item) => item.status === "passed");
   const partialClosedLoop = hasPartialClosedLoopEvidence(observation);
+  const mergedGuidanceCount = countMergedGuidanceEvidence(observation);
   const supervisorRecoveryNeeded = needsSupervisorRecovery(observation);
   const gaps = [];
   const evidence = [];
@@ -475,12 +509,13 @@ function deriveMaturity(items, readiness = {}) {
 
   if (stage === "production") {
     evidence.push("已观察到至少 2 轮真实闭环。");
+    evidence.push(`已观察到 ${mergedGuidanceCount} 次用户补充合并进下一条指令。`);
     return {
       label: "可长跑",
       percent: 90,
       canTrial: true,
       canLongRun: true,
-      summary: "代码闸门和真实 2 轮闭环证据都已通过，可以进入有人工观察的长期运行。",
+      summary: "代码闸门、真实 2 轮闭环证据和用户补充合并证据都已通过，可以进入有人工观察的长期运行。",
       gaps,
       evidence,
     };
@@ -517,6 +552,21 @@ function deriveMaturity(items, readiness = {}) {
   }
 
   if (stage === "trial") {
+    const closedLoops = Number(observation.counters?.closedLoops || 0);
+    if (closedLoops >= 2 && !hasMergedGuidanceEvidence(observation)) {
+      evidence.push("已观察到至少 2 轮真实闭环。");
+      gaps.push("还缺少用户补充经本地模型 / NPC 合并进下一条指令的真实证据。");
+      gaps.push("长时间运行前需要确认移动端或桌面端补充引导能被合并到下一轮。");
+      return {
+        label: "短时试用",
+        percent: 82,
+        canTrial: true,
+        canLongRun: false,
+        summary: "真实闭环已达标，但还没有观察到用户补充引导被本地模型 / NPC 合并进下一条指令，暂不进入长期运行。",
+        gaps,
+        evidence,
+      };
+    }
     if (partialClosedLoop) {
       evidence.push("已观察到 1 轮真实闭环。");
       gaps.push("还缺少第 2 轮真实闭环证据。");
@@ -554,6 +604,74 @@ function deriveMaturity(items, readiness = {}) {
     summary: readiness.summary || "生产检查还不能通过，暂不适合投入真实任务。",
     gaps,
     evidence,
+  };
+}
+
+function buildGuidanceEvidencePlan({
+  current = 0,
+  canLongRun = false,
+  target = {},
+} = {}) {
+  if (canLongRun) {
+    return {
+      status: "satisfied",
+      summary: "已观察到用户补充经本地模型 / NPC 合并进下一条指令。",
+      targetLabel: formatTargetLabel(target),
+      steps: [],
+    };
+  }
+
+  return {
+    status: "needs_guidance_merge_evidence",
+    summary: "还需要 1 次真实用户补充合并证据：写入补充引导 -> 等 Codex 完成 -> 本地模型 / NPC 合并 -> 下一条指令发出。",
+    targetLabel: formatTargetLabel(target),
+    steps: [
+      {
+        label: "写入补充",
+        detail: "从桌面端或移动端在对话底部写入下一轮补充引导。",
+      },
+      {
+        label: "等待完成",
+        detail: "不要打断 Codex 当前轮，等待它完成并进入可接收下一条指令的状态。",
+      },
+      {
+        label: "模型合并",
+        detail: "确认补充引导被本地模型 / NPC 结合 Codex 回复合并进下一条指令。",
+      },
+      {
+        label: "重新检查",
+        detail: "重新查看生产状态，确认用户补充合并证据是否出现。",
+      },
+    ],
+    observed: current,
+  };
+}
+
+function deriveGuidanceEvidence(items, maturity = {}, targetInfo = {}) {
+  const observation = items.find((item) => item.label === "真实运行观测") || {};
+  const current = countMergedGuidanceEvidence(observation);
+  const required = 1;
+  const remaining = Math.max(0, required - current);
+  const canLongRun = Boolean(maturity.canLongRun || current >= required);
+  const label = canLongRun
+    ? "已观察到用户补充合并证据"
+    : "还差 1 次用户补充合并证据";
+  const summary = canLongRun
+    ? `已观察到 ${current} 次用户补充被本地模型 / NPC 合并进下一条指令。`
+    : "还没有观察到用户补充被 NPC / Ollama / 本地模型合并进下一条指令。";
+
+  return {
+    current,
+    target: required,
+    remaining,
+    canLongRun,
+    label,
+    summary,
+    evidencePlan: buildGuidanceEvidencePlan({
+      current,
+      canLongRun,
+      target: targetInfo,
+    }),
   };
 }
 
@@ -689,6 +807,7 @@ export async function readProductionStatusSummary({
     readiness,
     maturity,
     closedLoopEvidence: deriveClosedLoopEvidence(items, maturity, target),
+    guidanceEvidence: deriveGuidanceEvidence(items, maturity, target),
     sections: items,
     nextActionLabel: "下一步建议",
     nextAction: deriveNextAction(items, target),

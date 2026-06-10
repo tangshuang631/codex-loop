@@ -190,6 +190,20 @@ test("dashboard shows closed-loop evidence progress before long-running use", as
   assert.match(stylesSource, /\.closed-loop-evidence-bar/);
 });
 
+test("dashboard shows guidance merge evidence before long-running use", async () => {
+  const appSource = await fs.readFile("app/web/src/App.jsx", "utf8");
+  const statusStart = appSource.indexOf("function StatusSummaryPanel");
+  const statusEnd = appSource.indexOf("const StatusSummaryPanelV2", statusStart);
+  const statusSource = appSource.slice(statusStart, statusEnd);
+
+  assert.notEqual(statusStart, -1);
+  assert.match(statusSource, /productionStatus\?\.guidanceEvidence/);
+  assert.match(statusSource, /guidanceEvidenceCount/);
+  assert.match(statusSource, /guidanceEvidenceTarget/);
+  assert.match(statusSource, /补充合并证据/);
+  assert.match(statusSource, /用户补充|补充引导/);
+});
+
 test("dashboard folds the next real closed-loop evidence plan into status details", async () => {
   const appSource = await fs.readFile("app/web/src/App.jsx", "utf8");
   const statusStart = appSource.indexOf("function StatusSummaryPanel");

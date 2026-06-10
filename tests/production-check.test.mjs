@@ -849,6 +849,11 @@ test("production status falls back to the latest fresh observation report when l
       completions: 2,
       supervisorReviews: 2,
       closedLoops: 2,
+      mergedGuidance: 1,
+    },
+    guidance: {
+      mergedCount: 1,
+      latestPreview: "下一轮请检查移动端远程查看是否清楚。",
     },
   });
 
@@ -1298,6 +1303,68 @@ test("production status summarizes merged guidance evidence from real observatio
   }
 });
 
+test("production status requires merged guidance evidence before long-running maturity", async () => {
+  const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), "codex-loop-production-status-"));
+  const writeReport = async (dirLabel, fileName, report) => {
+    const dir = path.join(tempRoot, ...dirLabel.split("/"));
+    await fs.mkdir(dir, { recursive: true });
+    await fs.writeFile(path.join(dir, fileName), `${JSON.stringify(report, null, 2)}\n`, "utf8");
+  };
+  await writeReport("runtime/production-checks", "latest-production-check.json", {
+    status: "passed",
+    finishedAt: "2026-06-10T08:00:00.000Z",
+    checks: [{ status: "passed" }],
+  });
+  await writeReport("runtime/frontend-evidence", "latest-frontend-evidence.json", {
+    status: "passed",
+    finishedAt: "2026-06-10T08:01:00.000Z",
+    results: [{ status: "passed", requiredText: ["历史对话", "发送引导", "待合并", "本地模型", "NPC"] }],
+  });
+  await writeReport("runtime/longrun-smoke", "latest-longrun-smoke.json", {
+    status: "passed",
+    finishedAt: "2026-06-10T08:02:00.000Z",
+    checks: [{ status: "passed" }],
+  });
+  await writeReport("runtime/production-observations", "no-guidance-production-observation.json", {
+    status: "passed",
+    finishedAt: "2026-06-10T08:03:00.000Z",
+    summary: "最近一次运行周期已观察到 2 轮发送、Codex 完成和 NPC 复盘。",
+    counters: {
+      dispatches: 2,
+      completions: 2,
+      supervisorReviews: 2,
+      closedLoops: 2,
+      mergedGuidance: 0,
+    },
+    guidance: {
+      mergedCount: 0,
+      latestPreview: "",
+      merged: [],
+    },
+  });
+
+  const previousCwd = process.cwd();
+  process.chdir(tempRoot);
+  try {
+    const status = await readProductionStatusSummary({
+      refreshObservation: false,
+      now: new Date("2026-06-10T08:04:00.000Z"),
+    });
+
+    assert.equal(status.readiness.stage, "trial");
+    assert.equal(status.maturity.canLongRun, false);
+    assert.equal(status.maturity.percent, 82);
+    assert.ok(status.maturity.gaps.some((gap) => /用户补充|引导.*合并/.test(gap)));
+    assert.match(status.nextAction, /补充引导|合并/);
+    assert.equal(status.guidanceEvidence.current, 0);
+    assert.equal(status.guidanceEvidence.target, 1);
+    assert.equal(status.guidanceEvidence.canLongRun, false);
+    assert.match(status.guidanceEvidence.summary, /还没有观察到用户补充被 NPC|Ollama|本地模型合并/);
+  } finally {
+    process.chdir(previousCwd);
+  }
+});
+
 test("production status exposes structured maturity and remaining gaps", async () => {
   const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), "codex-loop-status-"));
   const writeReport = async (dirLabel, fileName, report) => {
@@ -1505,6 +1572,7 @@ test("frontend evidence check requires closed-loop evidence progress on desktop 
 
   assert.match(source, /闭环证据/);
   assert.match(source, /真实闭环/);
+  assert.match(source, /补充合并证据/);
   assert.match(source, /下一轮验证/);
   assert.match(source, /复制命令/);
   assert.match(source, /复制文件/);
@@ -1518,6 +1586,8 @@ test("frontend evidence check requires closed-loop evidence progress on desktop 
   assert.match(architecture, /下一轮验证/);
   assert.match(readme, /闭环证据/);
   assert.match(architecture, /闭环证据/);
+  assert.match(readme, /补充合并证据|用户补充合并/);
+  assert.match(architecture, /补充合并证据|用户补充合并/);
 });
 
 test("frontend evidence check requires mobile Codex-style conversation rendering signals", async () => {
