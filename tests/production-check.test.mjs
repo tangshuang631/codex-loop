@@ -1354,6 +1354,17 @@ test("production status exposes structured maturity and remaining gaps", async (
     assert.equal(status.closedLoopEvidence.canLongRun, false);
     assert.match(status.closedLoopEvidence.label, /还差 1 轮真实闭环/);
     assert.match(status.closedLoopEvidence.summary, /还差 1 轮真实闭环/);
+    assert.equal(status.closedLoopEvidence.evidencePlan.status, "needs_more_real_loop_evidence");
+    assert.match(status.closedLoopEvidence.evidencePlan.summary, /还需要 1 轮真实闭环/);
+    assert.equal(Array.isArray(status.closedLoopEvidence.evidencePlan.steps), true);
+    assert.deepEqual(
+      status.closedLoopEvidence.evidencePlan.steps.map((step) => step.label),
+      ["确认目标", "发送一轮", "等待 Codex 完成", "NPC 复盘", "重新检查"],
+    );
+    assert.doesNotMatch(
+      status.closedLoopEvidence.evidencePlan.steps.map((step) => `${step.label} ${step.detail}`).join("\n"),
+      /dispatch|completion|supervisor|debug|internal/i,
+    );
   } finally {
     process.chdir(previousCwd);
   }

@@ -557,12 +557,76 @@ function deriveMaturity(items, readiness = {}) {
   };
 }
 
-function deriveClosedLoopEvidence(items, maturity = {}) {
+function buildClosedLoopEvidencePlan({
+  current = 0,
+  remaining = 0,
+  canLongRun = false,
+  maturity = {},
+  target = {},
+} = {}) {
+  if (canLongRun) {
+    return {
+      status: "satisfied",
+      summary: "真实闭环证据已达到长期运行基本要求，后续继续保留人工观察和运行日志。",
+      targetLabel: formatTargetLabel(target),
+      steps: [],
+    };
+  }
+
+  if (maturity.label === "需恢复") {
+    return {
+      status: "needs_supervisor_recovery",
+      summary: "Codex 已有完成回复但还缺少 NPC 复盘，先补齐复盘再决定是否发送下一轮。",
+      targetLabel: formatTargetLabel(target),
+      steps: [
+        {
+          label: "补齐复盘",
+          detail: "先运行安全恢复入口，只补 NPC 复盘，不发送新指令。",
+        },
+        {
+          label: "重新检查",
+          detail: "复盘完成后重新查看生产状态，再判断是否继续真实循环。",
+        },
+      ],
+    };
+  }
+
+  return {
+    status: "needs_more_real_loop_evidence",
+    summary: `还需要 ${remaining} 轮真实闭环：发送下一轮指令 -> Codex 完成 -> NPC 复盘。`,
+    targetLabel: formatTargetLabel(target),
+    steps: [
+      {
+        label: "确认目标",
+        detail: "确认当前任务、工作区和线程就是要继续验证的对象。",
+      },
+      {
+        label: "发送一轮",
+        detail: "只触发一次真实循环或手动发送一次引导，不连续追发。",
+      },
+      {
+        label: "等待 Codex 完成",
+        detail: "Codex 未完成前不要追加发送，等待它进入可接收下一条指令的状态。",
+      },
+      {
+        label: "NPC 复盘",
+        detail: "Codex 完成后等待产品经理、测试人员、真实用户视角完成复盘。",
+      },
+      {
+        label: "重新检查",
+        detail: "重新查看生产状态，确认真实闭环是否达到 2 轮。",
+      },
+    ],
+    observed: current,
+  };
+}
+
+function deriveClosedLoopEvidence(items, maturity = {}, targetInfo = {}) {
   const observation = items.find((item) => item.label === "真实运行观测") || {};
-  const target = 2;
   const current = Math.max(0, Number(observation.counters?.closedLoops || 0));
-  const remaining = Math.max(0, target - current);
-  const canLongRun = Boolean(maturity.canLongRun || current >= target);
+  const requiredLoops = 2;
+  const remaining = Math.max(0, requiredLoops - current);
+  const canLongRun = Boolean(maturity.canLongRun || current >= requiredLoops);
   const label = canLongRun
     ? "已达到长期运行基本证据"
     : `还差 ${remaining} 轮真实闭环`;
@@ -572,11 +636,18 @@ function deriveClosedLoopEvidence(items, maturity = {}) {
 
   return {
     current,
-    target,
+    target: requiredLoops,
     remaining,
     canLongRun,
     label,
     summary,
+    evidencePlan: buildClosedLoopEvidencePlan({
+      current,
+      remaining,
+      canLongRun,
+      maturity,
+      target: targetInfo,
+    }),
   };
 }
 
@@ -617,7 +688,7 @@ export async function readProductionStatusSummary({
     target,
     readiness,
     maturity,
-    closedLoopEvidence: deriveClosedLoopEvidence(items, maturity),
+    closedLoopEvidence: deriveClosedLoopEvidence(items, maturity, target),
     sections: items,
     nextActionLabel: "下一步建议",
     nextAction: deriveNextAction(items, target),
