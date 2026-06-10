@@ -58,6 +58,18 @@ test("mobile app surfaces production monitoring signals in one compact status bl
   assert.match(styleSource, /\.status-detail-grid/);
 });
 
+test("mobile app shows supervisor screenshot evidence without adding noisy cards", async () => {
+  const source = await read("app/mobile/src/main.jsx");
+  const styleSource = await read("app/mobile/src/styles.css");
+
+  assert.match(source, /supervisorVerificationEvidencePreview/);
+  assert.match(source, /supervisorVerificationEvidenceCount/);
+  assert.match(source, /截图证据/);
+  assert.match(source, /status-detail-row/);
+  assert.doesNotMatch(source, /screenshot-evidence-card/);
+  assert.match(styleSource, /\.status-detail-row/);
+});
+
 test("mobile app manifest supports installable Chinese product naming", async () => {
   const manifest = JSON.parse(await read("app/mobile/manifest.webmanifest"));
 

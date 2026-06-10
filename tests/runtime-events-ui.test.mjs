@@ -154,6 +154,18 @@ test("dashboard keeps independent verification and next action visible in primar
   );
 });
 
+test("dashboard exposes supervisor screenshot evidence inside compact status details", async () => {
+  const appSource = await fs.readFile("app/web/src/App.jsx", "utf8");
+  const stylesSource = await fs.readFile("app/web/src/styles.css", "utf8");
+
+  assert.match(appSource, /supervisorVerificationEvidencePreview/);
+  assert.match(appSource, /supervisorVerificationEvidenceCount/);
+  assert.match(appSource, /截图证据/);
+  assert.match(appSource, /status-detail-fold/);
+  assert.match(stylesSource, /\.status-detail-fold/);
+  assert.doesNotMatch(appSource, /screenshot-evidence-card/);
+});
+
 test("dashboard and mobile status show the latest instruction source", async () => {
   const appSource = await fs.readFile("app/web/src/App.jsx", "utf8");
   const statusStart = appSource.indexOf("function StatusSummaryPanel");

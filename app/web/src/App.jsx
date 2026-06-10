@@ -1572,6 +1572,13 @@ function StatusSummaryPanel({
       : null,
   ].filter(Boolean);
   const detailRows = [
+    processStatus?.supervisorVerificationEvidenceCount
+      ? [
+          "截图证据",
+          processStatus?.supervisorVerificationEvidencePreview ||
+            `${processStatus.supervisorVerificationEvidenceCount} 个截图证据`,
+        ]
+      : null,
     ["停止条件", processStatus?.stopLimit || "未设置停止条件"],
     ["线程", threadLabel],
     ["模型", modelStatus],

@@ -229,6 +229,13 @@ function StatusBlock({ mobileView, statusText }) {
     ["待合并引导", process.pendingGuidancePreview || mobileView?.pendingGuidance?.preview],
     ["独立验收", process.supervisorVerificationLabel || process.supervisorVerificationStatus],
     ["验收动作", process.supervisorVerificationAction],
+    [
+      "截图证据",
+      process.supervisorVerificationEvidencePreview ||
+        (process.supervisorVerificationEvidenceCount
+          ? `${process.supervisorVerificationEvidenceCount} 个截图证据`
+          : ""),
+    ],
     ["模型来源", process.latestInstructionSourceDetail],
   ].filter(([, value]) => asText(value));
 
