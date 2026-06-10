@@ -136,6 +136,10 @@ export async function generatePromptWithOllama({
   const englishPreferred = language.toLowerCase().startsWith("en");
   const pendingUserGuidance = safeText(snapshot.thread.pendingUserGuidance, "");
   const supervisorRuleLines = buildSupervisorRuleLines(snapshot, englishPreferred);
+  const supervisorEvidenceLines = buildSupervisorEvidenceLines(
+    snapshot,
+    englishPreferred,
+  );
 
   const system = englishPreferred
     ? "Act as the product-manager NPC for codex-loop. Generate the next concise follow-up for the same Codex thread. Make low-risk product and design decisions from project docs and rules. Ask the human only for destructive, irreversible, credential, permission, strong security, or high-cost choices. Return only the message."
@@ -150,6 +154,7 @@ export async function generatePromptWithOllama({
     `最近 Codex 回复摘要：${safeText(snapshot.thread.latestCodexSummary, "暂无")}`,
     `最近本地摘要：${safeText(snapshot.thread.latestSummary || snapshot.state.recentSummary, "暂无")}`,
     supervisorRuleLines.length ? supervisorRuleLines.join("\n") : "",
+    supervisorEvidenceLines.length ? supervisorEvidenceLines.join("\n") : "",
     pendingUserGuidance
       ? `用户临时补充：${pendingUserGuidance}`
       : "用户临时补充：暂无",
@@ -271,6 +276,87 @@ function cleanGeneratedList(value, maxItems = 5, maxChars = 140) {
     .map((item) => cleanGeneratedMessage(item, maxChars))
     .filter(Boolean)
     .slice(0, maxItems);
+}
+
+function compactEvidenceText(value, maxChars = 900) {
+  const text = safeText(value, "")
+    .replace(/\s+/g, " ")
+    .trim();
+  if (text.length <= maxChars) {
+    return text;
+  }
+  return `${text.slice(0, maxChars - 1).trimEnd()}…`;
+}
+
+function buildSupervisorEvidenceLines(snapshot, englishPreferred = false) {
+  const thread = snapshot.thread || {};
+  const lines = [];
+  const previousInstruction = compactEvidenceText(
+    thread.lastDispatchPrompt || thread.lastSupervisorInstruction,
+    1000,
+  );
+  const previousSupervisorInstruction = compactEvidenceText(
+    thread.lastSupervisorInstruction,
+    700,
+  );
+  const verificationStatus = safeText(thread.lastSupervisorVerificationStatus, "");
+  const verificationSummary = compactEvidenceText(
+    thread.lastSupervisorVerificationSummary,
+    700,
+  );
+  const verificationResults = Array.isArray(thread.lastSupervisorVerificationResults)
+    ? thread.lastSupervisorVerificationResults
+    : [];
+
+  if (previousInstruction) {
+    lines.push(
+      englishPreferred
+        ? `Previous codex-loop instruction: ${previousInstruction}`
+        : `上一条 codex-loop 指令：${previousInstruction}`,
+    );
+  }
+  if (
+    previousSupervisorInstruction &&
+    previousSupervisorInstruction !== previousInstruction
+  ) {
+    lines.push(
+      englishPreferred
+        ? `Previous supervisor instruction: ${previousSupervisorInstruction}`
+        : `上一轮监督指令：${previousSupervisorInstruction}`,
+    );
+  }
+  if (verificationStatus || verificationSummary) {
+    const statusText = verificationStatus || (englishPreferred ? "unknown" : "未知");
+    lines.push(
+      englishPreferred
+        ? `Latest independent verification: ${statusText}${
+            verificationSummary ? `; ${verificationSummary}` : ""
+          }`
+        : `最近独立验收：${statusText}${
+            verificationSummary ? `；${verificationSummary}` : ""
+          }`,
+    );
+  }
+
+  for (const result of verificationResults.slice(0, 3)) {
+    const command = compactEvidenceText(result?.command, 160);
+    const ok = result?.ok === true;
+    const output = compactEvidenceText(result?.output || result?.summary, 360);
+    if (!command && !output) {
+      continue;
+    }
+    lines.push(
+      englishPreferred
+        ? `Verification evidence: ${command || "command not recorded"} -> ${
+            ok ? "passed" : "failed or skipped"
+          }${output ? `; ${output}` : ""}`
+        : `验收证据：${command || "未记录命令"} -> ${
+            ok ? "通过" : "失败或跳过"
+          }${output ? `；${output}` : ""}`,
+    );
+  }
+
+  return lines;
 }
 
 function buildSupervisorRuleLines(snapshot, englishPreferred = false) {
@@ -402,6 +488,10 @@ export async function generateMilestoneReviewWithOllama({
   );
   const pendingUserGuidance = safeText(snapshot.thread.pendingUserGuidance, "");
   const supervisorRuleLines = buildSupervisorRuleLines(snapshot, englishPreferred);
+  const supervisorEvidenceLines = buildSupervisorEvidenceLines(
+    snapshot,
+    englishPreferred,
+  );
   const verificationCommands = [
     ...(Array.isArray(snapshot.config?.verification?.commands)
       ? snapshot.config.verification.commands
@@ -437,6 +527,7 @@ export async function generateMilestoneReviewWithOllama({
       ? `Latest Codex completion:\n${latestCodexText.slice(0, 7000)}`
       : `Codex 最新完成结果：\n${latestCodexText.slice(0, 7000)}`,
     supervisorRuleLines.length ? supervisorRuleLines.join("\n") : "",
+    supervisorEvidenceLines.length ? supervisorEvidenceLines.join("\n") : "",
     pendingUserGuidance
       ? englishPreferred
         ? `User added guidance while Codex was working: ${pendingUserGuidance}`

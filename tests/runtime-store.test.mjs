@@ -2218,6 +2218,147 @@ test("ollama prompt includes selected loop rule docs as model context", async ()
   assert.match(requestBody.prompt, /10 秒内判断 loop 是否健康/);
 });
 
+test("ollama follow-up prompt includes prior instruction and verification evidence", async () => {
+  const configRoot = await createWorkspace();
+  await ensureLoopArtifacts(configRoot);
+  await saveUserOverrides(configRoot, {
+    conversation: {
+      language: "zh-CN",
+      promptGenerator: {
+        enabled: true,
+        provider: "ollama",
+        model: "qwen2.5:7b",
+        baseUrl: "http://127.0.0.1:11434",
+      },
+    },
+  });
+  await saveThreadBinding(configRoot, {
+    workspaceName: "demo",
+    threadTitle: "续跑证据线程",
+    threadId: "thread-followup-evidence",
+    singleThreadMode: true,
+  });
+  await syncCodexThreadMirror(configRoot, {
+    latestCodexSummary: "Codex 已完成移动端对话渲染，等待下一轮。",
+  });
+  const snapshot = await readLoopSnapshot(configRoot);
+  const enrichedSnapshot = {
+    ...snapshot,
+    thread: {
+      ...snapshot.thread,
+      lastDispatchPrompt: "上一条 codex-loop 指令：把最近记录改成 Codex 风格左右对话。",
+      lastSupervisorVerificationStatus: "failed",
+      lastSupervisorVerificationSummary: "独立验收未通过：右侧指令气泡没有显示完整内容入口。",
+      lastSupervisorVerificationResults: [
+        {
+          command: "npm run test:conversation-ui",
+          ok: false,
+          output: "loop prompt bubble missing expand action",
+        },
+      ],
+    },
+  };
+  let requestBody = null;
+  const fetchImpl = async (_url, init) => {
+    requestBody = JSON.parse(init.body);
+    return {
+      ok: true,
+      json: async () => ({ response: "先修复右侧指令气泡展开入口，再做对话流验收。" }),
+    };
+  };
+
+  await generatePromptWithOllama({
+    snapshot: enrichedSnapshot,
+    fallbackPrompt: "继续推进下一步。",
+    fetchImpl,
+  });
+
+  assert.match(requestBody.prompt, /上一条 codex-loop 指令/);
+  assert.match(requestBody.prompt, /Codex 风格左右对话/);
+  assert.match(requestBody.prompt, /独立验收未通过/);
+  assert.match(requestBody.prompt, /loop prompt bubble missing expand action/);
+});
+
+test("ollama milestone review prompt includes prior instruction and verification evidence", async () => {
+  const configRoot = await createWorkspace();
+  await ensureLoopArtifacts(configRoot);
+  await saveUserOverrides(configRoot, {
+    conversation: {
+      language: "zh-CN",
+      promptGenerator: {
+        enabled: true,
+        provider: "ollama",
+        model: "qwen2.5:7b",
+        baseUrl: "http://127.0.0.1:11434",
+      },
+    },
+  });
+  await saveThreadBinding(configRoot, {
+    workspaceName: "demo",
+    threadTitle: "生产监督线程",
+    threadId: "thread-supervisor-evidence",
+    singleThreadMode: true,
+  });
+  await syncCodexThreadMirror(configRoot, {
+    latestCodexSummary: "Codex 已修复移动端历史记录输入框，等待复盘。",
+  });
+  const snapshot = await readLoopSnapshot(configRoot);
+  const enrichedSnapshot = {
+    ...snapshot,
+    thread: {
+      ...snapshot.thread,
+      lastDispatchPrompt: "上一条 codex-loop 指令：修复移动端底部补充输入框遮挡问题。",
+      lastSupervisorInstruction: "上一轮监督指令：先按小屏真实用户路径验收移动端输入。",
+      lastSupervisorVerificationStatus: "failed",
+      lastSupervisorVerificationSummary: "独立验收未通过：小屏下补充输入框仍会被键盘遮挡。",
+      lastSupervisorVerificationResults: [
+        {
+          command: "npm run test:mobile-flow",
+          ok: false,
+          output: "mobile composer hidden below viewport",
+        },
+      ],
+    },
+  };
+  let requestBody = null;
+  const fetchImpl = async (_url, init) => {
+    requestBody = JSON.parse(init.body);
+    return {
+      ok: true,
+      json: async () => ({
+        response: JSON.stringify({
+          summary: "监督复盘：移动端输入仍需修复。",
+          nextInstruction: "先修复小屏键盘遮挡，再做一次移动端验收。",
+          shouldContinue: true,
+          needsIndependentVerification: true,
+          verificationCommands: ["npm run test:mobile-flow"],
+          acceptanceFocus: ["小屏补充输入可见"],
+          risks: [],
+        }),
+      }),
+    };
+  };
+
+  await generateMilestoneReviewWithOllama({
+    snapshot: enrichedSnapshot,
+    fallbackReview: {
+      summary: "降级复盘",
+      nextInstruction: "继续推进。",
+      shouldContinue: true,
+      needsIndependentVerification: true,
+      verificationCommands: ["npm run test:mobile-flow"],
+      acceptanceFocus: ["小屏输入"],
+      risks: [],
+    },
+    fetchImpl,
+  });
+
+  assert.match(requestBody.prompt, /上一条 codex-loop 指令/);
+  assert.match(requestBody.prompt, /修复移动端底部补充输入框遮挡问题/);
+  assert.match(requestBody.prompt, /独立验收未通过/);
+  assert.match(requestBody.prompt, /mobile composer hidden below viewport/);
+});
+
 test("readLoopSnapshot marks health issue when selected loop rule docs are missing", async () => {
   const configRoot = await createWorkspace();
   await ensureLoopArtifacts(configRoot);
