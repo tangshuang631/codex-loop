@@ -299,6 +299,86 @@ test("production status refreshes real observation from current runtime logs", a
   }
 });
 
+test("production status defaults to the configured current run instead of assistant-loop", async () => {
+  const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), "codex-loop-status-"));
+  const writeReport = async (dirLabel, fileName, report) => {
+    const dir = path.join(tempRoot, ...dirLabel.split("/"));
+    await fs.mkdir(dir, { recursive: true });
+    await fs.writeFile(path.join(dir, fileName), `${JSON.stringify(report, null, 2)}\n`, "utf8");
+  };
+  const now = "2026-06-10T14:20:00.000Z";
+  await fs.writeFile(
+    path.join(tempRoot, "config.json"),
+    `${JSON.stringify({ currentRunId: "current-task-run", projectName: "当前任务" }, null, 2)}\n`,
+    "utf8",
+  );
+  await writeReport("runtime/production-checks", "latest-production-check.json", {
+    status: "passed",
+    finishedAt: now,
+    durationMs: 1,
+    checks: [{ status: "passed" }],
+  });
+  await writeReport("runtime/frontend-evidence", "latest-frontend-evidence.json", {
+    status: "passed",
+    finishedAt: now,
+    durationMs: 1,
+    results: [{ status: "passed" }],
+  });
+  await writeReport("runtime/longrun-smoke", "latest-longrun-smoke.json", {
+    status: "passed",
+    finishedAt: now,
+    durationMs: 1,
+    checks: [{ status: "passed" }],
+  });
+
+  const staleLogDir = path.join(tempRoot, "runtime", "assistant-loop", "logs");
+  await fs.mkdir(staleLogDir, { recursive: true });
+  const staleLogPath = path.join(staleLogDir, "events.jsonl");
+  await fs.writeFile(
+    staleLogPath,
+    [
+      { type: "run_started_from_console", at: "2026-06-08T05:53:43.574Z" },
+      { type: "codex_followup_failed", at: "2026-06-08T05:57:53.245Z" },
+    ].map((event) => JSON.stringify(event)).join("\n") + "\n",
+    "utf8",
+  );
+  await fs.utimes(staleLogPath, new Date("2026-06-08T05:57:53.245Z"), new Date("2026-06-08T05:57:53.245Z"));
+
+  const currentLogDir = path.join(tempRoot, "runtime", "current-task-run", "logs");
+  await fs.mkdir(currentLogDir, { recursive: true });
+  await fs.writeFile(
+    path.join(currentLogDir, "events.jsonl"),
+    [
+      { type: "run_started_from_console", at: "2026-06-10T14:00:00.000Z" },
+      { type: "codex_followup_dispatching", at: "2026-06-10T14:01:00.000Z" },
+      { type: "codex_followup_completed", at: "2026-06-10T14:05:00.000Z" },
+      { type: "supervisor_review_completed", at: "2026-06-10T14:06:00.000Z" },
+      { type: "codex_followup_dispatching", at: "2026-06-10T14:08:00.000Z" },
+      { type: "codex_followup_completed", at: "2026-06-10T14:12:00.000Z" },
+      { type: "supervisor_review_completed", at: "2026-06-10T14:13:00.000Z" },
+    ].map((event) => JSON.stringify(event)).join("\n") + "\n",
+    "utf8",
+  );
+
+  const previousCwd = process.cwd();
+  try {
+    process.chdir(tempRoot);
+    const status = await readProductionStatusSummary({
+      refreshObservation: true,
+      now: new Date("2026-06-10T14:20:00.000Z"),
+    });
+    const observation = status.sections.find((section) => section.label === "真实运行观测");
+
+    assert.equal(status.status, "passed");
+    assert.equal(observation.status, "passed");
+    assert.match(observation.path, /current-task-run/);
+    assert.doesNotMatch(observation.path, /assistant-loop/);
+    assert.match(observation.summary, /2 轮真实闭环/);
+  } finally {
+    process.chdir(previousCwd);
+  }
+});
+
 test("production status marks stale live runtime observations by log age", async () => {
   const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), "codex-loop-status-"));
   const writeReport = async (dirLabel, fileName, report) => {

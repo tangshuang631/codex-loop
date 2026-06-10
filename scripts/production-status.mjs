@@ -2,6 +2,7 @@ import fs from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 
+import { loadLoopConfig } from "./lib/config-loader.mjs";
 import { buildProductionObservation } from "./production-observer.mjs";
 
 const MAX_REPORT_AGE_HOURS = Number(process.env.CODEX_LOOP_STATUS_MAX_REPORT_AGE_HOURS || 12);
@@ -102,10 +103,11 @@ async function readLatestReport(kind) {
 
 async function readLiveProductionObservation(kind, {
   root = currentRoot(),
-  runId = process.env.CODEX_LOOP_OBSERVE_RUN_ID || "assistant-loop",
+  runId = null,
   now = new Date(),
 } = {}) {
-  const logPath = path.join(root, "runtime", runId, "logs", "events.jsonl");
+  const resolvedRunId = runId || await resolveObservedRunId(root);
+  const logPath = path.join(root, "runtime", resolvedRunId, "logs", "events.jsonl");
   let stat = null;
 
   try {
@@ -115,7 +117,7 @@ async function readLiveProductionObservation(kind, {
     throw error;
   }
 
-  const report = await buildProductionObservation({ root, runId, now });
+  const report = await buildProductionObservation({ root, runId: resolvedRunId, now });
   const nowMs = now instanceof Date ? now.getTime() : Date.parse(String(now || ""));
   const ageHours = Number.isFinite(nowMs)
     ? Math.max(0, (nowMs - stat.mtimeMs) / 36e5)
@@ -233,7 +235,7 @@ function deriveOverallStatus(items) {
 
 export async function readProductionStatusSummary({
   refreshObservation = true,
-  runId = process.env.CODEX_LOOP_OBSERVE_RUN_ID || "assistant-loop",
+  runId = null,
   now = new Date(),
 } = {}) {
   const startedAt = new Date();
@@ -258,6 +260,25 @@ export async function readProductionStatusSummary({
     nextActionLabel: "下一步建议",
     nextAction: deriveNextAction(items),
   };
+}
+
+async function resolveObservedRunId(root = currentRoot()) {
+  if (process.env.CODEX_LOOP_OBSERVE_RUN_ID) {
+    return process.env.CODEX_LOOP_OBSERVE_RUN_ID;
+  }
+
+  try {
+    const { config } = await loadLoopConfig(root);
+    if (config.currentRunId) {
+      return config.currentRunId;
+    }
+  } catch (error) {
+    if (error?.code !== "ENOENT" && !/Missing codex-loop config file/u.test(String(error?.message || ""))) {
+      throw error;
+    }
+  }
+
+  return "assistant-loop";
 }
 
 async function main() {
