@@ -106,26 +106,35 @@ async function readLiveProductionObservation(kind, {
   now = new Date(),
 } = {}) {
   const logPath = path.join(root, "runtime", runId, "logs", "events.jsonl");
+  let stat = null;
 
   try {
-    await fs.access(logPath);
+    stat = await fs.stat(logPath);
   } catch (error) {
     if (error?.code === "ENOENT") return null;
     throw error;
   }
 
   const report = await buildProductionObservation({ root, runId, now });
+  const nowMs = now instanceof Date ? now.getTime() : Date.parse(String(now || ""));
+  const ageHours = Number.isFinite(nowMs)
+    ? Math.max(0, (nowMs - stat.mtimeMs) / 36e5)
+    : getReportAgeHours(report.finishedAt || "", stat.mtimeMs);
+  const isStale = ageHours > MAX_REPORT_AGE_HOURS;
+  const summary = summarizeReport(kind, report);
   return {
     label: kind.label,
-    status: report.status || "unknown",
+    status: isStale ? "stale" : report.status || "unknown",
     rawStatus: report.status || "unknown",
     path: report.loop?.logPath || path.relative(root, logPath).replace(/\\/g, "/"),
     finishedAt: report.finishedAt || "",
-    ageHours: 0,
-    isStale: false,
+    ageHours: Number(ageHours.toFixed(2)),
+    isStale,
     durationMs: report.durationMs || 0,
-    summary: summarizeReport(kind, report),
-    nextAction: report.diagnosis?.nextAction || report.nextAction || "",
+    summary: isStale ? `${summary}，但真实运行日志已过期` : summary,
+    nextAction: isStale
+      ? "请重新运行 npm run production:observe，或重新启动一次真实任务生成新的运行记录。"
+      : report.diagnosis?.nextAction || report.nextAction || "",
     waiting: report.waiting || null,
   };
 }
@@ -181,6 +190,9 @@ function summarizeReport(kind, report) {
 function deriveNextAction(items) {
   const stale = items.find((item) => item.status === "stale");
   if (stale) {
+    if (stale.label === "真实运行观测") {
+      return `${stale.label}已过期，请重新运行 npm run production:observe，或重新启动一次真实任务生成新的运行记录。`;
+    }
     return `${stale.label}已过期，请重新运行 npm run production:check 后再判断是否适合继续长期运行。`;
   }
   const waiting = items.find((item) => item.status === "waiting");

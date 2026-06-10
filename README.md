@@ -168,6 +168,14 @@ npm run production:observe
 
 它会读取当前本机运行日志，整理发送、等待、Codex 完成、NPC 复盘、失败和停止时间线，并写入 `runtime/production-observations/`。这个命令只读日志，不启动循环，也不会向 Codex 发送消息。
 
+如果状态提示“Codex 已有回复但缺少监督复盘”，可以运行一次安全恢复：
+
+```bash
+npm run production:recover
+```
+
+它只补齐当前完成结果的 NPC 监督复盘，不会启动循环，也不会向 Codex 发送下一轮指令。恢复后再运行 `npm run production:status` 查看是否可以继续。
+
 `npm run production:status` 会汇总最近生产检查、前端证据、长跑节奏和真实运行观测，并给出下一步建议。这个命令不会启动循环，也不会向 Codex 发送消息，只用于快速判断当前本机 `codex-loop` 是否处在可继续使用的健康状态。
 
 默认超过 12 小时的报告会被视为已过期，状态会进入需留意；这种情况下先重新运行 npm run production:check，再判断是否适合继续长期运行。

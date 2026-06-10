@@ -16,6 +16,7 @@
     "production:check": "node scripts/production-check.mjs",
     "production:status": "node scripts/production-status.mjs",
     "production:observe": "node scripts/production-observer.mjs",
+    "production:recover": "node scripts/production-recover.mjs",
     "dev": "node scripts/dev.mjs",
     "dev:server": "node app/server/index.mjs",
     "dev:web": "vite --config app/web/vite.config.mjs",

@@ -84,6 +84,17 @@ test("production status summarizes recent production evidence for long-running u
   assert.match(source, /下一步建议/);
 });
 
+test("production recovery backfills supervisor review without sending another turn", async () => {
+  const packageJson = JSON.parse(await read("package.json"));
+  const source = await read("scripts/production-recover.mjs");
+
+  assert.equal(packageJson.scripts["production:recover"], "node scripts/production-recover.mjs");
+  assert.match(source, /ensureSupervisorReview/);
+  assert.match(source, /生产恢复/);
+  assert.match(source, /不会发送下一轮/);
+  assert.doesNotMatch(source, /runLoopTurn|sendPendingGuidanceOnce|startRun/);
+});
+
 test("production status treats stale reports as attention instead of current health", async () => {
   const source = await read("scripts/production-status.mjs");
 
@@ -283,6 +294,69 @@ test("production status refreshes real observation from current runtime logs", a
     assert.equal(observation.status, "waiting");
     assert.match(observation.summary, /已等待约 8 分钟/);
     assert.doesNotMatch(status.nextAction, /旧建议/);
+  } finally {
+    process.chdir(previousCwd);
+  }
+});
+
+test("production status marks stale live runtime observations by log age", async () => {
+  const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), "codex-loop-status-"));
+  const writeReport = async (dirLabel, fileName, report) => {
+    const dir = path.join(tempRoot, ...dirLabel.split("/"));
+    await fs.mkdir(dir, { recursive: true });
+    await fs.writeFile(path.join(dir, fileName), `${JSON.stringify(report, null, 2)}\n`, "utf8");
+  };
+  const now = "2026-06-10T14:20:00.000Z";
+  await writeReport("runtime/production-checks", "latest-production-check.json", {
+    status: "passed",
+    finishedAt: now,
+    durationMs: 1,
+    checks: [{ status: "passed" }],
+  });
+  await writeReport("runtime/frontend-evidence", "latest-frontend-evidence.json", {
+    status: "passed",
+    finishedAt: now,
+    durationMs: 1,
+    results: [{ status: "passed" }],
+  });
+  await writeReport("runtime/longrun-smoke", "latest-longrun-smoke.json", {
+    status: "passed",
+    finishedAt: now,
+    durationMs: 1,
+    checks: [{ status: "passed" }],
+  });
+
+  const logDir = path.join(tempRoot, "runtime", "assistant-loop", "logs");
+  await fs.mkdir(logDir, { recursive: true });
+  const logPath = path.join(logDir, "events.jsonl");
+  await fs.writeFile(
+    logPath,
+    [
+      { type: "run_started_from_console", at: "2026-06-08T05:53:43.574Z" },
+      {
+        type: "codex_followup_failed",
+        at: "2026-06-08T05:57:53.245Z",
+        message: "Codex 已收到指令，但等待这一轮回复超时。",
+      },
+    ].map((event) => JSON.stringify(event)).join("\n") + "\n",
+    "utf8",
+  );
+  await fs.utimes(logPath, new Date("2026-06-08T05:57:53.245Z"), new Date("2026-06-08T05:57:53.245Z"));
+
+  const previousCwd = process.cwd();
+  try {
+    process.chdir(tempRoot);
+    const status = await readProductionStatusSummary({
+      refreshObservation: true,
+      now: new Date("2026-06-10T14:20:00.000Z"),
+    });
+    const observation = status.sections.find((section) => section.label === "真实运行观测");
+
+    assert.equal(status.status, "attention");
+    assert.equal(observation.status, "stale");
+    assert.equal(observation.isStale, true);
+    assert.match(observation.summary, /已过期/);
+    assert.match(status.nextAction, /重新启动一次真实任务|重新运行 npm run production:observe/);
   } finally {
     process.chdir(previousCwd);
   }
