@@ -143,6 +143,8 @@
 - 已完成并验证：
 - `npm test`
 - `npm run build:web`
+- `npm run build:mobile`
+- 生产就绪检查入口：`npm run production:check`，会顺序执行环境检查、测试、桌面端构建、移动端构建和 git 差异检查，并写入 `runtime/production-checks/` 报告。
 - 已推送分支：
 - `dev`
 - 最新提交：
@@ -201,8 +203,10 @@
 - 先补失败测试
 - 再补实现
 - 最后统一跑：
+- `npm run production:check`
 - `npm test`
 - `npm run build:web`
+- `npm run build:mobile`
 
 ### 方法 3：真实用户视角验收
 - 不只看代码和接口。
@@ -233,8 +237,10 @@
 - 主界面减噪
 - 折叠与层级优化
 6. 最后跑：
+- `npm run production:check`
 - `npm test`
 - `npm run build:web`
+- `npm run build:mobile`
 
 ## 本轮最重要的产品判断标准
 - 智能：续发更像真人，不机械。

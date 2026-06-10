@@ -133,15 +133,22 @@ dist/            前端构建产物（git 忽略）
 ## 快速开始
 
 1. `npm install`
-2. `npm run loop:check`
-3. `npm test`
-4. `npm run build:web`
-5. `npm run build:mobile`
-6. `start-codex-loop.bat`
-7. 打开控制台
-8. 在左侧新建任务
-9. 连接真实对话窗口
-10. 开始循环
+2. `npm run production:check`
+3. `start-codex-loop.bat`
+4. 打开控制台
+5. 在左侧新建任务
+6. 连接真实对话窗口
+7. 开始循环
+
+## 生产就绪检查
+
+投入使用前建议先运行：
+
+```bash
+npm run production:check
+```
+
+这个命令会顺序执行环境检查、全量测试、桌面端构建、移动端构建和 git 差异检查，并把报告写入 `runtime/production-checks/`。如果它失败，先按报告里的失败命令处理，不要直接开始长期循环。
 
 ## 日常使用方式
 
@@ -279,6 +286,7 @@ ollama pull qwen2.5:7b
 - `npm run loop:scaffold`
 - `npm run loop:bind-thread`
 - `npm run loop:start`
+- `npm run production:check`
 - `npm run dev`
 - `npm run build:web`
 - `npm run build:mobile`
@@ -289,11 +297,8 @@ ollama pull qwen2.5:7b
 建议在新机器上按这个顺序验证：
 
 1. `npm install`
-2. `npm run loop:check`
-3. `npm test`
-4. `npm run build:web`
-5. `npm run build:mobile`
-6. `start-codex-loop.bat`
+2. `npm run production:check`
+3. `start-codex-loop.bat`
 
 如果以上都通过，再开始连接真实窗口和创建任务。
 
