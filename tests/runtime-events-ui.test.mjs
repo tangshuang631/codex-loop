@@ -187,6 +187,25 @@ test("dashboard shows closed-loop evidence progress before long-running use", as
   assert.match(stylesSource, /\.closed-loop-evidence-bar/);
 });
 
+test("dashboard folds the next real closed-loop evidence plan into status details", async () => {
+  const appSource = await fs.readFile("app/web/src/App.jsx", "utf8");
+  const statusStart = appSource.indexOf("function StatusSummaryPanel");
+  const statusEnd = appSource.indexOf("const StatusSummaryPanelV2", statusStart);
+  const statusSource = appSource.slice(statusStart, statusEnd);
+
+  assert.notEqual(statusStart, -1);
+  assert.match(statusSource, /closedLoopEvidence\.evidencePlan/);
+  assert.match(statusSource, /evidencePlanSteps/);
+  assert.match(statusSource, /下一轮验证/);
+  assert.match(statusSource, /确认目标/);
+  assert.match(statusSource, /发送一轮/);
+  assert.match(statusSource, /等待 Codex 完成/);
+  assert.match(statusSource, /NPC 复盘/);
+  assert.match(statusSource, /重新检查/);
+  assert.match(statusSource, /status-detail-fold/);
+  assert.doesNotMatch(appSource, /closed-loop-plan-card/);
+});
+
 test("dashboard surfaces supervisor review without adding noisy debug cards", async () => {
   const appSource = await fs.readFile("app/web/src/App.jsx", "utf8");
 

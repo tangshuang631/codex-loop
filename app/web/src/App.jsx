@@ -1581,6 +1581,22 @@ function StatusSummaryPanel({
     (closedLoopCount >= closedLoopTarget
       ? "已达到长期运行基本证据"
       : `还差 ${closedLoopTarget - closedLoopCount} 轮真实闭环`);
+  const closedLoopEvidencePlan = closedLoopEvidence.evidencePlan || {};
+  const fallbackEvidencePlanSteps = [
+    { label: "确认目标", detail: "确认当前任务、工作区和线程就是要继续验证的对象。" },
+    { label: "发送一轮", detail: "只触发一次真实循环或手动发送一次引导，不连续追发。" },
+    { label: "等待 Codex 完成", detail: "Codex 未完成前不要追加发送。" },
+    { label: "NPC 复盘", detail: "等待产品经理、测试人员、真实用户视角完成复盘。" },
+    { label: "重新检查", detail: "重新查看生产状态，确认真实闭环是否达到 2 轮。" },
+  ];
+  const evidencePlanSteps = Array.isArray(closedLoopEvidencePlan.steps) && closedLoopEvidencePlan.steps.length
+    ? closedLoopEvidencePlan.steps.filter(Boolean)
+    : fallbackEvidencePlanSteps;
+  const evidencePlanText = evidencePlanSteps.length
+    ? evidencePlanSteps
+        .map((step) => `${step.label || "下一步"}：${step.detail || ""}`.trim())
+        .join("；")
+    : closedLoopEvidencePlan.summary || "";
   const preflightLabel = productionPreflight?.canDispatch
     ? "可以启动"
     : productionPreflight?.status === "waiting"
@@ -1719,6 +1735,9 @@ function StatusSummaryPanel({
         ]
       : null,
     productionStatus?.maturity ? ["剩余缺口", maturityGapText] : null,
+    evidencePlanText
+      ? ["下一轮验证", `${closedLoopEvidencePlan.summary || "按真实闭环验证计划推进。"} ${evidencePlanText}`]
+      : null,
     productionPreflight?.title
       ? [
           "真实循环前预检",

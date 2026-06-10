@@ -157,6 +157,21 @@ test("mobile app shows closed-loop evidence progress for remote supervision", as
   assert.match(styleSource, /\.closed-loop-evidence-bar/);
 });
 
+test("mobile app folds the next real closed-loop evidence plan into status details", async () => {
+  const source = await read("app/mobile/src/main.jsx");
+
+  assert.match(source, /closedLoopEvidence\.evidencePlan/);
+  assert.match(source, /evidencePlanSteps/);
+  assert.match(source, /下一轮验证/);
+  assert.match(source, /确认目标/);
+  assert.match(source, /发送一轮/);
+  assert.match(source, /等待 Codex 完成/);
+  assert.match(source, /NPC 复盘/);
+  assert.match(source, /重新检查/);
+  assert.match(source, /status-detail/);
+  assert.doesNotMatch(source, /closed-loop-plan-card/);
+});
+
 test("mobile app shows supervisor screenshot evidence without adding noisy cards", async () => {
   const source = await read("app/mobile/src/main.jsx");
   const styleSource = await read("app/mobile/src/styles.css");
