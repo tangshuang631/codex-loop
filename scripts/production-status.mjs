@@ -94,6 +94,7 @@ async function readLatestReport(kind) {
     durationMs: report.durationMs || 0,
     summary: isStale ? `${summary}，但报告已过期` : summary,
     nextAction: report.diagnosis?.nextAction || report.nextAction || "",
+    waiting: report.waiting || null,
   };
 }
 
@@ -130,10 +131,16 @@ function summarizeReport(kind, report) {
   if (kind.key === "productionObservation") {
     const counters = report.counters || {};
     const diagnosis = report.diagnosis || {};
+    const waiting = report.waiting || {};
     const userMessage = typeof diagnosis.userMessage === "string" ? diagnosis.userMessage.trim() : "";
+    const waitingMinutes = Number(waiting.waitingMinutes);
+    const waitingLabel =
+      report.status === "waiting" && Number.isFinite(waitingMinutes) && waitingMinutes > 0
+        ? `已等待约 ${waitingMinutes} 分钟，`
+        : "";
     return report.status === "passed"
       ? `真实运行已形成闭环：发送 ${counters.dispatches || 0} 次，完成 ${counters.completions || 0} 次，NPC 复盘 ${counters.supervisorReviews || 0} 次`
-      : userMessage || report.summary || "真实运行观测需要留意";
+      : `${waitingLabel}${userMessage || report.summary || "真实运行观测需要留意"}`;
   }
 
   return report.nextAction || report.summary || "未记录摘要。";
@@ -146,7 +153,15 @@ function deriveNextAction(items) {
   }
   const waiting = items.find((item) => item.status === "waiting");
   if (waiting) {
-    return `${waiting.label}正在等待：${waiting.nextAction || waiting.summary}`;
+    const needsHumanCheck = Boolean(waiting.waiting?.needsHumanCheck);
+    const waitingMinutes = Number(waiting.waiting?.waitingMinutes);
+    const waitLabel = Number.isFinite(waitingMinutes) && waitingMinutes > 0
+      ? `已等待约 ${waitingMinutes} 分钟，`
+      : "";
+    const action = needsHumanCheck
+      ? "请确认 Codex 是否仍在处理或是否卡在确认步骤；不要重复发送。"
+      : waiting.nextAction || waiting.summary;
+    return `${waiting.label}正在等待：${waitLabel}${action}`;
   }
   const failed = items.find((item) => item.status && item.status !== "passed");
   if (failed) {

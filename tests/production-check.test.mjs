@@ -192,6 +192,12 @@ test("production status keeps delivered waiting observations as waiting instead 
       completions: 0,
       supervisorReviews: 0,
     },
+    waiting: {
+      waitingSince: now,
+      waitingMinutes: 18,
+      waitAttentionMinutes: 15,
+      needsHumanCheck: true,
+    },
   });
 
   const previousCwd = process.cwd();
@@ -202,8 +208,12 @@ test("production status keeps delivered waiting observations as waiting instead 
 
     assert.equal(status.status, "waiting");
     assert.equal(observation.status, "waiting");
+    assert.equal(observation.waiting.waitingMinutes, 18);
+    assert.equal(observation.waiting.needsHumanCheck, true);
     assert.match(observation.summary, /正在等待/);
+    assert.match(observation.summary, /已等待约 18 分钟/);
     assert.match(status.nextAction, /不要重复发送/);
+    assert.match(status.nextAction, /确认 Codex 是否仍在处理/);
   } finally {
     process.chdir(previousCwd);
   }

@@ -3,6 +3,9 @@ import { fileURLToPath } from "node:url";
 import path from "node:path";
 
 const DEFAULT_LIMIT = 80;
+const DEFAULT_WAIT_ATTENTION_MINUTES = Number(
+  process.env.CODEX_LOOP_WAIT_ATTENTION_MINUTES || 15,
+);
 const reportRootLabel = "runtime/production-observations";
 
 function nowForFile() {
@@ -126,7 +129,27 @@ function latestRunCycle(timeline) {
   };
 }
 
-function deriveStatusAndAdvice(counters, timeline) {
+function buildWaitingObservation(timeline, now = new Date()) {
+  const latestWaiting = timeline.findLast((event) => event.type === "codex_followup_sent_waiting");
+  const waitingAt = Date.parse(latestWaiting?.at || "");
+  const nowMs = now instanceof Date ? now.getTime() : Date.parse(String(now || ""));
+  const waitingMinutes =
+    Number.isFinite(waitingAt) && Number.isFinite(nowMs)
+      ? Math.max(0, Math.round((nowMs - waitingAt) / 60000))
+      : 0;
+  const waitAttentionMinutes = Number.isFinite(DEFAULT_WAIT_ATTENTION_MINUTES)
+    ? DEFAULT_WAIT_ATTENTION_MINUTES
+    : 15;
+
+  return {
+    waitingSince: latestWaiting?.at || "",
+    waitingMinutes,
+    waitAttentionMinutes,
+    needsHumanCheck: waitingMinutes >= waitAttentionMinutes,
+  };
+}
+
+function deriveStatusAndAdvice(counters, timeline, { waiting = null } = {}) {
   if (!timeline.length) {
     return {
       status: "attention",
@@ -148,10 +171,16 @@ function deriveStatusAndAdvice(counters, timeline) {
     types.has("codex_followup_sent_waiting") &&
     !types.has("codex_followup_completed")
   ) {
+    const waitLabel = waiting?.waitingMinutes
+      ? `已等待约 ${waiting.waitingMinutes} 分钟，`
+      : "";
+    const needsHumanCheck = Boolean(waiting?.needsHumanCheck);
     return {
       status: "waiting",
-      summary: "指令已送达，正在等待 Codex 完成这一轮。",
-      nextAction: "不要重复发送；如需补充方向，先写入下一轮引导，等 Codex 完成后再合并发送。",
+      summary: `指令已送达，${waitLabel}正在等待 Codex 完成这一轮。`,
+      nextAction: needsHumanCheck
+        ? "不要重复发送；请确认 Codex 是否仍在处理或是否卡在确认步骤。如需补充方向，先写入下一轮引导。"
+        : "不要重复发送；如需补充方向，先写入下一轮引导，等 Codex 完成后再合并发送。",
     };
   }
 
@@ -252,6 +281,7 @@ export async function buildProductionObservation({
   root = process.cwd(),
   runId = process.env.CODEX_LOOP_OBSERVE_RUN_ID || "assistant-loop",
   limit = DEFAULT_LIMIT,
+  now = new Date(),
 } = {}) {
   const startedAt = new Date();
   const logPath = path.join(root, "runtime", runId, "logs", "events.jsonl");
@@ -268,7 +298,8 @@ export async function buildProductionObservation({
   const cycles = latestRunCycle(timeline);
   const counters = buildCounters(cycles.current);
   const historyCounters = buildCounters(cycles.previous);
-  const advice = deriveStatusAndAdvice(counters, cycles.current);
+  const waiting = buildWaitingObservation(cycles.current, now);
+  const advice = deriveStatusAndAdvice(counters, cycles.current, { waiting });
   const diagnosis = deriveDiagnosis(counters, cycles.current);
 
   return {
@@ -288,6 +319,7 @@ export async function buildProductionObservation({
       totalTimelineEvents: timeline.length,
       previousTimelineEvents: cycles.previous.length,
     },
+    waiting,
     diagnosis,
     summary: advice.summary,
     nextAction: advice.nextAction,
