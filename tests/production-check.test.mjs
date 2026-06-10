@@ -219,6 +219,75 @@ test("production status keeps delivered waiting observations as waiting instead 
   }
 });
 
+test("production status refreshes real observation from current runtime logs", async () => {
+  const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), "codex-loop-status-"));
+  const writeReport = async (dirLabel, fileName, report) => {
+    const dir = path.join(tempRoot, ...dirLabel.split("/"));
+    await fs.mkdir(dir, { recursive: true });
+    await fs.writeFile(path.join(dir, fileName), `${JSON.stringify(report, null, 2)}\n`, "utf8");
+  };
+  const now = "2026-06-10T14:20:00.000Z";
+  await writeReport("runtime/production-checks", "latest-production-check.json", {
+    status: "passed",
+    finishedAt: now,
+    durationMs: 1,
+    checks: [{ status: "passed" }],
+  });
+  await writeReport("runtime/frontend-evidence", "latest-frontend-evidence.json", {
+    status: "passed",
+    finishedAt: now,
+    durationMs: 1,
+    results: [{ status: "passed" }],
+  });
+  await writeReport("runtime/longrun-smoke", "latest-longrun-smoke.json", {
+    status: "passed",
+    finishedAt: now,
+    durationMs: 1,
+    checks: [{ status: "passed" }],
+  });
+  await writeReport("runtime/production-observations", "old-production-observation.json", {
+    status: "attention",
+    finishedAt: "2026-06-10T14:00:00.000Z",
+    durationMs: 1,
+    summary: "旧观测失败，不应覆盖当前真实日志。",
+    diagnosis: {
+      nextAction: "旧建议不应继续显示。",
+    },
+  });
+
+  const logDir = path.join(tempRoot, "runtime", "assistant-loop", "logs");
+  await fs.mkdir(logDir, { recursive: true });
+  await fs.writeFile(
+    path.join(logDir, "events.jsonl"),
+    [
+      { type: "run_started_from_console", at: "2026-06-10T14:10:00.000Z" },
+      {
+        type: "codex_followup_sent_waiting",
+        at: "2026-06-10T14:12:00.000Z",
+        summary: "消息已送达绑定线程，正在等待 Codex 完成这一轮回复。",
+      },
+    ].map((event) => JSON.stringify(event)).join("\n") + "\n",
+    "utf8",
+  );
+
+  const previousCwd = process.cwd();
+  try {
+    process.chdir(tempRoot);
+    const status = await readProductionStatusSummary({
+      refreshObservation: true,
+      now: new Date("2026-06-10T14:20:00.000Z"),
+    });
+    const observation = status.sections.find((section) => section.label === "真实运行观测");
+
+    assert.equal(status.status, "waiting");
+    assert.equal(observation.status, "waiting");
+    assert.match(observation.summary, /已等待约 8 分钟/);
+    assert.doesNotMatch(status.nextAction, /旧建议/);
+  } finally {
+    process.chdir(previousCwd);
+  }
+});
+
 test("docs make production readiness check the pre-use gate", async () => {
   const readme = await read("README.md");
   const checklist = await read("codex-loop6.7-13-29开发清单.md");

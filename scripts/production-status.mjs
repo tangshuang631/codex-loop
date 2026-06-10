@@ -2,6 +2,8 @@ import fs from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 
+import { buildProductionObservation } from "./production-observer.mjs";
+
 const MAX_REPORT_AGE_HOURS = Number(process.env.CODEX_LOOP_STATUS_MAX_REPORT_AGE_HOURS || 12);
 
 const reportKinds = [
@@ -98,6 +100,36 @@ async function readLatestReport(kind) {
   };
 }
 
+async function readLiveProductionObservation(kind, {
+  root = currentRoot(),
+  runId = process.env.CODEX_LOOP_OBSERVE_RUN_ID || "assistant-loop",
+  now = new Date(),
+} = {}) {
+  const logPath = path.join(root, "runtime", runId, "logs", "events.jsonl");
+
+  try {
+    await fs.access(logPath);
+  } catch (error) {
+    if (error?.code === "ENOENT") return null;
+    throw error;
+  }
+
+  const report = await buildProductionObservation({ root, runId, now });
+  return {
+    label: kind.label,
+    status: report.status || "unknown",
+    rawStatus: report.status || "unknown",
+    path: report.loop?.logPath || path.relative(root, logPath).replace(/\\/g, "/"),
+    finishedAt: report.finishedAt || "",
+    ageHours: 0,
+    isStale: false,
+    durationMs: report.durationMs || 0,
+    summary: summarizeReport(kind, report),
+    nextAction: report.diagnosis?.nextAction || report.nextAction || "",
+    waiting: report.waiting || null,
+  };
+}
+
 function getReportAgeHours(finishedAt, fallbackMtimeMs) {
   const finishedMs = Date.parse(finishedAt);
   const baseMs = Number.isFinite(finishedMs) ? finishedMs : fallbackMtimeMs;
@@ -180,11 +212,20 @@ function deriveOverallStatus(items) {
   return "passed";
 }
 
-export async function readProductionStatusSummary() {
+export async function readProductionStatusSummary({
+  refreshObservation = true,
+  runId = process.env.CODEX_LOOP_OBSERVE_RUN_ID || "assistant-loop",
+  now = new Date(),
+} = {}) {
   const startedAt = new Date();
   const items = [];
 
   for (const kind of reportKinds) {
+    if (refreshObservation && kind.key === "productionObservation") {
+      const liveObservation = await readLiveProductionObservation(kind, { runId, now });
+      items.push(liveObservation || await readLatestReport(kind));
+      continue;
+    }
     items.push(await readLatestReport(kind));
   }
 

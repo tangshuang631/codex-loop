@@ -51,6 +51,7 @@ function eventLabel(type) {
     supervisor_review_completed: "NPC 复盘完成",
     supervisor_review_skipped: "NPC 复盘跳过",
     supervisor_verification_completed: "独立验收完成",
+    codex_conversation_mirror_synced: "已同步 Codex 回复",
     codex_followup_failed: "续跑失败",
     codex_followup_stalled: "等待超时",
     graceful_stop_requested: "已请求停止",
@@ -91,6 +92,7 @@ function isTimelineEvent(event = {}) {
     "supervisor_review_completed",
     "supervisor_review_skipped",
     "supervisor_verification_completed",
+    "codex_conversation_mirror_synced",
     "codex_followup_failed",
     "codex_followup_stalled",
     "graceful_stop_requested",
@@ -111,6 +113,48 @@ function buildCounters(events) {
     failures: events.filter((event) => /failed|stalled|runtime_error/u.test(event.type)).length,
     stopEvents: events.filter((event) => event.type === "graceful_stop_completed").length,
   };
+}
+
+function isDeliveredTimeoutFailure(event = {}) {
+  return (
+    event.type === "codex_followup_failed" &&
+    /(已收到|已送达|received|delivered).*(超时|timeout)|等待这一轮回复超时/iu.test(event.detail || "")
+  );
+}
+
+function recoverTimeoutsWithMirrorReplies(timeline) {
+  let pendingTimeoutIndex = -1;
+  let hasRecovery = false;
+  const recovered = [];
+
+  for (const event of timeline) {
+    if (isDeliveredTimeoutFailure(event)) {
+      pendingTimeoutIndex = recovered.length;
+      recovered.push(event);
+      continue;
+    }
+
+    if (
+      event.type === "codex_conversation_mirror_synced" &&
+      pendingTimeoutIndex >= 0 &&
+      safeText(event.detail, "未记录详情。") !== "未记录详情。"
+    ) {
+      recovered.splice(pendingTimeoutIndex, 1);
+      recovered.push({
+        ...event,
+        type: "codex_followup_completed",
+        label: "Codex 已完成一轮",
+        recoveredFromTimeout: true,
+      });
+      pendingTimeoutIndex = -1;
+      hasRecovery = true;
+      continue;
+    }
+
+    recovered.push(event);
+  }
+
+  return { timeline: recovered, hasRecovery };
 }
 
 function latestRunCycle(timeline) {
@@ -199,7 +243,7 @@ function deriveStatusAndAdvice(counters, timeline, { waiting = null } = {}) {
   };
 }
 
-function deriveDiagnosis(counters, timeline) {
+function deriveDiagnosis(counters, timeline, { hasRecovery = false } = {}) {
   if (!timeline.length) {
     return {
       category: "no_runtime_events",
@@ -209,6 +253,13 @@ function deriveDiagnosis(counters, timeline) {
   }
 
   if (counters.failures <= 0) {
+    if (hasRecovery || timeline.some((event) => event.recoveredFromTimeout)) {
+      return {
+        category: "codex_reply_recovered_after_timeout",
+        userMessage: "上一轮等待超时后已经同步到 Codex 回复。",
+        nextAction: "先查看这条 Codex 回复和本地监督复盘；不要因为旧超时重复发送同一条指令。",
+      };
+    }
     const types = new Set(timeline.map((event) => event.type));
     if (
       types.has("codex_followup_sent_waiting") &&
@@ -296,11 +347,15 @@ export async function buildProductionObservation({
     })),
   );
   const cycles = latestRunCycle(timeline);
+  const recoveredCycle = recoverTimeoutsWithMirrorReplies(cycles.current);
+  cycles.current = recoveredCycle.timeline;
   const counters = buildCounters(cycles.current);
   const historyCounters = buildCounters(cycles.previous);
   const waiting = buildWaitingObservation(cycles.current, now);
   const advice = deriveStatusAndAdvice(counters, cycles.current, { waiting });
-  const diagnosis = deriveDiagnosis(counters, cycles.current);
+  const diagnosis = deriveDiagnosis(counters, cycles.current, {
+    hasRecovery: recoveredCycle.hasRecovery,
+  });
 
   return {
     title: "codex-loop 真实运行观测报告",
