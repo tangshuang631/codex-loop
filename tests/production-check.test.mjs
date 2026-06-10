@@ -63,7 +63,64 @@ test("frontend evidence check verifies built desktop and mobile product surfaces
   assert.match(source, /历史对话/);
   assert.match(source, /发送引导/);
   assert.match(source, /截图证据/);
+  assert.match(source, /生产阶段/);
   assert.match(source, /runtime[\\/]frontend-evidence/);
+});
+
+test("production status frontend evidence summary includes production stage", async () => {
+  const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), "codex-loop-status-"));
+  const writeReport = async (dirLabel, fileName, report) => {
+    const dir = path.join(tempRoot, ...dirLabel.split("/"));
+    await fs.mkdir(dir, { recursive: true });
+    await fs.writeFile(path.join(dir, fileName), `${JSON.stringify(report, null, 2)}\n`, "utf8");
+  };
+  const now = "2026-06-10T14:20:00.000Z";
+  await writeReport("runtime/production-checks", "latest-production-check.json", {
+    status: "passed",
+    finishedAt: now,
+    durationMs: 1,
+    checks: [{ status: "passed" }],
+  });
+  await writeReport("runtime/frontend-evidence", "latest-frontend-evidence.json", {
+    status: "passed",
+    finishedAt: now,
+    durationMs: 1,
+    results: [
+      {
+        name: "桌面端",
+        status: "passed",
+        requiredText: ["历史对话", "发送引导", "截图证据", "生产阶段"],
+      },
+      {
+        name: "移动端",
+        status: "passed",
+        requiredText: ["历史对话", "发送引导", "截图证据", "生产阶段"],
+      },
+    ],
+  });
+  await writeReport("runtime/longrun-smoke", "latest-longrun-smoke.json", {
+    status: "passed",
+    finishedAt: now,
+    durationMs: 1,
+    checks: [{ status: "passed" }],
+  });
+
+  const previousCwd = process.cwd();
+  try {
+    process.chdir(tempRoot);
+    const status = await readProductionStatusSummary({
+      refreshObservation: false,
+      now: new Date("2026-06-10T14:20:00.000Z"),
+    });
+    const frontend = status.sections.find((section) => section.label === "前端证据");
+
+    assert.equal(frontend.status, "passed");
+    assert.match(frontend.summary, /生产阶段/);
+    assert.match(frontend.summary, /历史对话/);
+    assert.match(frontend.summary, /发送引导/);
+  } finally {
+    process.chdir(previousCwd);
+  }
 });
 
 test("production status summarizes recent production evidence for long-running use", async () => {

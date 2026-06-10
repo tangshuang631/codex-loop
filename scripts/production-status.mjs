@@ -161,9 +161,16 @@ function summarizeReport(kind, report) {
   if (kind.key === "frontendEvidence") {
     const results = Array.isArray(report.results) ? report.results : [];
     const failed = results.find((item) => item.status === "failed");
+    const requiredTexts = [
+      ...new Set(
+        results
+          .flatMap((item) => (Array.isArray(item.requiredText) ? item.requiredText : []))
+          .filter(Boolean),
+      ),
+    ];
     return failed
       ? `${failed.name || "前端"}缺少证据：${(failed.missing || []).join("、") || failed.error || "未记录原因"}`
-      : "历史对话、发送引导、截图证据已进入构建产物";
+      : `${requiredTexts.length ? requiredTexts.join("、") : "关键界面信号"}已进入构建产物`;
   }
 
   if (kind.key === "longrunSmoke") {
