@@ -193,7 +193,9 @@ test("dashboard surfaces supervisor review without adding noisy debug cards", as
   assert.match(appSource, /processStatus\?\.hasSupervisorReview/);
   assert.match(appSource, /processStatus\?\.supervisorReview/);
   assert.match(appSource, /processStatus\?\.supervisorInstructionPreview/);
+  assert.match(appSource, /processStatus\?\.supervisorPerspectiveRows/);
   assert.match(appSource, /监督复盘/);
+  assert.match(appSource, /NPC 视角/);
   assert.match(appSource, /下一条指令/);
 });
 

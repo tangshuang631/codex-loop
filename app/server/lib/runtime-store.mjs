@@ -2331,6 +2331,48 @@ function collectSupervisorVerificationEvidence(results = []) {
   };
 }
 
+function buildSupervisorPerspectiveRows({
+  review = "",
+  instruction = "",
+  verificationCommands = [],
+  acceptanceFocus = [],
+  risks = [],
+} = {}) {
+  const reviewText = safeText(review, "");
+  const instructionText = safeText(instruction, "");
+  const verificationText = normalizeTextList(verificationCommands, 3, 120).join(" · ");
+  const focusText = normalizeTextList(acceptanceFocus, 3, 120).join(" · ");
+  const riskText = normalizeTextList(risks, 3, 120).join(" · ");
+
+  if (!reviewText && !instructionText && !verificationText && !focusText && !riskText) {
+    return [];
+  }
+
+  return [
+    {
+      label: "产品经理",
+      text: summarizeForFollowup(
+        firstNonEmpty(riskText, reviewText, instructionText, "控制范围，确认下一步仍贴合用户目标。"),
+        160,
+      ),
+    },
+    {
+      label: "测试人员",
+      text: summarizeForFollowup(
+        firstNonEmpty(verificationText, focusText, "确认本轮有可复查的验证证据。"),
+        160,
+      ),
+    },
+    {
+      label: "真实用户",
+      text: summarizeForFollowup(
+        firstNonEmpty(focusText, reviewText, "确认用户能看懂状态、历史记录和下一步。"),
+        160,
+      ),
+    },
+  ];
+}
+
 function buildProcessStatus(snapshot) {
   const mode = snapshot.state.mode || "stopped";
   const continuationStatus = snapshot.thread.continuationStatus || "idle";
@@ -2389,6 +2431,18 @@ function buildProcessStatus(snapshot) {
     5,
     120,
   );
+  const supervisorRisks = normalizeTextList(
+    snapshot.thread.lastSupervisorRisks || [],
+    5,
+    120,
+  );
+  const supervisorPerspectiveRows = buildSupervisorPerspectiveRows({
+    review: supervisorReview,
+    instruction: supervisorInstruction,
+    verificationCommands,
+    acceptanceFocus,
+    risks: supervisorRisks,
+  });
   const isFinalizing =
     mode === "finalize_after_current" ||
     Boolean(snapshot.state.stopRequested || snapshot.state.finalizeRequested);
@@ -2512,6 +2566,10 @@ function buildProcessStatus(snapshot) {
       ? buildPromptPreview(supervisorInstruction, 180)
       : "",
     supervisorSource: snapshot.thread.lastSupervisorSource || "",
+    supervisorPerspectiveRows,
+    supervisorPerspectiveSummary: supervisorPerspectiveRows
+      .map((row) => `${row.label}：${row.text}`)
+      .join("；"),
     needsIndependentVerification: Boolean(
       snapshot.thread.supervisorNeedsIndependentVerification,
     ),
@@ -3167,6 +3225,8 @@ function buildThreadMirror(thread, state, overrides = {}) {
       overrides.lastSupervisorAcceptanceFocus ??
       thread.lastSupervisorAcceptanceFocus ??
       [],
+    lastSupervisorRisks:
+      overrides.lastSupervisorRisks ?? thread.lastSupervisorRisks ?? [],
     lastSupervisorVerificationStatus:
       overrides.lastSupervisorVerificationStatus ??
       thread.lastSupervisorVerificationStatus ??
@@ -5454,6 +5514,7 @@ export async function reviewCodexMilestone(
       supervisorNeedsIndependentVerification: Boolean(review.needsIndependentVerification),
       lastSupervisorVerificationCommands: review.verificationCommands,
       lastSupervisorAcceptanceFocus: review.acceptanceFocus,
+      lastSupervisorRisks: review.risks,
       lastSupervisorVerificationStatus: verification.status,
       lastSupervisorVerificationSummary: verification.summary,
       lastSupervisorVerificationResults: verification.results,

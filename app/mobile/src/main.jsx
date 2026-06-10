@@ -536,6 +536,14 @@ function StatusBlock({ mobileView, productionStatus, productionPreflight, status
         ]
       : null,
     ["独立验收", process.supervisorVerificationLabel || process.supervisorVerificationStatus],
+    process.supervisorPerspectiveRows?.length
+      ? [
+          "NPC 视角",
+          process.supervisorPerspectiveRows
+            .map((row) => `${row.label}：${row.text}`)
+            .join("；"),
+        ]
+      : null,
     ["验收动作", process.supervisorVerificationAction],
     [
       "截图证据",

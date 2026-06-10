@@ -624,6 +624,39 @@ test("exportMobileView exposes supervisor review and next instruction for monito
   assert.match(mobile.processStatus.acceptanceFocusPreview, /\u9996\u9875\u72b6\u6001/);
 });
 
+test("exportMobileView exposes structured supervisor perspectives for PM QA and user review", async () => {
+  const configRoot = await createWorkspace();
+  await ensureLoopArtifacts(configRoot);
+  await saveThreadBinding(configRoot, {
+    workspaceName: "demo",
+    threadTitle: "结构化监督视角",
+    threadId: "thread-supervisor-perspectives",
+    singleThreadMode: true,
+  });
+  await reviewCodexMilestone(configRoot, {
+    generateMilestoneReview: async () => ({
+      summary: "监督复盘：Codex 已完成移动端历史对话，但还需要控制范围并补齐真实用户验收。",
+      nextInstruction: "下一轮先修复移动端状态判断不清楚的问题，再补一条验证证据。",
+      shouldContinue: true,
+      needsIndependentVerification: true,
+      verificationCommands: ["npm run build:mobile"],
+      acceptanceFocus: ["手机 10 秒内能判断当前任务是否健康", "历史对话和补充引导入口是否清楚"],
+      risks: ["不要扩展到新功能", "避免在 Codex 未完成时追发"],
+    }),
+  });
+
+  const mobile = await exportMobileView(configRoot);
+
+  assert.deepEqual(
+    mobile.processStatus.supervisorPerspectiveRows.map((row) => row.label),
+    ["产品经理", "测试人员", "真实用户"],
+  );
+  assert.match(mobile.processStatus.supervisorPerspectiveRows[0].text, /控制范围|新功能/);
+  assert.match(mobile.processStatus.supervisorPerspectiveRows[1].text, /npm run build:mobile|验证证据/);
+  assert.match(mobile.processStatus.supervisorPerspectiveRows[2].text, /10 秒|历史对话/);
+  assert.match(mobile.processStatus.supervisorPerspectiveSummary, /产品经理|测试人员|真实用户/);
+});
+
 test("exportMobileView exposes independent supervisor verification result", async () => {
   const configRoot = await createWorkspace();
   await ensureLoopArtifacts(configRoot);

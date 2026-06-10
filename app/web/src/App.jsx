@@ -1683,6 +1683,14 @@ function StatusSummaryPanel({
     processStatus?.hasSupervisorReview
       ? ["监督复盘", processStatus?.supervisorReview || "已完成监督复盘"]
       : null,
+    processStatus?.supervisorPerspectiveRows?.length
+      ? [
+          "NPC 视角",
+          processStatus.supervisorPerspectiveRows
+            .map((row) => `${row.label}：${row.text}`)
+            .join("；"),
+        ]
+      : null,
     processStatus?.hasSupervisorReview
       ? ["下一条指令", processStatus?.supervisorInstructionPreview || "等待生成下一条指令"]
       : null,

@@ -104,8 +104,9 @@ test("mobile app surfaces production monitoring signals in one compact status bl
   assert.match(source, /已合并补充/);
   assert.match(source, /supervisorVerificationLabel/);
   assert.match(source, /supervisorVerificationAction/);
+  assert.match(source, /supervisorPerspectiveRows/);
   assert.match(source, /latestInstructionSourceDetail/);
-  assert.match(source, /状态细节|等待原因|独立验收|模型来源/);
+  assert.match(source, /状态细节|等待原因|独立验收|模型来源|NPC 视角/);
   assert.match(styleSource, /\.status-detail/);
   assert.match(styleSource, /\.status-detail-grid/);
 });
