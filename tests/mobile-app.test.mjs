@@ -52,6 +52,7 @@ test("mobile app uses shared conversation items and collapses Codex-style detail
   assert.match(source, /detailBlocks/);
   assert.match(source, /conversation-detail-block/);
   assert.match(source, /collapsedByDefault/);
+  assert.match(source, /block\.displayLabel \|\| block\.summary/);
   assert.match(styleSource, /\.conversation-detail-block/);
   assert.match(styleSource, /\.conversation-detail-body/);
 });

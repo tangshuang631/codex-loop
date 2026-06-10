@@ -2641,6 +2641,26 @@ function conversationDetailSummary(kind, text) {
   return `${prefix}：${summarizeForFollowup(text, 96) || "点击展开查看完整内容"}`;
 }
 
+function conversationDetailTitle(kind) {
+  return {
+    command_output: "已运行命令",
+    file_change: "已编辑文件",
+    test_log: "验证日志",
+    screenshot: "截图证据",
+    runtime_detail: "运行详情",
+  }[kind] || "运行详情";
+}
+
+function conversationDetailCountLabel(kind, copyTargets = []) {
+  const commandCount = copyTargets.filter((target) => target.kind === "command").length;
+  const fileCount = copyTargets.filter((target) => target.kind === "file").length;
+  if (kind === "command_output") return `${Math.max(1, commandCount)} 条命令`;
+  if (kind === "file_change") return `${Math.max(1, fileCount)} 个文件`;
+  if (kind === "test_log") return "1 条日志";
+  if (kind === "screenshot") return "1 张截图";
+  return "1 条详情";
+}
+
 function dedupeCopyTargets(targets = []) {
   const seen = new Set();
   const nextTargets = [];
@@ -2700,13 +2720,19 @@ function buildConversationDetailBlocks(text, { force = false } = {}) {
     /```|TAP version|npm run|node --test|diff --git|Exit code|已修改|截图|\.png|app[\\/]/i.test(value);
   if (!shouldCollapse) return [];
   const kind = classifyConversationDetail(value);
+  const copyTargets = extractConversationCopyTargets(value);
+  const title = conversationDetailTitle(kind);
+  const countLabel = conversationDetailCountLabel(kind, copyTargets);
   return [
     {
       kind,
+      title,
+      countLabel,
+      displayLabel: `${title} · ${countLabel}`,
       summary: conversationDetailSummary(kind, value),
       text: value,
       collapsedByDefault: true,
-      copyTargets: extractConversationCopyTargets(value),
+      copyTargets,
     },
   ];
 }

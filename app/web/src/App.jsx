@@ -1793,7 +1793,7 @@ function ConversationDetailBlocks({ blocks = [] }) {
           key={`${block.kind || "detail"}-${index}`}
           open={block.collapsedByDefault === false}
         >
-          <summary>{formatValue(block.summary, "查看详情")}</summary>
+          <summary>{formatValue(block.displayLabel || block.summary, "查看详情")}</summary>
           {Array.isArray(block.copyTargets) && block.copyTargets.length ? (
             <div className="conversation-detail-actions">
               {block.copyTargets.map((target, targetIndex) => (

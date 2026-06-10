@@ -183,6 +183,9 @@ test("exportMobileView returns shared Codex-style conversation items with collap
   assert.ok(detailItem, "长命令、文件改动或测试日志应默认收纳成详情块。");
   assert.equal(detailItem.detailBlocks[0].collapsedByDefault, true);
   assert.match(detailItem.detailBlocks[0].kind, /command_output|file_change|test_log|runtime_detail/);
+  assert.match(detailItem.detailBlocks[0].title, /已运行|已编辑|验证|运行详情|截图/);
+  assert.match(detailItem.detailBlocks[0].countLabel, /\d+ 条命令|\d+ 个文件|\d+ 条日志|\d+ 张截图|\d+ 条详情/);
+  assert.match(detailItem.detailBlocks[0].displayLabel, /已运行|已编辑|验证|运行详情|截图/);
   assert.match(detailItem.detailBlocks[0].summary, /命令|文件|验证|详情|日志/);
   assert.match(detailItem.detailBlocks[0].text, /npm run build:mobile|app\/web\/src\/App\.jsx/);
   assert.ok(
