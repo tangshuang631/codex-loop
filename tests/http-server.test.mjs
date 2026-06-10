@@ -1659,6 +1659,60 @@ test("handler dispatches current loop supervisor route", async () => {
   assert.match(chunks.join(""), /10 秒内看懂当前进程/);
 });
 
+test("handler dispatches supervisor review backfill route", async () => {
+  let reviewed = false;
+  const handler = buildHandler({
+    operations: {
+      readLoopSnapshot: async () => ({}),
+      exportLoopSummary: async () => ({}),
+      startRun: async () => ({}),
+      renameLoop: async () => ({}),
+      requestGracefulStop: async () => ({}),
+      updateBudgets: async () => ({}),
+      updateLoopSupervisor: async () => ({}),
+      ensureSupervisorReview: async () => {
+        reviewed = true;
+        return {
+          reviewed: true,
+          thread: {
+            latestEventType: "supervisor_review_completed",
+          },
+        };
+      },
+      saveThreadBinding: async () => ({}),
+      syncCodexThreadMirror: async () => ({}),
+      savePendingGuidance: async () => ({}),
+      recordHeartbeat: async () => ({}),
+      recordError: async () => ({}),
+      saveUserOverrides: async () => ({}),
+    },
+  });
+
+  const chunks = [];
+  const response = {
+    writeHead(statusCode, headers) {
+      this.statusCode = statusCode;
+      this.headers = headers;
+    },
+    end(text) {
+      chunks.push(text);
+    },
+  };
+
+  await handler(
+    {
+      method: "POST",
+      url: "/api/supervisor/review",
+      [Symbol.asyncIterator]: async function* iterator() {},
+    },
+    response,
+  );
+
+  assert.equal(response.statusCode, 200);
+  assert.equal(reviewed, true);
+  assert.match(chunks.join(""), /supervisor_review_completed/);
+});
+
 test("handler dispatches run turn route", async () => {
   const handler = buildHandler({
     operations: {

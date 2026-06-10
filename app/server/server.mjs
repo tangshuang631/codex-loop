@@ -4,6 +4,7 @@ import {
   deleteLoop,
   exportMobileView,
   exportLoopSummary,
+  ensureSupervisorReview,
   getLoopCreationAssistantState,
   goBackLoopCreationAssistant,
   listLoops,
@@ -167,6 +168,7 @@ export function buildHandler({
       requestGracefulStop,
       runLoopTurn,
       sendPendingGuidanceOnce,
+      ensureSupervisorReview,
       clearPendingGuidance,
       savePendingGuidance,
       updateBudgets,
@@ -614,6 +616,15 @@ export function buildHandler({
           response,
           200,
           await operations.updateLoopSupervisor(process.cwd(), body),
+        );
+        return;
+      }
+
+      if (request.method === "POST" && request.url === "/api/supervisor/review") {
+        sendJson(
+          response,
+          200,
+          await operations.ensureSupervisorReview(process.cwd()),
         );
         return;
       }

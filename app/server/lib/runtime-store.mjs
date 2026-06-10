@@ -19,7 +19,10 @@ import {
   generatePromptWithOllama,
 } from "./ollama-prompt-generator.mjs";
 import { resolveProjectLayout } from "./paths.mjs";
-import { budgetLimitReached } from "./loop-core/controller-gates.mjs";
+import {
+  budgetLimitReached,
+  completionNeedsSupervisorReview,
+} from "./loop-core/controller-gates.mjs";
 import { classifyContinuationFailure } from "./runtime-governance/failure-classifier.mjs";
 import {
   defaultRunSupervisorVerificationCommand,
@@ -5078,6 +5081,29 @@ export async function reviewCodexMilestone(
   });
 
   return readLoopSnapshot(startDir);
+}
+
+export async function ensureSupervisorReview(
+  startDir = process.cwd(),
+  reviewOptions = {},
+) {
+  const snapshot = await ensureLoopArtifacts(startDir);
+  if (!completionNeedsSupervisorReview(snapshot.thread)) {
+    return {
+      reviewed: false,
+      reason: snapshot.thread.lastSupervisorReviewAt
+        ? "当前 Codex 完成结果已经完成监督复盘。"
+        : "当前没有需要监督复盘的 Codex 完成结果。",
+      ...snapshot,
+    };
+  }
+
+  const reviewed = await reviewCodexMilestone(startDir, reviewOptions);
+  return {
+    reviewed: true,
+    reason: "已补齐当前 Codex 完成结果的监督复盘。",
+    ...reviewed,
+  };
 }
 
 export async function syncCodexThreadMirror(

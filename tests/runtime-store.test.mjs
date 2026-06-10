@@ -11,6 +11,7 @@ import {
   exportLoopSummary,
   exportMobileView,
   ensureLoopArtifacts,
+  ensureSupervisorReview,
   goBackLoopCreationAssistant,
   getLoopCreationAssistantState,
   listLoops,
@@ -1196,6 +1197,93 @@ test("milestone review stores supervisor guidance that the next loop turn uses",
 
   assert.match(dispatchedPrompt, /真实用户和测试人员视角/);
   assert.match(dispatchedPrompt, /不要扩大到新功能/);
+});
+
+test("ensureSupervisorReview backfills review for a completed Codex turn", async () => {
+  const configRoot = await createWorkspace();
+  await ensureLoopArtifacts(configRoot);
+  await saveThreadBinding(configRoot, {
+    workspaceName: "demo",
+    threadTitle: "补复盘线程",
+    threadId: "thread-supervisor-backfill",
+    singleThreadMode: true,
+  });
+  await runLoopTurn(configRoot, {
+    dispatchThreadMessage: async () => ({
+      deliveryObserved: true,
+      completionObserved: false,
+      lastMessage: "",
+    }),
+  });
+  await syncCodexThreadMirror(configRoot, {
+    latestCodexSummary: "Codex 已完成恢复后的任务结果，但还没有本地监督复盘。",
+  });
+
+  let reviewCount = 0;
+  const reviewed = await ensureSupervisorReview(configRoot, {
+    generateMilestoneReview: async () => {
+      reviewCount += 1;
+      return {
+        summary: "监督复盘：已补齐恢复回复后的复盘。",
+        nextInstruction: "下一步继续做最小可验证改动，不要重复发送旧指令。",
+        shouldContinue: true,
+        needsIndependentVerification: false,
+        verificationCommands: [],
+        acceptanceFocus: ["确认恢复回复已经进入复盘链路"],
+        risks: [],
+      };
+    },
+  });
+
+  assert.equal(reviewCount, 1);
+  assert.equal(reviewed.reviewed, true);
+  assert.equal(reviewed.thread.latestEventType, "supervisor_review_completed");
+  assert.match(reviewed.thread.lastSupervisorReview, /已补齐恢复回复后的复盘/);
+});
+
+test("ensureSupervisorReview does not duplicate an already reviewed completion", async () => {
+  const configRoot = await createWorkspace();
+  await ensureLoopArtifacts(configRoot);
+  await saveThreadBinding(configRoot, {
+    workspaceName: "demo",
+    threadTitle: "不重复复盘线程",
+    threadId: "thread-supervisor-no-duplicate",
+    singleThreadMode: true,
+  });
+  await runLoopTurn(configRoot, {
+    dispatchThreadMessage: async () => ({
+      deliveryObserved: true,
+      completionObserved: false,
+      lastMessage: "",
+    }),
+  });
+  await syncCodexThreadMirror(configRoot, {
+    latestCodexSummary: "Codex 已完成一轮，并已经复盘。",
+  });
+  await reviewCodexMilestone(configRoot, {
+    generateMilestoneReview: async () => ({
+      summary: "监督复盘：已经完成。",
+      nextInstruction: "继续下一批。",
+      shouldContinue: true,
+      needsIndependentVerification: false,
+      verificationCommands: [],
+      acceptanceFocus: [],
+      risks: [],
+    }),
+  });
+
+  let reviewCount = 0;
+  const result = await ensureSupervisorReview(configRoot, {
+    generateMilestoneReview: async () => {
+      reviewCount += 1;
+      throw new Error("不应该重复复盘");
+    },
+  });
+
+  assert.equal(reviewCount, 0);
+  assert.equal(result.reviewed, false);
+  assert.match(result.reason, /已经完成监督复盘|不需要复盘/);
+  assert.equal(result.thread.latestEventType, "supervisor_review_completed");
 });
 
 test("milestone review auto-resolves ordinary product confirmation instead of stopping", async () => {
