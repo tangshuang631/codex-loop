@@ -89,6 +89,14 @@ function formatReadinessStage(readiness = {}) {
   return "等待判断";
 }
 
+function formatProductionTarget(target = {}) {
+  return [
+    asText(target.threadTitle || target.workspaceName || target.runId),
+    asText(target.workspaceRoot),
+    asText(target.threadId),
+  ].filter(Boolean).join(" / ");
+}
+
 function dedupe(entries) {
   const seen = new Set();
   return entries.filter((entry) => {
@@ -232,6 +240,7 @@ function StatusBlock({ mobileView, productionStatus, statusText }) {
     (section) => section.label === "真实运行观测",
   );
   const readiness = productionStatus?.readiness || {};
+  const productionTarget = formatProductionTarget(productionStatus?.target);
   const readinessLabel = formatReadinessStage(readiness);
   const productionLabel =
     productionStatus?.status === "passed"
@@ -249,6 +258,7 @@ function StatusBlock({ mobileView, productionStatus, statusText }) {
   const rows = [
     ["当前状态", process.monitorLabel || mobileView?.loop?.modeLabel || "监控中"],
     ["下一步", process.nextAction || mobileView?.suggestedAction || "等待下一轮更新"],
+    productionTarget ? ["验证目标", productionTarget] : null,
     productionStatus ? ["生产阶段", `${readinessLabel} · ${readinessDetail}`] : null,
     productionStatus ? ["生产观测", `${productionLabel} · ${productionDetail}`] : null,
     ["最近指令", process.latestInstructionSourceLabel || "等待生成"],

@@ -752,6 +752,171 @@ test("production status treats one real closed loop as trial evidence instead of
   }
 });
 
+test("production status includes the bound task target before asking for another real loop", async () => {
+  const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), "codex-loop-status-"));
+  const writeReport = async (dirLabel, fileName, report) => {
+    const dir = path.join(tempRoot, ...dirLabel.split("/"));
+    await fs.mkdir(dir, { recursive: true });
+    await fs.writeFile(path.join(dir, fileName), `${JSON.stringify(report, null, 2)}\n`, "utf8");
+  };
+  const now = "2026-06-10T14:20:00.000Z";
+  await fs.writeFile(
+    path.join(tempRoot, "config.json"),
+    `${JSON.stringify({ currentRunId: "assistant-loop" }, null, 2)}\n`,
+    "utf8",
+  );
+  await writeReport("runtime/production-checks", "latest-production-check.json", {
+    status: "passed",
+    finishedAt: now,
+    durationMs: 1,
+    checks: [{ status: "passed" }],
+  });
+  await writeReport("runtime/frontend-evidence", "latest-frontend-evidence.json", {
+    status: "passed",
+    finishedAt: now,
+    durationMs: 1,
+    results: [{ status: "passed" }],
+  });
+  await writeReport("runtime/longrun-smoke", "latest-longrun-smoke.json", {
+    status: "passed",
+    finishedAt: now,
+    durationMs: 1,
+    checks: [{ status: "passed" }],
+  });
+  await writeReport("runtime/production-observations", "one-cycle-production-observation.json", {
+    status: "attention",
+    finishedAt: now,
+    durationMs: 1,
+    summary: "只观察到 1 轮完整闭环，说明链路可试用，但还不足以证明长期稳定运行。",
+    nextAction: "再跑至少 1 轮真实任务，确认发送、Codex 完成和 NPC 复盘能连续出现。",
+    counters: {
+      dispatches: 1,
+      completions: 1,
+      supervisorReviews: 1,
+      closedLoops: 1,
+    },
+  });
+  await fs.mkdir(path.join(tempRoot, "runtime", "assistant-loop"), { recursive: true });
+  await fs.writeFile(
+    path.join(tempRoot, "runtime", "assistant-loop", "thread.json"),
+    `${JSON.stringify({
+      threadId: "thread-123",
+      threadTitle: "按清单继续开发",
+      workspaceRoot: "E:\\2026\\opencow",
+      workspaceName: "opencow",
+      continuationStatus: "idle",
+    }, null, 2)}\n`,
+    "utf8",
+  );
+
+  const previousCwd = process.cwd();
+  try {
+    process.chdir(tempRoot);
+    const status = await readProductionStatusSummary({
+      refreshObservation: false,
+      now: new Date("2026-06-10T14:20:00.000Z"),
+    });
+
+    assert.equal(status.readiness.stage, "trial");
+    assert.equal(status.target.runId, "assistant-loop");
+    assert.equal(status.target.threadId, "thread-123");
+    assert.equal(status.target.threadTitle, "按清单继续开发");
+    assert.equal(status.target.workspaceRoot, "E:\\2026\\opencow");
+    assert.match(status.readiness.nextAction, /当前验证目标：按清单继续开发/);
+    assert.match(status.readiness.nextAction, /E:\\2026\\opencow/);
+    assert.match(status.readiness.nextAction, /确认这就是要继续的任务/);
+  } finally {
+    process.chdir(previousCwd);
+  }
+});
+
+test("production status completes the target workspace from the loop registry", async () => {
+  const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), "codex-loop-status-"));
+  const writeReport = async (dirLabel, fileName, report) => {
+    const dir = path.join(tempRoot, ...dirLabel.split("/"));
+    await fs.mkdir(dir, { recursive: true });
+    await fs.writeFile(path.join(dir, fileName), `${JSON.stringify(report, null, 2)}\n`, "utf8");
+  };
+  const now = "2026-06-10T14:20:00.000Z";
+  await fs.writeFile(
+    path.join(tempRoot, "config.json"),
+    `${JSON.stringify({ currentRunId: "assistant-loop" }, null, 2)}\n`,
+    "utf8",
+  );
+  await fs.mkdir(path.join(tempRoot, "settings"), { recursive: true });
+  await fs.writeFile(
+    path.join(tempRoot, "settings", "loops.json"),
+    `${JSON.stringify({
+      currentLoopId: "assistant-loop",
+      loops: [
+        {
+          id: "assistant-loop",
+          runId: "assistant-loop",
+          name: "按清单继续开发",
+          projectName: "opencow",
+          workspaceRoot: "E:\\2026\\opencow",
+          threadBinding: {
+            threadId: "thread-123",
+            threadTitle: "按清单继续开发",
+          },
+        },
+      ],
+    }, null, 2)}\n`,
+    "utf8",
+  );
+  await writeReport("runtime/production-checks", "latest-production-check.json", {
+    status: "passed",
+    finishedAt: now,
+    durationMs: 1,
+    checks: [{ status: "passed" }],
+  });
+  await writeReport("runtime/frontend-evidence", "latest-frontend-evidence.json", {
+    status: "passed",
+    finishedAt: now,
+    durationMs: 1,
+    results: [{ status: "passed" }],
+  });
+  await writeReport("runtime/longrun-smoke", "latest-longrun-smoke.json", {
+    status: "passed",
+    finishedAt: now,
+    durationMs: 1,
+    checks: [{ status: "passed" }],
+  });
+  await writeReport("runtime/production-observations", "one-cycle-production-observation.json", {
+    status: "attention",
+    finishedAt: now,
+    durationMs: 1,
+    summary: "只观察到 1 轮完整闭环，说明链路可试用，但还不足以证明长期稳定运行。",
+    counters: { dispatches: 1, completions: 1, supervisorReviews: 1, closedLoops: 1 },
+  });
+  await fs.mkdir(path.join(tempRoot, "runtime", "assistant-loop"), { recursive: true });
+  await fs.writeFile(
+    path.join(tempRoot, "runtime", "assistant-loop", "thread.json"),
+    `${JSON.stringify({
+      threadId: "thread-123",
+      threadTitle: "按清单继续开发",
+      workspaceName: "按清单继续开发",
+      continuationStatus: "idle",
+    }, null, 2)}\n`,
+    "utf8",
+  );
+
+  const previousCwd = process.cwd();
+  try {
+    process.chdir(tempRoot);
+    const status = await readProductionStatusSummary({
+      refreshObservation: false,
+      now: new Date("2026-06-10T14:20:00.000Z"),
+    });
+
+    assert.equal(status.target.workspaceRoot, "E:\\2026\\opencow");
+    assert.equal(status.target.projectName, "opencow");
+    assert.match(status.readiness.nextAction, /E:\\2026\\opencow/);
+  } finally {
+    process.chdir(previousCwd);
+  }
+});
+
 test("production status exposes the two-cycle live evidence threshold", async () => {
   const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), "codex-loop-status-"));
   const writeReport = async (dirLabel, fileName, report) => {

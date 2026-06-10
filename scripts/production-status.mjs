@@ -42,6 +42,24 @@ function resolveLabel(label, root = currentRoot()) {
   return path.join(root, ...label.split("/"));
 }
 
+function cleanText(value, fallback = "") {
+  return typeof value === "string" && value.trim() ? value.trim() : fallback;
+}
+
+function formatTargetLabel(target = {}) {
+  return [
+    cleanText(target.threadTitle, cleanText(target.workspaceName, cleanText(target.runId, "当前任务"))),
+    cleanText(target.workspaceRoot),
+    cleanText(target.threadId),
+  ].filter(Boolean).join(" / ");
+}
+
+function appendTargetConfirmation(action, target = {}) {
+  const targetLabel = formatTargetLabel(target);
+  if (!targetLabel) return action;
+  return `${action} 当前验证目标：${targetLabel}。触发真实循环前，请确认这就是要继续的任务。`;
+}
+
 async function readLatestReport(kind, {
   root = currentRoot(),
   now = new Date(),
@@ -256,7 +274,7 @@ function deriveOverallStatus(items) {
   return "passed";
 }
 
-function deriveReadiness(items) {
+function deriveReadiness(items, target = {}) {
   const codeGateLabels = new Set(["最近生产检查", "前端证据", "长跑节奏"]);
   const codeGatesPassed = items
     .filter((item) => codeGateLabels.has(item.label))
@@ -307,7 +325,10 @@ function deriveReadiness(items) {
       return {
         stage: "trial",
         summary: "代码闸门已通过，并已观察到 1 轮真实闭环；适合短时试用，但还缺少第 2 轮连续闭环证据。",
-        nextAction: observation.nextAction || "再跑至少 1 轮真实任务，确认发送、Codex 完成和 NPC 复盘能连续出现。",
+        nextAction: appendTargetConfirmation(
+          observation.nextAction || "再跑至少 1 轮真实任务，确认发送、Codex 完成和 NPC 复盘能连续出现。",
+          target,
+        ),
       };
     }
   }
@@ -324,7 +345,10 @@ function deriveReadiness(items) {
     return {
       stage: "trial",
       summary: "代码闸门已通过，适合短时真实试用；但还缺少真实 2 轮闭环证据，暂不适合提高自动化时长。",
-      nextAction: "启动真实任务，观察至少 2 次发送、Codex 完成、NPC 复盘的连续闭环，再判断是否提高自动化时长。",
+      nextAction: appendTargetConfirmation(
+        "启动真实任务，观察至少 2 次发送、Codex 完成、NPC 复盘的连续闭环，再判断是否提高自动化时长。",
+        target,
+      ),
     };
   }
 
@@ -342,10 +366,12 @@ export async function readProductionStatusSummary({
 } = {}) {
   const startedAt = new Date();
   const items = [];
+  const resolvedRunId = runId || await resolveObservedRunId(currentRoot());
+  const target = await readProductionTarget({ root: currentRoot(), runId: resolvedRunId });
 
   for (const kind of reportKinds) {
     if (refreshObservation && kind.key === "productionObservation") {
-      const liveObservation = await readLiveProductionObservation(kind, { runId, now });
+      const liveObservation = await readLiveProductionObservation(kind, { runId: resolvedRunId, now });
       if (liveObservation?.status === "stale") {
         const latestReport = await readLatestReport(kind, { now });
         items.push(latestReport.status && !["missing", "stale"].includes(latestReport.status)
@@ -365,11 +391,57 @@ export async function readProductionStatusSummary({
     status,
     startedAt: startedAt.toISOString(),
     finishedAt: new Date().toISOString(),
-    readiness: deriveReadiness(items),
+    target,
+    readiness: deriveReadiness(items, target),
     sections: items,
     nextActionLabel: "下一步建议",
     nextAction: deriveNextAction(items),
   };
+}
+
+async function readProductionTarget({
+  root = currentRoot(),
+  runId = "assistant-loop",
+} = {}) {
+  const threadPath = path.join(root, "runtime", runId, "thread.json");
+  const loop = await readProductionTargetLoop({ root, runId });
+  let thread = {};
+  try {
+    thread = JSON.parse(await fs.readFile(threadPath, "utf8"));
+  } catch (error) {
+    if (error?.code !== "ENOENT") throw error;
+  }
+  const binding = loop?.threadBinding || {};
+
+  return {
+    runId,
+    threadId: cleanText(thread.threadId, cleanText(binding.threadId)),
+    threadTitle: cleanText(thread.threadTitle, cleanText(binding.threadTitle, cleanText(loop?.threadTitle))),
+    workspaceRoot: cleanText(thread.workspaceRoot, cleanText(binding.workspaceRoot, cleanText(loop?.workspaceRoot))),
+    workspaceName: cleanText(thread.workspaceName, cleanText(binding.workspaceName, cleanText(loop?.projectName))),
+    projectName: cleanText(loop?.projectName),
+    loopName: cleanText(loop?.name),
+    continuationStatus: cleanText(thread.continuationStatus),
+  };
+}
+
+async function readProductionTargetLoop({
+  root = currentRoot(),
+  runId = "assistant-loop",
+} = {}) {
+  const registryPath = path.join(root, "settings", "loops.json");
+  try {
+    const registry = JSON.parse(await fs.readFile(registryPath, "utf8"));
+    const loops = Array.isArray(registry.loops) ? registry.loops : [];
+    return (
+      loops.find((loop) => loop.id === runId || loop.runId === runId) ||
+      loops.find((loop) => loop.id === registry.currentLoopId || loop.runId === registry.currentLoopId) ||
+      null
+    );
+  } catch (error) {
+    if (error?.code === "ENOENT") return null;
+    throw error;
+  }
 }
 
 async function resolveObservedRunId(root = currentRoot()) {

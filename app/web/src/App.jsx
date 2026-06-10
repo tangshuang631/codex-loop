@@ -584,6 +584,16 @@ function formatReadinessStage(readiness = {}) {
   return "等待判断";
 }
 
+function formatProductionTarget(target = {}) {
+  return [
+    formatValue(target.threadTitle || target.workspaceName || target.runId, ""),
+    formatValue(target.workspaceRoot, ""),
+    target.threadId ? shortThreadId(target.threadId) : "",
+  ]
+    .filter(Boolean)
+    .join(" / ");
+}
+
 function isUsefulTranscriptEntry(entry) {
   const summary = formatValue(entry?.summary, "");
   if (!summary) {
@@ -1522,6 +1532,7 @@ function StatusSummaryPanel({
     (section) => section.label === "真实运行观测",
   );
   const readiness = productionStatus?.readiness || {};
+  const productionTarget = formatProductionTarget(productionStatus?.target);
   const readinessLabel = formatReadinessStage(readiness);
   const productionLabel =
     productionStatus?.status === "passed"
@@ -1560,10 +1571,11 @@ function StatusSummaryPanel({
     ["当前", `${modeText} · ${monitorText}`],
     ["说明", processDetail],
     processStatus?.nextAction ? ["下一步", processStatus.nextAction] : null,
+    productionTarget ? ["验证目标", productionTarget] : null,
     productionStatus ? ["生产阶段", `${readinessLabel} · ${readinessDetail}`] : null,
     productionStatus ? ["生产观测", `${productionLabel} · ${productionDetail}`] : null,
   ].filter(Boolean);
-  const primaryLabels = new Set(["当前", "说明", "下一步", "生产阶段", "生产观测"]);
+  const primaryLabels = new Set(["当前", "说明", "下一步", "验证目标", "生产阶段", "生产观测"]);
   const detailRows = [
     controllerStatus?.label
       ? [

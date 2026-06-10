@@ -104,7 +104,7 @@ test("dashboard folds low-frequency status details by default", async () => {
   const stylesSource = await fs.readFile("app/web/src/styles.css", "utf8");
 
   assert.match(appSource, /primaryRows/);
-  assert.match(appSource, /const primaryLabels = new Set\(\["当前", "说明", "下一步", "生产阶段", "生产观测"\]\)/);
+  assert.match(appSource, /const primaryLabels = new Set\(\["当前", "说明", "下一步", "验证目标", "生产阶段", "生产观测"\]\)/);
   assert.match(appSource, /rows\.filter\(\(\[label\]\) => primaryLabels\.has\(label\)\)/);
   assert.match(appSource, /detailRows/);
   assert.match(appSource, /status-detail-fold/);
@@ -118,6 +118,8 @@ test("dashboard keeps production status inside folded status details", async () 
   const appSource = await fs.readFile("app/web/src/App.jsx", "utf8");
 
   assert.match(appSource, /productionStatus/);
+  assert.match(appSource, /productionStatus\?\.target/);
+  assert.match(appSource, /验证目标/);
   assert.match(appSource, /requestJson\("\/production-status"\)\.catch/);
   assert.match(appSource, /readiness\?\.stage/);
   assert.match(appSource, /生产阶段/);
@@ -158,7 +160,7 @@ test("dashboard keeps next action primary and folds independent verification det
   const verificationRowIndex = appSource.indexOf('verificationText ? ["独立验收"');
   const holdReasonRowIndex = appSource.indexOf("processStatus?.holdReason");
   const nextActionRowIndex = appSource.indexOf("processStatus?.nextAction");
-  const primaryLabelsIndex = appSource.indexOf('const primaryLabels = new Set(["当前", "说明", "下一步", "生产阶段", "生产观测"])');
+  const primaryLabelsIndex = appSource.indexOf('const primaryLabels = new Set(["当前", "说明", "下一步", "验证目标", "生产阶段", "生产观测"])');
   const productionStageRowIndex = appSource.indexOf('productionStatus ? ["生产阶段"');
   const detailRowsIndex = appSource.indexOf("const detailRows = [");
   const productionRowIndex = appSource.indexOf('productionStatus ? ["生产观测"');
