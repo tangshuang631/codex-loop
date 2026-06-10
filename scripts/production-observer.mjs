@@ -143,6 +143,18 @@ function deriveStatusAndAdvice(counters, timeline) {
     };
   }
 
+  const types = new Set(timeline.map((event) => event.type));
+  if (
+    types.has("codex_followup_sent_waiting") &&
+    !types.has("codex_followup_completed")
+  ) {
+    return {
+      status: "waiting",
+      summary: "指令已送达，正在等待 Codex 完成这一轮。",
+      nextAction: "不要重复发送；如需补充方向，先写入下一轮引导，等 Codex 完成后再合并发送。",
+    };
+  }
+
   if (counters.dispatches > 0 && counters.completions > 0 && counters.supervisorReviews > 0) {
     return {
       status: "passed",
@@ -168,6 +180,17 @@ function deriveDiagnosis(counters, timeline) {
   }
 
   if (counters.failures <= 0) {
+    const types = new Set(timeline.map((event) => event.type));
+    if (
+      types.has("codex_followup_sent_waiting") &&
+      !types.has("codex_followup_completed")
+    ) {
+      return {
+        category: "codex_waiting_after_delivery",
+        userMessage: "指令已经送达 Codex，正在等待这一轮完成。",
+        nextAction: "不要重复发送；可以先写入下一轮补充，等 Codex 完成后再由本地模型合并处理。",
+      };
+    }
     return {
       category: "healthy_or_waiting",
       userMessage: "当前周期没有失败记录。",

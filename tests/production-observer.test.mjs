@@ -157,6 +157,45 @@ test("production observer diagnoses sent-but-timeout failures separately from di
   assert.match(report.diagnosis.nextAction, /不要立即连续补发/);
 });
 
+test("production observer reports delivered turns that are still waiting as waiting instead of failure", async () => {
+  const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), "codex-loop-observer-"));
+  const logDir = path.join(tempRoot, "runtime", "waiting-loop", "logs");
+  await fs.mkdir(logDir, { recursive: true });
+  await fs.writeFile(
+    path.join(logDir, "events.jsonl"),
+    [
+      {
+        type: "run_started_from_console",
+        at: "2026-06-10T14:00:00.000Z",
+      },
+      {
+        type: "codex_followup_dispatching",
+        at: "2026-06-10T14:01:00.000Z",
+        promptGenerator: "ollama",
+        promptPreview: "继续验证等待态。",
+      },
+      {
+        type: "codex_followup_sent_waiting",
+        at: "2026-06-10T14:01:02.000Z",
+        summary: "消息已送达绑定线程，正在等待 Codex 完成这一轮回复。",
+      },
+    ]
+      .map((event) => JSON.stringify(event))
+      .join("\n") + "\n",
+    "utf8",
+  );
+
+  const report = await buildProductionObservation({
+    root: tempRoot,
+    runId: "waiting-loop",
+  });
+
+  assert.equal(report.status, "waiting");
+  assert.equal(report.diagnosis.category, "codex_waiting_after_delivery");
+  assert.match(report.summary, /正在等待 Codex/);
+  assert.match(report.nextAction, /不要重复发送/);
+});
+
 test("production observer treats legacy received timeout details as delivered timeout", async () => {
   const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), "codex-loop-observer-"));
   const logDir = path.join(tempRoot, "runtime", "legacy-timeout-loop", "logs");

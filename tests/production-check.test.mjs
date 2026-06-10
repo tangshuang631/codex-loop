@@ -150,6 +150,65 @@ test("production status surfaces observation diagnosis as the actionable next st
   }
 });
 
+test("production status keeps delivered waiting observations as waiting instead of attention", async () => {
+  const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), "codex-loop-status-"));
+  const writeReport = async (dirLabel, fileName, report) => {
+    const dir = path.join(tempRoot, ...dirLabel.split("/"));
+    await fs.mkdir(dir, { recursive: true });
+    await fs.writeFile(path.join(dir, fileName), `${JSON.stringify(report, null, 2)}\n`, "utf8");
+  };
+  const now = new Date().toISOString();
+  await writeReport("runtime/production-checks", "latest-production-check.json", {
+    status: "passed",
+    finishedAt: now,
+    durationMs: 1,
+    checks: [{ status: "passed" }],
+  });
+  await writeReport("runtime/frontend-evidence", "latest-frontend-evidence.json", {
+    status: "passed",
+    finishedAt: now,
+    durationMs: 1,
+    results: [{ status: "passed" }],
+  });
+  await writeReport("runtime/longrun-smoke", "latest-longrun-smoke.json", {
+    status: "passed",
+    finishedAt: now,
+    durationMs: 1,
+    checks: [{ status: "passed" }],
+  });
+  await writeReport("runtime/production-observations", "latest-production-observation.json", {
+    status: "waiting",
+    finishedAt: now,
+    durationMs: 1,
+    summary: "指令已送达，正在等待 Codex 完成这一轮。",
+    nextAction: "不要重复发送；如需补充方向，先写入下一轮引导。",
+    diagnosis: {
+      category: "codex_waiting_after_delivery",
+      userMessage: "指令已经送达 Codex，正在等待这一轮完成。",
+      nextAction: "不要重复发送；可以先写入下一轮补充。",
+    },
+    counters: {
+      dispatches: 1,
+      completions: 0,
+      supervisorReviews: 0,
+    },
+  });
+
+  const previousCwd = process.cwd();
+  try {
+    process.chdir(tempRoot);
+    const status = await readProductionStatusSummary();
+    const observation = status.sections.find((section) => section.label === "真实运行观测");
+
+    assert.equal(status.status, "waiting");
+    assert.equal(observation.status, "waiting");
+    assert.match(observation.summary, /正在等待/);
+    assert.match(status.nextAction, /不要重复发送/);
+  } finally {
+    process.chdir(previousCwd);
+  }
+});
+
 test("docs make production readiness check the pre-use gate", async () => {
   const readme = await read("README.md");
   const checklist = await read("codex-loop6.7-13-29开发清单.md");

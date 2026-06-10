@@ -144,11 +144,25 @@ function deriveNextAction(items) {
   if (stale) {
     return `${stale.label}已过期，请重新运行 npm run production:check 后再判断是否适合继续长期运行。`;
   }
+  const waiting = items.find((item) => item.status === "waiting");
+  if (waiting) {
+    return `${waiting.label}正在等待：${waiting.nextAction || waiting.summary}`;
+  }
   const failed = items.find((item) => item.status && item.status !== "passed");
   if (failed) {
     return `先处理${failed.label}：${failed.nextAction || failed.summary}`;
   }
   return "可以进入真实任务使用；长时间运行仍建议保留人工观察和运行日志。";
+}
+
+function deriveOverallStatus(items) {
+  if (items.some((item) => item.status && !["passed", "waiting"].includes(item.status))) {
+    return "attention";
+  }
+  if (items.some((item) => item.status === "waiting")) {
+    return "waiting";
+  }
+  return "passed";
 }
 
 export async function readProductionStatusSummary() {
@@ -159,7 +173,7 @@ export async function readProductionStatusSummary() {
     items.push(await readLatestReport(kind));
   }
 
-  const status = items.every((item) => item.status === "passed") ? "passed" : "attention";
+  const status = deriveOverallStatus(items);
   return {
     title: "codex-loop 生产状态摘要",
     status,
