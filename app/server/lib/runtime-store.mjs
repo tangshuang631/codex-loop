@@ -2737,6 +2737,40 @@ function buildConversationDetailBlocks(text, { force = false } = {}) {
   ];
 }
 
+function derivePendingGuidanceStatus(processStatus = {}) {
+  const state = safeText(processStatus.state, "");
+  if (state === "codex_working") {
+    return {
+      status: "waiting_codex",
+      statusLabel: "等待 Codex 完成",
+      statusDetail: "Codex 正在处理当前轮，补充会先保存，完成后再交给本地模型 / NPC 合并。",
+      actionLabel: "等待完成",
+    };
+  }
+  if (state === "supervisor_reviewing") {
+    return {
+      status: "waiting_npc",
+      statusLabel: "等待 NPC 复盘",
+      statusDetail: "本地模型 / NPC 正在复盘 Codex 回复，补充会在复盘后合并进下一条指令。",
+      actionLabel: "等待复盘",
+    };
+  }
+  if (processStatus.canSendNextTurn) {
+    return {
+      status: "ready_to_merge",
+      statusLabel: "等待本地模型 / NPC 合并",
+      statusDetail: "Codex 当前空闲，可以由本地模型 / NPC 结合最新回复和你的补充生成下一条指令。",
+      actionLabel: "可发送",
+    };
+  }
+  return {
+    status: "blocked",
+    statusLabel: "暂不可发送",
+    statusDetail: processStatus.holdReason || processStatus.detail || "当前状态不适合发送下一条指令。",
+    actionLabel: "暂不可发送",
+  };
+}
+
 function normalizeConversationItem(entry = {}, fallback = {}) {
   const text = safeText(entry.text || entry.summary || entry.detail || entry.preview, "");
   if (!text) return null;
@@ -2854,6 +2888,7 @@ export async function exportMobileView(startDir = process.cwd()) {
   });
   const strategy = buildContinuationStrategy(snapshot);
   const processStatus = buildProcessStatus(snapshot);
+  const pendingGuidanceStatus = derivePendingGuidanceStatus(processStatus);
   const supervisor = snapshot.profile?.resolved?.conversation?.supervisor || {};
   const pendingGuidanceText = safeText(snapshot.thread.pendingUserGuidance, "");
   const boundThreadLabel = snapshot.thread.threadTitle || snapshot.thread.threadId;
@@ -2925,6 +2960,7 @@ export async function exportMobileView(startDir = process.cwd()) {
       mergeTimingLabel: "等 Codex 完成后合并到下一条指令",
       mergeProcessor: "ollama_npc",
       mergeProcessorLabel: "本地模型 / NPC 合并",
+      ...pendingGuidanceStatus,
       userMessage: "会等 Codex 完成当前任务后，再交给本地模型 / NPC 结合 Codex 回复合并成下一条指令。",
     },
     codexConversation: snapshot.codexConversation,

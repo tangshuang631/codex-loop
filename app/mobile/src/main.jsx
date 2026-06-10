@@ -508,11 +508,12 @@ function PendingGuidance({ pending, onEdit, onClear, disabled }) {
     <section className="pending-guidance">
       <div>
         <span>待合并</span>
+        {pending.statusLabel ? <em>{pending.statusLabel}</em> : null}
         <strong>{pending.preview || pending.text}</strong>
-        <p>{pending.userMessage || "会等 Codex 完成后交给本地模型 / NPC 合并，不会打断当前任务。"}</p>
+        <p>{pending.statusDetail || pending.userMessage || "会等 Codex 完成后交给本地模型 / NPC 合并，不会打断当前任务。"}</p>
       </div>
       <div className="mini-actions">
-        <button type="button" disabled={disabled} onClick={onEdit} aria-label="编辑待合并引导">
+        <button type="button" disabled={disabled} onClick={onEdit} aria-label={`${pending.actionLabel || "等待发送"}，编辑待合并引导`}>
           编辑
         </button>
         <button type="button" disabled={disabled} onClick={onClear} aria-label="撤回待合并引导">

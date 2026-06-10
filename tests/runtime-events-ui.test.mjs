@@ -652,7 +652,13 @@ test("mobile guidance uses server dispatch result instead of a fixed saved messa
   assert.match(mobileSource, /guidanceResult\?\.message/);
   assert.match(mobileSource, /guidanceResult\?\.dispatch === "sent"/);
   assert.match(mobileSource, /pendingGuidance\.userMessage/);
+  assert.match(mobileSource, /pendingGuidance\.statusLabel/);
+  assert.match(mobileSource, /pendingGuidance\.statusDetail/);
+  assert.match(mobileSource, /pendingGuidance\.actionLabel/);
   assert.match(mobileAppSource, /pending\.userMessage/);
+  assert.match(mobileAppSource, /pending\.statusLabel/);
+  assert.match(mobileAppSource, /pending\.statusDetail/);
+  assert.match(mobileAppSource, /pending\.actionLabel/);
   assert.match(mobileAppSource, /本地模型|NPC/);
   assert.doesNotMatch(mobileSource, /setStatusText\("已保存补充引导，会等 Codex 完成后合并。"\)/);
 });

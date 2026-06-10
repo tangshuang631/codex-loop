@@ -38,6 +38,9 @@ test("mobile app is a lightweight task monitor instead of a desktop console clon
   assert.match(source, /发送引导/);
   assert.match(source, /等 Codex 完成后合并/);
   assert.match(source, /待合并/);
+  assert.match(source, /pending\.statusLabel/);
+  assert.match(source, /pending\.statusDetail/);
+  assert.match(source, /pending\.actionLabel/);
   assert.doesNotMatch(source, /彻底关闭|新建项目|新建任务|Ollama 设置|运行治理/);
   assert.doesNotMatch(source, /app\/web|\\.\\.\/web|MobileTaskApp/);
   assert.match(styleSource, /border-top/);

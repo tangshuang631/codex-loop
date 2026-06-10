@@ -796,6 +796,10 @@ test("exportMobileView exposes customized npc rules and pending mobile guidance"
   assert.equal(mobile.pendingGuidance.mergeTiming, "codex_completed");
   assert.equal(mobile.pendingGuidance.mergeProcessor, "ollama_npc");
   assert.match(mobile.pendingGuidance.mergeProcessorLabel, /本地模型|NPC|Ollama/);
+  assert.equal(mobile.pendingGuidance.status, "ready_to_merge");
+  assert.match(mobile.pendingGuidance.statusLabel, /等待本地模型|NPC|合并/);
+  assert.match(mobile.pendingGuidance.statusDetail, /Codex.*空闲|可以.*下一条|本地模型|NPC/);
+  assert.match(mobile.pendingGuidance.actionLabel, /可发送|等待发送/);
   assert.match(mobile.pendingGuidance.userMessage, /Codex.*完成/);
   assert.match(mobile.pendingGuidance.userMessage, /本地模型|NPC|Ollama/);
 });

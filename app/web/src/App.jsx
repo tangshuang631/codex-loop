@@ -1454,13 +1454,19 @@ function MobileTaskApp() {
               <div className="mobile-task-panel-row">
                 <span>待合并</span>
                 <div className="mobile-task-pending-actions">
+                  {mobileView.pendingGuidance.statusLabel ? (
+                    <em>{mobileView.pendingGuidance.statusLabel}</em>
+                  ) : null}
                   <strong>{mobileView.pendingGuidance.preview || mobileView.pendingGuidance.text}</strong>
-                  {mobileView.pendingGuidance.userMessage ? <small>{mobileView.pendingGuidance.userMessage}</small> : null}
+                  {mobileView.pendingGuidance.statusDetail || mobileView.pendingGuidance.userMessage ? (
+                    <small>{mobileView.pendingGuidance.statusDetail || mobileView.pendingGuidance.userMessage}</small>
+                  ) : null}
                   <div className="mobile-task-pending-buttons">
                     <button
                       type="button"
                       className="ghost-button"
                       disabled={submitting}
+                      aria-label={`${mobileView.pendingGuidance.actionLabel || "等待发送"}，编辑待合并引导`}
                       onClick={() => {
                         setGuidanceText(mobileView.pendingGuidance.text || "");
                         setMobileGuidanceEditMode(true);
