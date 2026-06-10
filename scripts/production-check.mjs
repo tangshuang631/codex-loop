@@ -42,6 +42,12 @@ const checks = [
     display: "npm run build:mobile",
   },
   {
+    name: "前端证据检查",
+    command: process.execPath,
+    args: ["scripts/frontend-evidence-check.mjs"],
+    display: "node scripts/frontend-evidence-check.mjs",
+  },
+  {
     name: "工作区差异检查",
     command: "git",
     args: ["diff", "--check"],

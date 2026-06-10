@@ -42,10 +42,24 @@ test("production readiness check writes a Chinese evidence report", async () => 
 
   assert.match(source, /生产就绪检查/);
   assert.match(source, /验证命令/);
+  assert.match(source, /前端证据检查/);
+  assert.match(source, /frontend-evidence-check\.mjs/);
   assert.match(source, /报告路径/);
   assert.match(source, /runtime[\\/]production-checks/);
   assert.match(source, /status:\s*"passed"/);
   assert.match(source, /status:\s*"failed"/);
+});
+
+test("frontend evidence check verifies built desktop and mobile product surfaces", async () => {
+  const source = await read("scripts/frontend-evidence-check.mjs");
+
+  assert.match(source, /codex-loop 前端证据检查/);
+  assert.match(source, /dist[\\/]web/);
+  assert.match(source, /dist[\\/]mobile/);
+  assert.match(source, /历史对话/);
+  assert.match(source, /发送引导/);
+  assert.match(source, /截图证据/);
+  assert.match(source, /runtime[\\/]frontend-evidence/);
 });
 
 test("docs make production readiness check the pre-use gate", async () => {
