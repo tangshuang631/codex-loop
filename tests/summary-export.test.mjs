@@ -199,6 +199,47 @@ test("exportMobileView returns shared Codex-style conversation items with collap
   );
 });
 
+test("exportMobileView collapses script snippets as Codex-style script details", async () => {
+  const configRoot = await createWorkspace();
+  const snapshot = await ensureLoopArtifacts(configRoot);
+  await saveThreadBinding(configRoot, {
+    workspaceName: "demo",
+    threadTitle: "脚本详情渲染",
+    threadId: "thread-script-details",
+    singleThreadMode: true,
+  });
+  await fs.appendFile(
+    snapshot.paths.logPath,
+    `${JSON.stringify({
+      type: "codex_conversation_mirror_synced",
+      at: "2026-06-10T10:20:00.000Z",
+      latestAssistantPreview:
+        "已补充脚本验证：```powershell\nnpm run build:mobile\nnode --test tests/summary-export.test.mjs\n```\n涉及 app/mobile/src/main.jsx 和 scripts/frontend-evidence-check.mjs。",
+    })}\n`,
+    "utf8",
+  );
+
+  const mobile = await exportMobileView(configRoot);
+  const scriptItem = mobile.conversationItems.find((item) =>
+    item.detailBlocks?.some((block) => block.kind === "script_snippet"),
+  );
+
+  assert.ok(scriptItem, "包含脚本片段的 Codex 回复应该默认折叠为脚本内容详情。");
+  const scriptBlock = scriptItem.detailBlocks.find((block) => block.kind === "script_snippet");
+  assert.equal(scriptBlock.collapsedByDefault, true);
+  assert.equal(scriptBlock.title, "脚本内容");
+  assert.match(scriptBlock.displayLabel, /脚本内容/);
+  assert.match(scriptBlock.summary, /脚本内容/);
+  assert.ok(
+    scriptBlock.copyTargets.some((target) => target.kind === "command" && /npm run build:mobile/.test(target.value)),
+    "脚本详情应保留可复制命令。",
+  );
+  assert.ok(
+    scriptBlock.copyTargets.some((target) => target.kind === "file" && /app\/mobile\/src\/main\.jsx/.test(target.value)),
+    "脚本详情应保留可复制文件路径。",
+  );
+});
+
 test("exportMobileView returns readable runtime events for mobile monitoring", async () => {
   const configRoot = await createWorkspace();
   await ensureLoopArtifacts(configRoot);

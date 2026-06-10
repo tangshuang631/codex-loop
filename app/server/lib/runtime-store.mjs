@@ -486,11 +486,13 @@ async function readReadableRuntimeEvents(logPath, limit = 12) {
     })
     .map((event) => {
       const type = safeText(event.type, "");
+      const fullDetail = readableRuntimeEventDetail(event);
       return {
         at: safeText(event.at, ""),
         type,
         title: readableRuntimeEventTitle(type, event),
-        detail: summarizeForFollowup(readableRuntimeEventDetail(event), 180),
+        detail: summarizeForFollowup(fullDetail, 180),
+        fullDetail,
         tone: /failed|error|stalled/i.test(type) ? "danger" : "normal",
       };
     })
@@ -2661,6 +2663,9 @@ function classifyConversationDetail(text) {
   if (/截图|\.png|\.jpg|\.jpeg|\.webp|runtime[\\/]+screenshots/i.test(value)) {
     return "screenshot";
   }
+  if (/```(?:powershell|pwsh|bash|sh|javascript|js|typescript|ts|python|py|json|yaml|yml)?|@\s*'|function\s+\w+\s*\(|const\s+\w+\s*=|let\s+\w+\s*=|import\s+.+from\s+|nodeRepl\.|Get-ChildItem|Select-String/i.test(value)) {
+    return "script_snippet";
+  }
   if (/TAP version|node --test|npm run|pnpm |yarn |vite build|build:mobile|tests?|pass|fail|失败|通过/i.test(value)) {
     return "test_log";
   }
@@ -2677,6 +2682,7 @@ function conversationDetailSummary(kind, text) {
   const prefix = {
     command_output: "命令输出",
     file_change: "文件改动",
+    script_snippet: "脚本内容",
     test_log: "验证日志",
     screenshot: "截图证据",
     runtime_detail: "运行详情",
@@ -2688,6 +2694,7 @@ function conversationDetailTitle(kind) {
   return {
     command_output: "已运行命令",
     file_change: "已编辑文件",
+    script_snippet: "脚本内容",
     test_log: "验证日志",
     screenshot: "截图证据",
     runtime_detail: "运行详情",
@@ -2699,6 +2706,7 @@ function conversationDetailCountLabel(kind, copyTargets = []) {
   const fileCount = copyTargets.filter((target) => target.kind === "file").length;
   if (kind === "command_output") return `${Math.max(1, commandCount)} 条命令`;
   if (kind === "file_change") return `${Math.max(1, fileCount)} 个文件`;
+  if (kind === "script_snippet") return "1 段脚本";
   if (kind === "test_log") return "1 条日志";
   if (kind === "screenshot") return "1 张截图";
   return "1 条详情";
@@ -2903,7 +2911,7 @@ function buildConversationItems(snapshot, { transcriptEntries = [], runtimeEvent
   }
 
   for (const event of runtimeEvents || []) {
-    const text = safeText(event.detail || event.title, "");
+    const text = safeText(event.fullDetail || event.detail || event.title, "");
     if (!text) continue;
     const dispatchLike = /dispatch|sent|followup|guidance/i.test(event.type || "");
     items.push(normalizeConversationItem({

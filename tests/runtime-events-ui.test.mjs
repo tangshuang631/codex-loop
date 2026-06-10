@@ -456,10 +456,14 @@ test("dashboard prefers shared conversation items and renders collapsible Codex 
   assert.match(appSource, /copyTargets/);
   assert.match(appSource, /复制命令/);
   assert.match(appSource, /复制文件/);
+  assert.match(appSource, /script_snippet/);
+  assert.match(appSource, /脚本内容/);
   assert.match(mobileSource, /copyTargets/);
   assert.match(mobileSource, /block\.displayLabel \|\| block\.summary/);
   assert.match(mobileSource, /复制命令/);
   assert.match(mobileSource, /复制文件/);
+  assert.match(mobileSource, /script_snippet/);
+  assert.match(mobileSource, /脚本内容/);
   assert.match(stylesSource, /\.conversation-detail-block/);
   assert.match(stylesSource, /\.conversation-detail-actions/);
   assert.match(stylesSource, /\.conversation-detail-body/);

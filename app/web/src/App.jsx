@@ -1809,6 +1809,16 @@ function ConversationDetailBlocks({ blocks = [] }) {
     return null;
   }
 
+  const detailLabel = (block) => {
+    if (block.displayLabel || block.summary) {
+      return formatValue(block.displayLabel || block.summary, "查看详情");
+    }
+    if (block.kind === "script_snippet") {
+      return "脚本内容 · 1 段脚本";
+    }
+    return "查看详情";
+  };
+
   return (
     <div className="conversation-detail-list">
       {visibleBlocks.map((block, index) => (
@@ -1817,7 +1827,7 @@ function ConversationDetailBlocks({ blocks = [] }) {
           key={`${block.kind || "detail"}-${index}`}
           open={block.collapsedByDefault === false}
         >
-          <summary>{formatValue(block.displayLabel || block.summary, "查看详情")}</summary>
+          <summary>{detailLabel(block)}</summary>
           {Array.isArray(block.copyTargets) && block.copyTargets.length ? (
             <div className="conversation-detail-actions">
               {block.copyTargets.map((target, targetIndex) => (
