@@ -132,20 +132,43 @@ test("dashboard surfaces supervisor verification plan as compact status rows", a
   assert.match(appSource, /验证命令/);
 });
 
-test("dashboard keeps independent verification result visible in primary status rows", async () => {
+test("dashboard keeps independent verification and next action visible in primary status rows", async () => {
   const appSource = await fs.readFile("app/web/src/App.jsx", "utf8");
 
   const verificationRowIndex = appSource.indexOf('verificationText ? ["独立验收"');
   const holdReasonRowIndex = appSource.indexOf("processStatus?.holdReason");
-  const primaryRowsIndex = appSource.indexOf("const primaryRows = rows.slice(0, 6)");
+  const nextActionRowIndex = appSource.indexOf("processStatus?.nextAction");
+  const primaryRowsIndex = appSource.indexOf("const primaryRows = rows.slice(0, 7)");
 
   assert.notEqual(verificationRowIndex, -1);
   assert.notEqual(holdReasonRowIndex, -1);
+  assert.notEqual(nextActionRowIndex, -1);
   assert.notEqual(primaryRowsIndex, -1);
   assert.ok(
     verificationRowIndex < holdReasonRowIndex,
     "独立验收结果要排在判断/下一步之前，避免默认折叠后看不到。",
   );
+  assert.ok(
+    holdReasonRowIndex < nextActionRowIndex,
+    "下一步要保留在主要状态区，避免新增模型来源后被折叠。",
+  );
+});
+
+test("dashboard and mobile status show the latest instruction source", async () => {
+  const appSource = await fs.readFile("app/web/src/App.jsx", "utf8");
+  const statusStart = appSource.indexOf("function StatusSummaryPanel");
+  const statusEnd = appSource.indexOf("const StatusSummaryPanelV2", statusStart);
+  const mobileStart = appSource.indexOf("function MobileTaskApp");
+  const mobileEnd = appSource.indexOf("function DesktopConsoleApp", mobileStart);
+  const statusSource = appSource.slice(statusStart, statusEnd);
+  const mobileSource = appSource.slice(mobileStart, mobileEnd);
+
+  assert.notEqual(statusStart, -1);
+  assert.notEqual(mobileStart, -1);
+  assert.match(statusSource, /latestInstructionSourceLabel/);
+  assert.match(statusSource, /最近指令/);
+  assert.match(mobileSource, /latestInstructionSourceLabel/);
+  assert.match(mobileSource, /最近指令/);
 });
 
 test("dashboard shows a compact Codex-style loop progress panel", async () => {

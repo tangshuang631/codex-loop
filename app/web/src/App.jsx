@@ -1377,6 +1377,12 @@ function MobileTaskApp() {
               <span>下一步</span>
               <strong>{processStatus.nextAction || mobileView?.suggestedAction || "等待下一轮更新"}</strong>
             </div>
+            {processStatus.latestInstructionSourceLabel ? (
+              <div className="mobile-task-panel-row">
+                <span>最近指令</span>
+                <strong>{processStatus.latestInstructionSourceLabel}</strong>
+              </div>
+            ) : null}
             {mobileView?.pendingGuidance?.hasPending ? (
               <div className="mobile-task-panel-row">
                 <span>待合并</span>
@@ -1494,6 +1500,17 @@ function StatusSummaryPanel({
         ]
       : null,
     ["说明", processDetail],
+    processStatus?.latestInstructionSourceLabel
+      ? [
+          "最近指令",
+          [
+            processStatus.latestInstructionSourceLabel,
+            processStatus.latestInstructionSourceDetail,
+          ]
+            .filter(Boolean)
+            .join("："),
+        ]
+      : null,
     verificationText ? ["独立验收", verificationText] : null,
     processStatus?.holdReason ? ["判断", processStatus.holdReason] : null,
     processStatus?.nextAction ? ["下一步", processStatus.nextAction] : null,
@@ -1524,7 +1541,7 @@ function StatusSummaryPanel({
     ["健康提示", healthSummary || "当前没有明显异常。"],
     ["刷新状态", pollStatus],
   ].filter(Boolean);
-  const primaryRows = rows.slice(0, 6);
+  const primaryRows = rows.slice(0, 7);
 
   return (
     <div className="status-summary-panel">

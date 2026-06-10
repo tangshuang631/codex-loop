@@ -12,6 +12,7 @@ import {
   markContinuationFailed,
   recordHeartbeat,
   reviewCodexMilestone,
+  runLoopTurn,
   saveThreadBinding,
   savePendingGuidance,
   selectLoop,
@@ -251,6 +252,65 @@ test("exportMobileView blocks next turn when stop limits are already reached", a
   assert.equal(mobile.processStatus.canSendNextTurn, false);
   assert.match(mobile.processStatus.holdReason, /停止条件|预算|token/);
   assert.match(mobile.processStatus.nextAction, /停止|调整.*设置|重新开始/);
+});
+
+test("exportMobileView shows when the latest instruction used Ollama", async () => {
+  const configRoot = await createWorkspace();
+  await ensureLoopArtifacts(configRoot);
+  await saveThreadBinding(configRoot, {
+    workspaceName: "demo",
+    threadTitle: "移动端模型来源",
+    threadId: "thread-process-ollama-source",
+    singleThreadMode: true,
+  });
+  await startRun(configRoot);
+
+  await runLoopTurn(configRoot, {
+    generateFollowupPrompt: async () =>
+      "本轮由本地模型整理 Codex 回复和用户补充后生成，请继续做移动端状态验收。",
+    dispatchThreadMessage: async () => ({
+      deliveryObserved: true,
+      completionObserved: false,
+      lastMessage: "",
+    }),
+  });
+
+  const mobile = await exportMobileView(configRoot);
+
+  assert.equal(mobile.processStatus.latestInstructionSource, "ollama");
+  assert.equal(mobile.processStatus.latestInstructionSourceLabel, "本地模型生成");
+  assert.equal(mobile.processStatus.latestInstructionSourceTone, "ready");
+  assert.match(mobile.processStatus.latestInstructionSourceDetail, /Ollama|NPC|本地模型/);
+});
+
+test("exportMobileView shows when Ollama auto mode fell back to template", async () => {
+  const configRoot = await createWorkspace();
+  await ensureLoopArtifacts(configRoot);
+  await saveThreadBinding(configRoot, {
+    workspaceName: "demo",
+    threadTitle: "移动端模型降级",
+    threadId: "thread-process-template-source",
+    singleThreadMode: true,
+  });
+  await startRun(configRoot);
+
+  await runLoopTurn(configRoot, {
+    generateFollowupPrompt: async () => {
+      throw new Error("ollama unavailable");
+    },
+    dispatchThreadMessage: async () => ({
+      deliveryObserved: true,
+      completionObserved: false,
+      lastMessage: "",
+    }),
+  });
+
+  const mobile = await exportMobileView(configRoot);
+
+  assert.equal(mobile.processStatus.latestInstructionSource, "template");
+  assert.equal(mobile.processStatus.latestInstructionSourceLabel, "模板降级");
+  assert.equal(mobile.processStatus.latestInstructionSourceTone, "warning");
+  assert.match(mobile.processStatus.latestInstructionSourceDetail, /Ollama.*不可用|降级/);
 });
 
 test("exportMobileView blocks next turn when required rule docs are missing", async () => {

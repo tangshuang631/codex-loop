@@ -532,6 +532,7 @@ async function markDispatchWaiting(
       continuationStatus: "dispatching",
       lastDispatchAt: dispatchAt,
       lastDispatchPrompt: prompt,
+      lastDispatchPromptGenerator: promptGenerator,
       lastContinuationError: promptGenerationError,
       promptGenerationWarning,
       latestSummary: dispatchingSummary,
@@ -600,6 +601,7 @@ async function markDispatchSentWithoutCompletion(
       ...nextPendingGuidance,
       lastContinuationError: promptGenerationError,
       promptGenerationWarning,
+      lastDispatchPromptGenerator: promptGenerator,
       latestSummary: sentSummary,
       latestEventType: "codex_followup_sent_waiting",
       lastUpdatedAt: sentAt,
@@ -722,6 +724,7 @@ function createThreadDefaults(config) {
     lastDispatchAt: "",
     lastCompletionAt: "",
     lastDispatchPrompt: "",
+    lastDispatchPromptGenerator: "",
     lastContinuationError: "",
     lastSupervisorReview: "",
     lastSupervisorReviewAt: "",
@@ -2149,6 +2152,47 @@ function deriveSupervisorVerificationView(status, summary) {
   };
 }
 
+function deriveLatestInstructionSourceView(source, warning) {
+  const cleanSource = safeText(source, "");
+  const cleanWarning = safeText(warning, "");
+
+  if (cleanSource === "ollama") {
+    return {
+      latestInstructionSource: "ollama",
+      latestInstructionSourceLabel: "本地模型生成",
+      latestInstructionSourceTone: "ready",
+      latestInstructionSourceDetail:
+        "最近一条发给 Codex 的指令已经过 Ollama / NPC 工作流整理。",
+    };
+  }
+
+  if (cleanSource === "template" && cleanWarning) {
+    return {
+      latestInstructionSource: "template",
+      latestInstructionSourceLabel: "模板降级",
+      latestInstructionSourceTone: "warning",
+      latestInstructionSourceDetail: cleanWarning,
+    };
+  }
+
+  if (cleanSource === "template") {
+    return {
+      latestInstructionSource: "template",
+      latestInstructionSourceLabel: "精简模板",
+      latestInstructionSourceTone: "soft",
+      latestInstructionSourceDetail:
+        "最近一条指令使用精简模板生成；开启本地模型后会优先交给 Ollama / NPC 处理。",
+    };
+  }
+
+  return {
+    latestInstructionSource: "",
+    latestInstructionSourceLabel: "",
+    latestInstructionSourceTone: "soft",
+    latestInstructionSourceDetail: "",
+  };
+}
+
 function buildProcessStatus(snapshot) {
   const mode = snapshot.state.mode || "stopped";
   const continuationStatus = snapshot.thread.continuationStatus || "idle";
@@ -2159,6 +2203,10 @@ function buildProcessStatus(snapshot) {
   const budgetReached = budgetLimitReached(snapshot.state);
   const hasPendingGuidance = Boolean(snapshot.thread.pendingUserGuidance);
   const promptGenerationWarning = safeText(snapshot.thread.promptGenerationWarning, "");
+  const latestInstructionSourceView = deriveLatestInstructionSourceView(
+    snapshot.thread.lastDispatchPromptGenerator,
+    promptGenerationWarning,
+  );
   const supervisorReview = safeText(snapshot.thread.lastSupervisorReview, "");
   const supervisorInstruction = safeText(snapshot.thread.lastSupervisorInstruction, "");
   const supervisorReviewWarning = safeText(snapshot.thread.supervisorReviewWarning, "");
@@ -2320,6 +2368,7 @@ function buildProcessStatus(snapshot) {
     supervisorVerificationAt: snapshot.thread.lastSupervisorVerificationAt || "",
     supervisorReviewWarning,
     promptGenerationWarning,
+    ...latestInstructionSourceView,
     failureCategory: snapshot.thread.lastContinuationFailureCategory || "",
     failureLabel: snapshot.thread.lastContinuationFailureLabel || "",
     failureSeverity: snapshot.thread.lastContinuationFailureSeverity || "",
