@@ -104,6 +104,8 @@ test("dashboard folds low-frequency status details by default", async () => {
   const stylesSource = await fs.readFile("app/web/src/styles.css", "utf8");
 
   assert.match(appSource, /primaryRows/);
+  assert.match(appSource, /const primaryLabels = new Set\(\["当前", "说明", "下一步"\]\)/);
+  assert.match(appSource, /rows\.filter\(\(\[label\]\) => primaryLabels\.has\(label\)\)/);
   assert.match(appSource, /detailRows/);
   assert.match(appSource, /status-detail-fold/);
   assert.match(appSource, /更多状态/);
@@ -144,25 +146,29 @@ test("dashboard surfaces supervisor verification plan as compact status rows", a
   assert.match(appSource, /验证命令/);
 });
 
-test("dashboard keeps independent verification and next action visible in primary status rows", async () => {
+test("dashboard keeps next action primary and folds independent verification details", async () => {
   const appSource = await fs.readFile("app/web/src/App.jsx", "utf8");
 
   const verificationRowIndex = appSource.indexOf('verificationText ? ["独立验收"');
   const holdReasonRowIndex = appSource.indexOf("processStatus?.holdReason");
   const nextActionRowIndex = appSource.indexOf("processStatus?.nextAction");
-  const primaryRowsIndex = appSource.indexOf("const primaryRows = rows.slice(0, 7)");
+  const primaryLabelsIndex = appSource.indexOf('const primaryLabels = new Set(["当前", "说明", "下一步"])');
+  const detailRowsIndex = appSource.indexOf("const detailRows = [");
+  const primaryRowsIndex = appSource.indexOf("rows.filter(([label]) => primaryLabels.has(label))");
 
   assert.notEqual(verificationRowIndex, -1);
   assert.notEqual(holdReasonRowIndex, -1);
   assert.notEqual(nextActionRowIndex, -1);
+  assert.notEqual(primaryLabelsIndex, -1);
+  assert.notEqual(detailRowsIndex, -1);
   assert.notEqual(primaryRowsIndex, -1);
   assert.ok(
-    verificationRowIndex < holdReasonRowIndex,
-    "独立验收结果要排在判断/下一步之前，避免默认折叠后看不到。",
+    nextActionRowIndex < primaryLabelsIndex,
+    "下一步要留在主要状态来源里，避免用户看不到下一步动作。",
   );
   assert.ok(
-    holdReasonRowIndex < nextActionRowIndex,
-    "下一步要保留在主要状态区，避免新增模型来源后被折叠。",
+    detailRowsIndex < verificationRowIndex && verificationRowIndex < holdReasonRowIndex,
+    "独立验收和判断应进入折叠详情，避免首页默认状态过重。",
   );
 });
 

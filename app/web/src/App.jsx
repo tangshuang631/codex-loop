@@ -1529,6 +1529,11 @@ function StatusSummaryPanel({
       : "";
   const rows = [
     ["当前", `${modeText} · ${monitorText}`],
+    ["说明", processDetail],
+    processStatus?.nextAction ? ["下一步", processStatus.nextAction] : null,
+  ].filter(Boolean);
+  const primaryLabels = new Set(["当前", "说明", "下一步"]);
+  const detailRows = [
     controllerStatus?.label
       ? [
           "自动循环",
@@ -1537,7 +1542,6 @@ function StatusSummaryPanel({
             : controllerStatus.label,
         ]
       : null,
-    ["说明", processDetail],
     processStatus?.latestInstructionSourceLabel
       ? [
           "最近指令",
@@ -1551,7 +1555,6 @@ function StatusSummaryPanel({
       : null,
     verificationText ? ["独立验收", verificationText] : null,
     processStatus?.holdReason ? ["判断", processStatus.holdReason] : null,
-    processStatus?.nextAction ? ["下一步", processStatus.nextAction] : null,
     processStatus?.hasPendingGuidance
       ? ["待合并补充", processStatus?.pendingGuidancePreview || "已记录"]
       : null,
@@ -1571,8 +1574,6 @@ function StatusSummaryPanel({
             processStatus.verificationCommands.join(" · "),
         ]
       : null,
-  ].filter(Boolean);
-  const detailRows = [
     productionStatus?.title
       ? [
           "生产状态摘要",
@@ -1610,7 +1611,7 @@ function StatusSummaryPanel({
     ["健康提示", healthSummary || "当前没有明显异常。"],
     ["刷新状态", pollStatus],
   ].filter(Boolean);
-  const primaryRows = rows.slice(0, 7);
+  const primaryRows = rows.filter(([label]) => primaryLabels.has(label));
 
   return (
     <div className="status-summary-panel">
