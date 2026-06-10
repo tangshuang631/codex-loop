@@ -141,3 +141,17 @@ test("docs distinguish shipped phone-pairing and mobile app shell from the futur
     assert.match(source, /自动窗口绑定基础已接入/);
   }
 });
+
+test("docs describe frontend evidence as part of production readiness", async () => {
+  const readmeSource = await fs.readFile("README.md", "utf8");
+  const checklistSource = await fs.readFile("codex-loop6.7-13-29开发清单.md", "utf8");
+  const architectureSource = await fs.readFile("docs/enterprise-loop-architecture.md", "utf8");
+
+  for (const source of [readmeSource, checklistSource, architectureSource]) {
+    assert.match(source, /前端证据检查/);
+    assert.match(source, /runtime\/frontend-evidence/);
+    assert.match(source, /历史对话/);
+    assert.match(source, /发送引导/);
+    assert.match(source, /截图证据/);
+  }
+});
