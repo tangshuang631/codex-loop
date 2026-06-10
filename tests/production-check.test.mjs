@@ -1172,6 +1172,72 @@ test("production status exposes structured maturity and remaining gaps", async (
   }
 });
 
+test("production status marks missing supervisor recovery as not ready for trial", async () => {
+  const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), "codex-loop-status-"));
+  const writeReport = async (dirLabel, fileName, report) => {
+    const dir = path.join(tempRoot, ...dirLabel.split("/"));
+    await fs.mkdir(dir, { recursive: true });
+    await fs.writeFile(path.join(dir, fileName), `${JSON.stringify(report, null, 2)}\n`, "utf8");
+  };
+  const now = "2026-06-10T14:20:00.000Z";
+  await writeReport("runtime/production-checks", "latest-production-check.json", {
+    status: "passed",
+    finishedAt: now,
+    durationMs: 1,
+    checks: [{ status: "passed" }],
+  });
+  await writeReport("runtime/frontend-evidence", "latest-frontend-evidence.json", {
+    status: "passed",
+    finishedAt: now,
+    durationMs: 1,
+    results: [{ status: "passed" }],
+  });
+  await writeReport("runtime/longrun-smoke", "latest-longrun-smoke.json", {
+    status: "passed",
+    finishedAt: now,
+    durationMs: 1,
+    checks: [{ status: "passed" }],
+  });
+  await writeReport("runtime/production-observations", "needs-recovery-production-observation.json", {
+    status: "attention",
+    finishedAt: now,
+    durationMs: 1,
+    summary: "Codex 已有完成回复，但还缺少 NPC 监督复盘，暂时不能算完整闭环。",
+    nextAction: "先运行 npm run production:recover 补齐监督复盘；该命令不会发送下一轮指令。",
+    diagnosis: {
+      category: "completion_missing_supervisor_review",
+      userMessage: "Codex 已有完成回复，但还缺少 NPC 监督复盘，暂时不能算完整闭环。",
+      nextAction: "先运行 npm run production:recover 补齐监督复盘；该命令不会发送下一轮指令。",
+    },
+    counters: {
+      dispatches: 1,
+      completions: 1,
+      supervisorReviews: 0,
+      closedLoops: 0,
+    },
+  });
+
+  const previousCwd = process.cwd();
+  try {
+    process.chdir(tempRoot);
+    const status = await readProductionStatusSummary({
+      refreshObservation: false,
+      now: new Date("2026-06-10T14:20:00.000Z"),
+    });
+
+    assert.equal(status.readiness.stage, "blocked");
+    assert.match(status.readiness.summary, /缺少 NPC 监督复盘/);
+    assert.match(status.readiness.nextAction, /production:recover/);
+    assert.equal(status.maturity.label, "需恢复");
+    assert.equal(status.maturity.canTrial, false);
+    assert.equal(status.maturity.canLongRun, false);
+    assert.ok(status.maturity.gaps.some((gap) => /补齐监督复盘/.test(gap)));
+    assert.match(status.nextAction, /production:recover/);
+  } finally {
+    process.chdir(previousCwd);
+  }
+});
+
 test("docs make production readiness check the pre-use gate", async () => {
   const readme = await read("README.md");
   const checklist = await read("codex-loop6.7-13-29开发清单.md");

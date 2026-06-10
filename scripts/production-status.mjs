@@ -234,6 +234,16 @@ function hasPartialClosedLoopEvidence(item = {}) {
   );
 }
 
+function needsSupervisorRecovery(item = {}) {
+  const textBlock = [
+    item.summary,
+    item.nextAction,
+    item.diagnosis?.userMessage,
+    item.diagnosis?.nextAction,
+  ].filter(Boolean).join("\n");
+  return /缺少\s*NPC\s*监督复盘|补齐监督复盘|production:recover/u.test(textBlock);
+}
+
 function deriveNextAction(items, target = {}) {
   const stale = items.find((item) => item.status === "stale");
   if (stale) {
@@ -256,6 +266,9 @@ function deriveNextAction(items, target = {}) {
   }
   const failed = items.find((item) => item.status && item.status !== "passed");
   if (failed) {
+    if (failed.label === "真实运行观测" && needsSupervisorRecovery(failed)) {
+      return failed.nextAction || "先运行 npm run production:recover 补齐监督复盘；该命令不会发送下一轮指令。";
+    }
     if (failed.label === "真实运行观测" && hasPartialClosedLoopEvidence(failed)) {
       return appendTargetConfirmation(failed.nextAction || failed.summary, target);
     }
@@ -289,6 +302,7 @@ function deriveReadiness(items, target = {}) {
     item.status &&
     !["passed", "waiting", "stale"].includes(item.status),
   );
+  const supervisorRecoveryNeeded = observation && needsSupervisorRecovery(observation);
 
   if (failedCodeGate || (failed && !codeGatesPassed)) {
     const item = failedCodeGate || failed;
@@ -296,6 +310,15 @@ function deriveReadiness(items, target = {}) {
       stage: "blocked",
       summary: `生产检查还不能通过：${item.label}需要处理。`,
       nextAction: item.nextAction || item.summary || "先处理失败项，再重新运行 npm run production:check。",
+    };
+  }
+
+  if (codeGatesPassed && supervisorRecoveryNeeded) {
+    return {
+      stage: "blocked",
+      summary: "Codex 已完成但还缺少 NPC 监督复盘，暂时不能继续发送下一轮。",
+      nextAction:
+        observation.nextAction || "先运行 npm run production:recover 补齐监督复盘；该命令不会发送下一轮指令。",
     };
   }
 
@@ -370,6 +393,7 @@ function deriveMaturity(items, readiness = {}) {
     .filter((item) => codeGateLabels.has(item.label))
     .every((item) => item.status === "passed");
   const partialClosedLoop = hasPartialClosedLoopEvidence(observation);
+  const supervisorRecoveryNeeded = needsSupervisorRecovery(observation);
   const gaps = [];
   const evidence = [];
 
@@ -402,6 +426,21 @@ function deriveMaturity(items, readiness = {}) {
       canTrial: codeGatesPassed,
       canLongRun: false,
       summary: "代码闸门已通过，但真实任务仍在等待当前轮结果，还不能判断长期稳定性。",
+      gaps,
+      evidence,
+    };
+  }
+
+  if (supervisorRecoveryNeeded) {
+    evidence.push("Codex 已有完成回复。");
+    gaps.push("需要先补齐监督复盘。");
+    gaps.push("恢复前不能继续发送下一轮。");
+    return {
+      label: "需恢复",
+      percent: codeGatesPassed ? 68 : 40,
+      canTrial: false,
+      canLongRun: false,
+      summary: "Codex 已完成但还缺少 NPC 监督复盘，暂时不能继续发送下一轮。",
       gaps,
       evidence,
     };
