@@ -80,6 +80,7 @@
 app/
   server/        本地接口、任务控制、健康状态、模型接口
   web/           本地控制台前端
+  mobile/        独立移动端 App/PWA 壳，只放状态、历史对话和发送引导
 docs/            设计文档、说明文档
 projects/        通用项目适配模板
 scripts/         启动、检查、初始化、绑定等脚本
@@ -135,11 +136,12 @@ dist/            前端构建产物（git 忽略）
 2. `npm run loop:check`
 3. `npm test`
 4. `npm run build:web`
-5. `start-codex-loop.bat`
-6. 打开控制台
-7. 在左侧新建任务
-8. 连接真实对话窗口
-9. 开始循环
+5. `npm run build:mobile`
+6. `start-codex-loop.bat`
+7. 打开控制台
+8. 在左侧新建任务
+9. 连接真实对话窗口
+10. 开始循环
 
 ## 日常使用方式
 
@@ -246,7 +248,7 @@ ollama pull qwen2.5:7b
 
 ## 当前移动端进度
 
-目前移动端已经具备基础数据能力：
+目前移动端已经从“只提供数据”推进到基础移动端 App/PWA 壳：
 
 - 最近摘要
 - 聊天镜像
@@ -254,8 +256,7 @@ ollama pull qwen2.5:7b
 - 建议动作
 - 扫码长期绑定基础已接入
 - `/mobile` 轻量移动端任务界面已接入
-
-但当前优先级仍然是桌面端。
+- `app/mobile` 独立移动端 App/PWA 壳已接入
 
 也就是说：
 
@@ -263,10 +264,10 @@ ollama pull qwen2.5:7b
 - 现在已经能在桌面控制台生成扫码绑定，并通过长期令牌校验已绑定设备
 - 受保护移动端任务视图已接入：已绑定设备携带长期设备令牌才能读取任务状态和历史对话，令牌失效或设备未绑定时必须重新扫码
 - 手机打开桌面控制台地址后加 `/mobile`，可以查看当前任务、历史对话，并发送引导；引导会等 Codex 完成后再合并到下一轮
-- 原生 App 和独立 `app/mobile` 工程仍是后续阶段
+- 独立 `app/mobile` 已提供基础移动端 App/PWA 壳；后续只剩更完整的原生 App 封装和系统级能力
 - 自动窗口绑定基础已接入：绑定时可优先填写项目路径和 Codex 窗口名，系统会从本机 Codex 历史里自动匹配线程；匹配不唯一或失败时再手动填写线程 ID
 
-当前 `/mobile` 是先落地的轻量移动端 App/PWA 入口：主界面只放历史对话、当前状态和发送引导输入框。首次连接通过桌面控制台的扫码绑定完成长期授权，手机保存这台电脑的访问凭据；以后同一台电脑上的 codex-loop 进程重启后，手机不用重复扫码也能重新连接。
+当前 `/mobile` 和 `app/mobile` 共享同一套后端数据：主界面只放历史对话、当前状态和发送引导输入框。首次连接通过桌面控制台的扫码绑定完成长期授权，手机保存这台电脑的访问凭据；以后同一台电脑上的 codex-loop 进程重启后，手机不用重复扫码也能重新连接。
 
 ## 主要命令
 
@@ -280,6 +281,7 @@ ollama pull qwen2.5:7b
 - `npm run loop:start`
 - `npm run dev`
 - `npm run build:web`
+- `npm run build:mobile`
 - `npm test`
 
 ## 新机器验证建议
@@ -290,7 +292,8 @@ ollama pull qwen2.5:7b
 2. `npm run loop:check`
 3. `npm test`
 4. `npm run build:web`
-5. `start-codex-loop.bat`
+5. `npm run build:mobile`
+6. `start-codex-loop.bat`
 
 如果以上都通过，再开始连接真实窗口和创建任务。
 

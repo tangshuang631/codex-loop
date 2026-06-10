@@ -1,0 +1,11 @@
+{
+  "name": "codex-loop 移动监控",
+  "short_name": "codex-loop",
+  "start_url": "/mobile",
+  "scope": "/",
+  "display": "standalone",
+  "lang": "zh-CN",
+  "background_color": "#f7f7f3",
+  "theme_color": "#f7f7f3",
+  "description": "查看 codex-loop 当前任务、历史对话，并发送下一轮引导。"
+}

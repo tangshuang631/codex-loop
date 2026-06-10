@@ -15,7 +15,8 @@
     "dev": "node scripts/dev.mjs",
     "dev:server": "node app/server/index.mjs",
     "dev:web": "vite --config app/web/vite.config.mjs",
-    "build:web": "vite build --config app/web/vite.config.mjs"
+    "build:web": "vite build --config app/web/vite.config.mjs",
+    "build:mobile": "vite build --config app/mobile/vite.config.mjs"
   },
   "dependencies": {
     "qrcode": "^1.5.4",

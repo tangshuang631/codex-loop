@@ -126,7 +126,7 @@ test("architecture map includes productized binding and mobile-app target module
   assert.match(architectureSource, /扫码.*长期绑定|长期绑定.*扫码/);
 });
 
-test("docs distinguish shipped phone-pairing and mobile web app from the future native app", async () => {
+test("docs distinguish shipped phone-pairing and mobile app shell from the future native wrapper", async () => {
   const readmeSource = await fs.readFile("README.md", "utf8");
   const roadmapSource = await fs.readFile("docs/product-roadmap.md", "utf8");
 
@@ -134,8 +134,10 @@ test("docs distinguish shipped phone-pairing and mobile web app from the future 
     assert.match(source, /扫码长期绑定基础已接入/);
     assert.match(source, /受保护移动端任务视图|长期设备令牌.*移动端任务视图/);
     assert.match(source, /\/mobile/);
+    assert.match(source, /app\/mobile/);
+    assert.match(source, /独立.*App\/PWA 壳|App\/PWA 壳.*独立/);
     assert.match(source, /发送引导/);
-    assert.match(source, /原生 App|独立 app\/mobile/);
+    assert.match(source, /原生 App.*后续|后续.*原生 App/);
     assert.match(source, /自动窗口绑定基础已接入/);
   }
 });
