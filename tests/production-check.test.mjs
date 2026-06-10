@@ -744,6 +744,8 @@ test("production status treats one real closed loop as trial evidence instead of
     assert.equal(status.readiness.stage, "trial");
     assert.match(status.readiness.summary, /1 轮真实闭环/);
     assert.match(status.readiness.nextAction, /再跑至少 1 轮/);
+    assert.match(status.nextAction, /再跑至少 1 轮/);
+    assert.doesNotMatch(status.nextAction, /先处理真实运行观测/);
     assert.doesNotMatch(status.readiness.summary, /不能通过|需要处理/);
   } finally {
     process.chdir(previousCwd);

@@ -206,6 +206,16 @@ function summarizeReport(kind, report) {
   return report.nextAction || report.summary || "未记录摘要。";
 }
 
+function hasPartialClosedLoopEvidence(item = {}) {
+  const closedLoops = Number(item.counters?.closedLoops || 0);
+  return (
+    closedLoops > 0 ||
+    /1 轮真实闭环|1 轮完整闭环|已经观察到 1 轮/u.test(
+      `${item.summary || ""}\n${item.nextAction || ""}`,
+    )
+  );
+}
+
 function deriveNextAction(items) {
   const stale = items.find((item) => item.status === "stale");
   if (stale) {
@@ -228,6 +238,9 @@ function deriveNextAction(items) {
   }
   const failed = items.find((item) => item.status && item.status !== "passed");
   if (failed) {
+    if (failed.label === "真实运行观测" && hasPartialClosedLoopEvidence(failed)) {
+      return failed.nextAction || failed.summary;
+    }
     return `先处理${failed.label}：${failed.nextAction || failed.summary}`;
   }
   return "可以进入真实任务使用；长时间运行仍建议保留人工观察和运行日志。";
@@ -290,13 +303,7 @@ function deriveReadiness(items) {
       observation.nextAction
     )
   ) {
-    const closedLoops = Number(observation.counters?.closedLoops || 0);
-    const partialClosedLoop =
-      closedLoops > 0 ||
-      /1 轮真实闭环|1 轮完整闭环|已经观察到 1 轮/u.test(
-        `${observation.summary || ""}\n${observation.nextAction || ""}`,
-      );
-    if (partialClosedLoop) {
+    if (hasPartialClosedLoopEvidence(observation)) {
       return {
         stage: "trial",
         summary: "代码闸门已通过，并已观察到 1 轮真实闭环；适合短时试用，但还缺少第 2 轮连续闭环证据。",
