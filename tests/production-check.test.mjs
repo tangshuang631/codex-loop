@@ -62,6 +62,21 @@ test("frontend evidence check verifies built desktop and mobile product surfaces
   assert.match(source, /runtime[\\/]frontend-evidence/);
 });
 
+test("production status summarizes recent production evidence for long-running use", async () => {
+  const packageJson = JSON.parse(await read("package.json"));
+  const source = await read("scripts/production-status.mjs");
+
+  assert.equal(packageJson.scripts["production:status"], "node scripts/production-status.mjs");
+  assert.match(source, /codex-loop 生产状态摘要/);
+  assert.match(source, /runtime[\\/]production-checks/);
+  assert.match(source, /runtime[\\/]frontend-evidence/);
+  assert.match(source, /runtime[\\/]longrun-smoke/);
+  assert.match(source, /最近生产检查/);
+  assert.match(source, /前端证据/);
+  assert.match(source, /长跑节奏/);
+  assert.match(source, /下一步建议/);
+});
+
 test("docs make production readiness check the pre-use gate", async () => {
   const readme = await read("README.md");
   const checklist = await read("codex-loop6.7-13-29开发清单.md");

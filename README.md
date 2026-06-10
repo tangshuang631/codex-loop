@@ -154,6 +154,14 @@ npm run production:check
 
 其中前端证据检查会读取桌面端和移动端构建产物，确认关键中文产品界面信号已经进入产物，包括历史对话、发送引导和截图证据。检查结果会写入 `runtime/frontend-evidence/`，用于后续审查界面是否仍保留核心监控能力。
 
+长期运行期间可以随时查看生产状态摘要：
+
+```bash
+npm run production:status
+```
+
+它会汇总最近生产检查、前端证据和长跑节奏，并给出下一步建议。这个命令不会启动循环，也不会向 Codex 发送消息，只用于快速判断当前本机 `codex-loop` 是否处在可继续使用的健康状态。
+
 ## 日常使用方式
 
 日常只需要记住三件事：
@@ -292,6 +300,7 @@ ollama pull qwen2.5:7b
 - `npm run loop:smoke`
 - `npm run loop:start`
 - `npm run production:check`
+- `npm run production:status`
 - `npm run dev`
 - `npm run build:web`
 - `npm run build:mobile`

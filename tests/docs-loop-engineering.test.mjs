@@ -155,3 +155,17 @@ test("docs describe frontend evidence as part of production readiness", async ()
     assert.match(source, /截图证据/);
   }
 });
+
+test("docs expose production status summary for long-running operation", async () => {
+  const readmeSource = await fs.readFile("README.md", "utf8");
+  const checklistSource = await fs.readFile("codex-loop6.7-13-29开发清单.md", "utf8");
+
+  for (const source of [readmeSource, checklistSource]) {
+    assert.match(source, /npm run production:status/);
+    assert.match(source, /生产状态摘要/);
+    assert.match(source, /最近生产检查/);
+    assert.match(source, /前端证据/);
+    assert.match(source, /长跑节奏/);
+    assert.match(source, /下一步建议/);
+  }
+});

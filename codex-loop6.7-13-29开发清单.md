@@ -145,6 +145,7 @@
 - `npm run build:web`
 - `npm run build:mobile`
 - 生产就绪检查入口：`npm run production:check`，会顺序执行环境检查、长跑 smoke 检查、测试、桌面端构建、移动端构建、前端证据检查和 git 差异检查，并写入 `runtime/production-checks/` 报告。前端证据检查会确认构建产物仍包含历史对话、发送引导和截图证据，并把结果写入 `runtime/frontend-evidence/`。
+- 生产状态摘要入口：`npm run production:status`，会读取最近生产检查、前端证据和长跑节奏报告，输出当前是否可继续使用以及下一步建议；它只读本地报告，不启动循环也不向 Codex 发送消息。
 - 长跑 smoke 检查入口：`npm run loop:smoke`，只做本地模拟，不发送真实 Codex 消息；它验证发送后等待 Codex、未完成不追发、用户补充会等 Codex 完成后交给 NPC 合并、完成后先监督复盘、按产品经理 / 测试人员 / 真实用户视角做独立验收并遵守冷却防重复、预算到达后停止，是长期运行前的节奏护栏。
 - 已推送分支：
 - `dev`

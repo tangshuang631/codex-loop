@@ -14,6 +14,7 @@
     "loop:smoke": "node scripts/longrun-smoke.mjs",
     "loop:start": "start-codex-loop.bat",
     "production:check": "node scripts/production-check.mjs",
+    "production:status": "node scripts/production-status.mjs",
     "dev": "node scripts/dev.mjs",
     "dev:server": "node app/server/index.mjs",
     "dev:web": "vite --config app/web/vite.config.mjs",
