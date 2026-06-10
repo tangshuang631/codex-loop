@@ -73,6 +73,35 @@ test("supervisor verification skips repeated passed commands inside the cooldown
   assert.match(result.summary, /冷却期|近期已完成/);
 });
 
+test("supervisor verification does not repeat the same commands for an already verified Codex completion", async () => {
+  const completionAt = "2026-06-10T10:00:00.000Z";
+  const verifiedAt = "2026-06-10T10:05:00.000Z";
+  const snapshot = {
+    paths: { workspaceRoot: process.cwd() },
+    thread: {
+      lastCompletionAt: completionAt,
+      lastSupervisorVerificationStatus: "failed",
+      lastSupervisorVerificationAt: verifiedAt,
+      lastSupervisorVerificationCommands: ["npm run test:mobile-flow"],
+    },
+  };
+  const review = {
+    shouldContinue: true,
+    needsIndependentVerification: true,
+    verificationCommands: ["npm run test:mobile-flow"],
+  };
+
+  const result = await runSupervisorIndependentVerification(snapshot, review, {
+    runVerificationCommand: async () => {
+      throw new Error("should not rerun verification for the same completion");
+    },
+  });
+
+  assert.equal(result.status, "skipped");
+  assert.match(result.summary, /已经做过独立验收|等待新的 Codex 完成/);
+  assert.equal(result.ranAt, verifiedAt);
+});
+
 test("verification injection keeps Codex focused on failed or skipped evidence", () => {
   const failedInstruction = injectVerificationIntoInstruction("继续优化移动端状态。", {
     status: "failed",

@@ -161,6 +161,24 @@ function recentPassedVerificationStillFresh(snapshot, commands) {
   return Date.now() - lastAt < SUPERVISOR_VERIFICATION_COOLDOWN_MS;
 }
 
+function sameCompletionAlreadyVerified(snapshot, commands) {
+  const completionAt = Date.parse(snapshot.thread.lastCompletionAt || "");
+  const verifiedAt = Date.parse(snapshot.thread.lastSupervisorVerificationAt || "");
+  if (!Number.isFinite(completionAt) || !Number.isFinite(verifiedAt)) {
+    return false;
+  }
+  if (verifiedAt < completionAt) {
+    return false;
+  }
+
+  const previousCommands = normalizeTextList(
+    snapshot.thread.lastSupervisorVerificationCommands || [],
+    SUPERVISOR_VERIFICATION_MAX_COMMANDS,
+    160,
+  );
+  return sameTextList(previousCommands, commands);
+}
+
 export async function defaultRunSupervisorVerificationCommand({
   command,
   workspaceRoot,
@@ -259,6 +277,16 @@ export async function runSupervisorIndependentVerification(
       summary: "近期已完成同一组独立验收，仍在冷却期内，本轮不重复执行。",
       results: [],
       ranAt: nowIso(),
+    };
+  }
+
+  if (sameCompletionAlreadyVerified(snapshot, commands)) {
+    return {
+      status: "skipped",
+      summary:
+        "当前 Codex 完成结果已经做过独立验收，本轮不重复执行；等待新的 Codex 完成后再验收。",
+      results: [],
+      ranAt: snapshot.thread.lastSupervisorVerificationAt || nowIso(),
     };
   }
 
