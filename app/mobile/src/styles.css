@@ -258,7 +258,11 @@ label {
 .message {
   display: flex;
   border-top: 1px solid rgba(31, 33, 31, 0.09);
-  padding: 0.82rem 0;
+  padding: 1rem 0;
+}
+
+.message.is-codex {
+  display: block;
 }
 
 .message.is-loop {
@@ -269,11 +273,16 @@ label {
   width: min(100%, 35rem);
 }
 
+.message.is-codex details {
+  width: 100%;
+}
+
 .message.is-loop details {
   width: min(88%, 28rem);
-  border-radius: 1.2rem;
-  background: #242620;
-  color: #fff;
+  border: 1px solid rgba(31, 33, 31, 0.1);
+  border-radius: 1.15rem 1.15rem 0.35rem 1.15rem;
+  background: #f6f3ed;
+  color: #1f211f;
   padding: 0.78rem 0.9rem;
 }
 
@@ -289,12 +298,20 @@ label {
 }
 
 .message.is-loop summary span {
-  color: rgba(255, 255, 255, 0.64);
+  color: #7f7a70;
 }
 
 .message summary strong {
   line-height: 1.65;
   white-space: pre-wrap;
+}
+
+.message.is-codex summary strong {
+  color: #242620;
+}
+
+.message.is-loop summary strong {
+  color: #2d2c28;
 }
 
 .message pre {

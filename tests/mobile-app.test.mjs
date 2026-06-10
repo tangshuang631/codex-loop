@@ -60,6 +60,21 @@ test("mobile app uses shared conversation items and collapses Codex-style detail
   assert.match(styleSource, /\.conversation-detail-body/);
 });
 
+test("mobile app renders history as Codex-like divider flow instead of heavy chat cards", async () => {
+  const source = await read("app/mobile/src/main.jsx");
+  const styleSource = await read("app/mobile/src/styles.css");
+
+  assert.match(source, /className=\{isLoop \? "message is-loop" : "message is-codex"\}/);
+  assert.match(styleSource, /\.message\s*\{/);
+  assert.match(styleSource, /\.message\.is-codex/);
+  assert.match(styleSource, /\.message\.is-loop/);
+  assert.match(styleSource, /border-top:\s*1px solid rgba\(31,\s*33,\s*31,\s*0\.09\)/);
+  const loopBubbleRule = styleSource.match(/\.message\.is-loop details\s*\{[\s\S]*?\n\}/)?.[0] || "";
+  assert.match(loopBubbleRule, /background:\s*#f6f3ed/);
+  assert.doesNotMatch(loopBubbleRule, /background:\s*#242620/);
+  assert.doesNotMatch(loopBubbleRule, /color:\s*#fff/);
+});
+
 test("mobile app surfaces production monitoring signals in one compact status block", async () => {
   const source = await read("app/mobile/src/main.jsx");
   const styleSource = await read("app/mobile/src/styles.css");
