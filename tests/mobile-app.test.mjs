@@ -65,6 +65,7 @@ test("mobile app shows production status and stale observation guidance", async 
   assert.match(source, /productionStatus/);
   assert.match(source, /productionStatus\?\.target/);
   assert.match(source, /验证目标/);
+  assert.match(source, /shortThreadId/);
   assert.match(source, /readiness\?\.stage/);
   assert.match(source, /生产阶段/);
   assert.match(source, /短时试用|可长跑|观察中|需处理/);

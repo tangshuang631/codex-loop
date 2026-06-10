@@ -80,6 +80,12 @@ function compactText(value, length = 180) {
   return `${text.slice(0, length - 1)}…`;
 }
 
+function shortThreadId(threadId = "") {
+  const value = asText(threadId);
+  if (value.length <= 18) return value;
+  return `${value.slice(0, 8)}...${value.slice(-6)}`;
+}
+
 function formatReadinessStage(readiness = {}) {
   const stage = readiness?.stage || "";
   if (stage === "production") return "可长跑";
@@ -93,7 +99,7 @@ function formatProductionTarget(target = {}) {
   return [
     asText(target.threadTitle || target.workspaceName || target.runId),
     asText(target.workspaceRoot),
-    asText(target.threadId),
+    shortThreadId(target.threadId),
   ].filter(Boolean).join(" / ");
 }
 
