@@ -1791,6 +1791,22 @@ function ConversationDetailBlocks({ blocks = [] }) {
           open={block.collapsedByDefault === false}
         >
           <summary>{formatValue(block.summary, "查看详情")}</summary>
+          {Array.isArray(block.copyTargets) && block.copyTargets.length ? (
+            <div className="conversation-detail-actions">
+              {block.copyTargets.map((target, targetIndex) => (
+                <button
+                  type="button"
+                  key={`${target.kind || "copy"}-${targetIndex}`}
+                  onClick={(event) => {
+                    event.preventDefault();
+                    copyTextToClipboard(target.value);
+                  }}
+                >
+                  {formatValue(target.label, target.kind === "command" ? "复制命令" : "复制文件")}
+                </button>
+              ))}
+            </div>
+          ) : null}
           <pre className="conversation-detail-body">{formatValue(block.text, "")}</pre>
         </details>
       ))}

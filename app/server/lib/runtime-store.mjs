@@ -2641,6 +2641,56 @@ function conversationDetailSummary(kind, text) {
   return `${prefix}：${summarizeForFollowup(text, 96) || "点击展开查看完整内容"}`;
 }
 
+function dedupeCopyTargets(targets = []) {
+  const seen = new Set();
+  const nextTargets = [];
+  for (const target of targets) {
+    const value = safeText(target?.value, "").trim();
+    if (!value) continue;
+    const kind = safeText(target?.kind, "text");
+    const key = `${kind}:${value.toLowerCase()}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    nextTargets.push({
+      kind,
+      label: safeText(target?.label, kind === "command" ? "复制命令" : kind === "file" ? "复制文件" : "复制"),
+      value,
+    });
+  }
+  return nextTargets.slice(0, 8);
+}
+
+function extractConversationCopyTargets(text) {
+  const value = safeText(text, "");
+  if (!value) return [];
+  const targets = [];
+  const commandPatterns = [
+    /\b(?:npm|pnpm|yarn)\s+run\s+[A-Za-z0-9:_-]+(?:\s+[^\n\r]*)?/g,
+    /\bnode\s+--test\s+[^\n\r]+/g,
+    /\bnpx\s+[^\n\r]+/g,
+  ];
+  for (const pattern of commandPatterns) {
+    for (const match of value.matchAll(pattern)) {
+      targets.push({
+        kind: "command",
+        label: "复制命令",
+        value: safeText(match[0], "").trim(),
+      });
+    }
+  }
+
+  const filePattern = /(?:[A-Za-z]:[\\/][^\s`"'<>，。；：、（）()]+|(?:app|scripts|docs|tests|runtime|settings)[\\/][^\s`"'<>，。；：、（）()]+)/g;
+  for (const match of value.matchAll(filePattern)) {
+    targets.push({
+      kind: "file",
+      label: "复制文件",
+      value: safeText(match[0], "").trim(),
+    });
+  }
+
+  return dedupeCopyTargets(targets);
+}
+
 function buildConversationDetailBlocks(text, { force = false } = {}) {
   const value = safeText(text, "");
   if (!value) return [];
@@ -2656,6 +2706,7 @@ function buildConversationDetailBlocks(text, { force = false } = {}) {
       summary: conversationDetailSummary(kind, value),
       text: value,
       collapsedByDefault: true,
+      copyTargets: extractConversationCopyTargets(value),
     },
   ];
 }

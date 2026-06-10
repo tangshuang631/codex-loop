@@ -74,6 +74,25 @@ function asText(value, fallback = "") {
   return typeof value === "string" && value.trim() ? value.trim() : fallback;
 }
 
+function copyText(text) {
+  const value = asText(text);
+  if (!value) return;
+  if (navigator.clipboard?.writeText) {
+    void navigator.clipboard.writeText(value);
+    return;
+  }
+
+  const textarea = document.createElement("textarea");
+  textarea.value = value;
+  textarea.setAttribute("readonly", "true");
+  textarea.style.position = "fixed";
+  textarea.style.opacity = "0";
+  document.body.appendChild(textarea);
+  textarea.select();
+  document.execCommand("copy");
+  document.body.removeChild(textarea);
+}
+
 function compactText(value, length = 180) {
   const text = asText(value).replace(/\s+/g, " ");
   if (text.length <= length) return text;
@@ -422,6 +441,22 @@ function ConversationDetailBlocks({ blocks = [] }) {
           open={block.collapsedByDefault === false}
         >
           <summary>{asText(block.summary, "查看详情")}</summary>
+          {Array.isArray(block.copyTargets) && block.copyTargets.length ? (
+            <div className="conversation-detail-actions">
+              {block.copyTargets.map((target, targetIndex) => (
+                <button
+                  type="button"
+                  key={`${target.kind || "copy"}-${targetIndex}`}
+                  onClick={(event) => {
+                    event.preventDefault();
+                    copyText(target.value);
+                  }}
+                >
+                  {asText(target.label, target.kind === "command" ? "复制命令" : "复制文件")}
+                </button>
+              ))}
+            </div>
+          ) : null}
           <pre className="conversation-detail-body">{asText(block.text)}</pre>
         </details>
       ))}

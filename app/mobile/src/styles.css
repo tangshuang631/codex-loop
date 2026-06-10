@@ -330,6 +330,23 @@ label {
   display: none;
 }
 
+.conversation-detail-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  margin: 0.7rem 0 0.55rem;
+}
+
+.conversation-detail-actions button {
+  border: 1px solid rgba(31, 33, 31, 0.14);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.72);
+  color: inherit;
+  font-size: 0.74rem;
+  line-height: 1;
+  padding: 0.42rem 0.58rem;
+}
+
 .conversation-detail-body {
   margin: 0.65rem 0 0;
   padding: 0.75rem;

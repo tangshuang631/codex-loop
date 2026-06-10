@@ -185,6 +185,14 @@ test("exportMobileView returns shared Codex-style conversation items with collap
   assert.match(detailItem.detailBlocks[0].kind, /command_output|file_change|test_log|runtime_detail/);
   assert.match(detailItem.detailBlocks[0].summary, /命令|文件|验证|详情|日志/);
   assert.match(detailItem.detailBlocks[0].text, /npm run build:mobile|app\/web\/src\/App\.jsx/);
+  assert.ok(
+    detailItem.detailBlocks[0].copyTargets?.some((target) => target.kind === "command" && /npm run build:mobile/.test(target.value)),
+    "详情块应该把运行命令提取成可复制操作，避免用户只能从大段日志里手动选择。",
+  );
+  assert.ok(
+    detailItem.detailBlocks[0].copyTargets?.some((target) => target.kind === "file" && /app\/web\/src\/App\.jsx/.test(target.value)),
+    "详情块应该把文件路径提取成可复制操作，接近 Codex 桌面端的文件引用体验。",
+  );
 });
 
 test("exportMobileView returns readable runtime events for mobile monitoring", async () => {

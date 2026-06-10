@@ -429,13 +429,23 @@ test("dashboard keeps mobile first screen compact and conversation readable", as
 test("dashboard prefers shared conversation items and renders collapsible Codex details", async () => {
   const appSource = await fs.readFile("app/web/src/App.jsx", "utf8");
   const stylesSource = await fs.readFile("app/web/src/styles.css", "utf8");
+  const mobileSource = await fs.readFile("app/mobile/src/main.jsx", "utf8");
+  const mobileStylesSource = await fs.readFile("app/mobile/src/styles.css", "utf8");
 
   assert.match(appSource, /mobileView\?\.conversationItems/);
   assert.match(appSource, /detailBlocks/);
   assert.match(appSource, /conversation-detail-block/);
   assert.match(appSource, /collapsedByDefault/);
+  assert.match(appSource, /copyTargets/);
+  assert.match(appSource, /复制命令/);
+  assert.match(appSource, /复制文件/);
+  assert.match(mobileSource, /copyTargets/);
+  assert.match(mobileSource, /复制命令/);
+  assert.match(mobileSource, /复制文件/);
   assert.match(stylesSource, /\.conversation-detail-block/);
+  assert.match(stylesSource, /\.conversation-detail-actions/);
   assert.match(stylesSource, /\.conversation-detail-body/);
+  assert.match(mobileStylesSource, /\.conversation-detail-actions/);
 });
 
 test("dashboard uses task wording for primary creation and status surfaces", async () => {

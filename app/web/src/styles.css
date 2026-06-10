@@ -1957,6 +1957,29 @@ select {
   display: none;
 }
 
+.conversation-detail-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 10px 0 8px;
+}
+
+.conversation-detail-actions button {
+  border: 1px solid #d6d3ca;
+  border-radius: 999px;
+  background: #fff;
+  color: #3b3b34;
+  font-size: 12px;
+  line-height: 1;
+  padding: 6px 9px;
+  cursor: pointer;
+}
+
+.conversation-detail-actions button:hover {
+  border-color: #aaa59a;
+  background: #f7f7f3;
+}
+
 .conversation-detail-body {
   margin: 10px 0 0;
   padding: 12px;
