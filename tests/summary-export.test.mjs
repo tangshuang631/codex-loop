@@ -421,6 +421,9 @@ test("exportMobileView blocks next turn when required rule docs are missing", as
     singleThreadMode: true,
   });
   await startRun(configRoot);
+  await savePendingGuidance(configRoot, {
+    text: "等当前轮完成后，请把移动端对话流再压缩一点。",
+  });
 
   const mobile = await exportMobileView(configRoot);
 
@@ -462,6 +465,10 @@ test("exportMobileView blocks next turn when project workspace is missing", asyn
   assert.match(mobile.processStatus.headline, /需要处理/);
   assert.match(mobile.processStatus.holdReason, /项目路径|工作区/);
   assert.match(mobile.processStatus.nextAction, /恢复|重新配置/);
+  assert.equal(mobile.pendingGuidance.status, "blocked");
+  assert.match(mobile.pendingGuidance.statusLabel, /暂不可发送/);
+  assert.match(mobile.pendingGuidance.statusDetail, /项目路径|工作区/);
+  assert.match(mobile.pendingGuidance.userMessage, /项目路径|工作区|暂不可发送/);
 });
 
 test("exportMobileView explains why the loop is waiting before sending again", async () => {
@@ -474,6 +481,9 @@ test("exportMobileView explains why the loop is waiting before sending again", a
     singleThreadMode: true,
   });
   await startRun(configRoot);
+  await savePendingGuidance(configRoot, {
+    text: "等 Codex 完成后，请优先检查最新回复有没有遗漏验收。",
+  });
   const runningSnapshot = await ensureLoopArtifacts(configRoot);
   await fs.writeFile(
     initialSnapshot.paths.threadPath,
@@ -501,6 +511,10 @@ test("exportMobileView explains why the loop is waiting before sending again", a
   assert.equal(mobile.processStatus.canSendNextTurn, false);
   assert.match(mobile.processStatus.holdReason, /Codex.*当前轮|当前轮.*Codex/);
   assert.match(mobile.processStatus.nextAction, /等待.*完成|不要.*发送|查看.*记录/);
+  assert.equal(mobile.pendingGuidance.status, "waiting_codex");
+  assert.match(mobile.pendingGuidance.statusLabel, /等待 Codex 完成/);
+  assert.match(mobile.pendingGuidance.statusDetail, /Codex.*当前轮|完成后.*本地模型|NPC/);
+  assert.match(mobile.pendingGuidance.userMessage, /等待 Codex 完成|不会打断/);
 });
 
 test("exportMobileView explains the recovery action after continuation failure", async () => {
@@ -728,6 +742,9 @@ test("exportMobileView gives clear mobile guidance while supervisor review is in
     threadId: "thread-mobile-reviewing",
     singleThreadMode: true,
   });
+  await savePendingGuidance(configRoot, {
+    text: "复盘完成后，请把用户补充合并成更短的下一轮指令。",
+  });
 
   let releaseReview;
   const releaseReviewPromise = new Promise((resolve) => {
@@ -760,6 +777,10 @@ test("exportMobileView gives clear mobile guidance while supervisor review is in
   assert.equal(mobile.thread.continuationStatus, "reviewing");
   assert.equal(mobile.processStatus.state, "supervisor_reviewing");
   assert.match(mobile.suggestedAction, /监督复盘中|本地模型|等待.*下一步/);
+  assert.equal(mobile.pendingGuidance.status, "waiting_npc");
+  assert.match(mobile.pendingGuidance.statusLabel, /等待 NPC 复盘/);
+  assert.match(mobile.pendingGuidance.statusDetail, /本地模型|NPC|复盘/);
+  assert.match(mobile.pendingGuidance.userMessage, /等待.*NPC|复盘后.*合并/);
 
   releaseReview();
   await reviewPromise;

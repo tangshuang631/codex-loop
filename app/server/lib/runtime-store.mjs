@@ -2745,6 +2745,7 @@ function derivePendingGuidanceStatus(processStatus = {}) {
       statusLabel: "等待 Codex 完成",
       statusDetail: "Codex 正在处理当前轮，补充会先保存，完成后再交给本地模型 / NPC 合并。",
       actionLabel: "等待完成",
+      userMessage: "等待 Codex 完成当前轮；你的补充已保存，不会打断正在执行的任务。",
     };
   }
   if (state === "supervisor_reviewing") {
@@ -2753,6 +2754,7 @@ function derivePendingGuidanceStatus(processStatus = {}) {
       statusLabel: "等待 NPC 复盘",
       statusDetail: "本地模型 / NPC 正在复盘 Codex 回复，补充会在复盘后合并进下一条指令。",
       actionLabel: "等待复盘",
+      userMessage: "正在等待 NPC 复盘；复盘后会把你的补充合并进下一条指令。",
     };
   }
   if (processStatus.canSendNextTurn) {
@@ -2761,13 +2763,16 @@ function derivePendingGuidanceStatus(processStatus = {}) {
       statusLabel: "等待本地模型 / NPC 合并",
       statusDetail: "Codex 当前空闲，可以由本地模型 / NPC 结合最新回复和你的补充生成下一条指令。",
       actionLabel: "可发送",
+      userMessage: "Codex 已完成当前任务，会交给本地模型 / NPC 结合 Codex 回复合并成下一条指令。",
     };
   }
+  const blockedDetail = processStatus.holdReason || processStatus.detail || "当前状态不适合发送下一条指令。";
   return {
     status: "blocked",
     statusLabel: "暂不可发送",
-    statusDetail: processStatus.holdReason || processStatus.detail || "当前状态不适合发送下一条指令。",
+    statusDetail: blockedDetail,
     actionLabel: "暂不可发送",
+    userMessage: `暂不可发送：${blockedDetail}`,
   };
 }
 
@@ -2961,7 +2966,9 @@ export async function exportMobileView(startDir = process.cwd()) {
       mergeProcessor: "ollama_npc",
       mergeProcessorLabel: "本地模型 / NPC 合并",
       ...pendingGuidanceStatus,
-      userMessage: "会等 Codex 完成当前任务后，再交给本地模型 / NPC 结合 Codex 回复合并成下一条指令。",
+      userMessage:
+        pendingGuidanceStatus.userMessage ||
+        "会等 Codex 完成当前任务后，再交给本地模型 / NPC 结合 Codex 回复合并成下一条指令。",
     },
     codexConversation: snapshot.codexConversation,
     bindingNote,
