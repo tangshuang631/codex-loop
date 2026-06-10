@@ -1463,7 +1463,8 @@ test("milestone review avoids repeating independent verification inside the cool
   assert.equal(reviewedAgain.thread.lastSupervisorVerificationStatus, "skipped");
   assert.match(reviewedAgain.thread.lastSupervisorVerificationSummary, /冷却期|近期已完成/);
   assert.match(reviewedAgain.thread.lastSupervisorInstruction, /最影响长期监控判断/);
-  assert.match(reviewedAgain.thread.lastSupervisorInstruction, /独立验收未执行/);
+  assert.doesNotMatch(reviewedAgain.thread.lastSupervisorInstruction, /独立验收未执行|补齐/);
+  assert.match(reviewedAgain.thread.lastSupervisorInstruction, /不重复执行|复用最近验收结论/);
   assert.match(reviewedAgain.thread.lastSupervisorInstruction, /冷却期|近期已完成/);
 });
 

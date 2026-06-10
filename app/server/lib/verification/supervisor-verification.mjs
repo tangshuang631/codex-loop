@@ -352,10 +352,22 @@ export function injectVerificationIntoInstruction(instruction, verification = {}
   }
 
   if (verification.status === "skipped") {
+    const summary = safeText(verification.summary, "没有可执行命令。");
+    if (/冷却期|近期已完成|不重复执行|已经做过独立验收|等待新的 Codex 完成/u.test(summary)) {
+      return summarizeForFollowup(
+        [
+          "原下一步：" + instruction,
+          "提醒：本轮不重复执行独立验收，原因：" + summary,
+          "请复用最近验收结论继续推进；完成新的 Codex 结果后再做下一次验收。",
+        ].join(" "),
+        700,
+      );
+    }
+
     return summarizeForFollowup(
       [
         "原下一步：" + instruction,
-        "提醒：独立验收未执行，原因：" + (verification.summary || "没有可执行命令。"),
+        "提醒：独立验收未执行，原因：" + summary,
         "请先补齐或说明可验证证据，再继续下一步。",
       ].join(" "),
       700,

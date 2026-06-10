@@ -117,3 +117,19 @@ test("verification injection keeps Codex focused on failed or skipped evidence",
   assert.match(skippedInstruction, /独立验收未执行/);
   assert.match(skippedInstruction, /没有可执行命令/);
 });
+
+test("verification injection does not treat throttled verification as missing evidence", () => {
+  const cooldownInstruction = injectVerificationIntoInstruction("继续优化移动端状态。", {
+    status: "skipped",
+    summary: "近期已完成同一组独立验收，仍在冷却期内，本轮不重复执行。",
+  });
+  const alreadyVerifiedInstruction = injectVerificationIntoInstruction("继续优化移动端状态。", {
+    status: "skipped",
+    summary: "当前 Codex 完成结果已经做过独立验收，本轮不重复执行；等待新的 Codex 完成后再验收。",
+  });
+
+  assert.doesNotMatch(cooldownInstruction, /独立验收未执行|补齐/);
+  assert.match(cooldownInstruction, /不重复执行|冷却期|复用/);
+  assert.doesNotMatch(alreadyVerifiedInstruction, /独立验收未执行|补齐/);
+  assert.match(alreadyVerifiedInstruction, /已经做过独立验收|等待新的 Codex 完成/);
+});
