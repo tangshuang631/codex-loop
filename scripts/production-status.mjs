@@ -118,6 +118,8 @@ async function readLatestReport(kind, {
     summary: isStale ? `${summary}，但报告已过期` : summary,
     nextAction: report.diagnosis?.nextAction || report.nextAction || "",
     waiting: report.waiting || null,
+    diagnosis: report.diagnosis || null,
+    counters: report.counters || null,
   };
 }
 
@@ -160,6 +162,8 @@ async function readLiveProductionObservation(kind, {
       ? "请重新运行 npm run production:observe，或重新启动一次真实任务生成新的运行记录。"
       : report.diagnosis?.nextAction || report.nextAction || "",
     waiting: report.waiting || null,
+    diagnosis: report.diagnosis || null,
+    counters: report.counters || null,
   };
 }
 
@@ -235,6 +239,18 @@ function hasPartialClosedLoopEvidence(item = {}) {
 }
 
 function needsSupervisorRecovery(item = {}) {
+  if (item.status === "stale") {
+    return false;
+  }
+  if (item.diagnosis?.category === "completion_missing_supervisor_review") {
+    return true;
+  }
+  if (
+    Number(item.counters?.completions || 0) > Number(item.counters?.supervisorReviews || 0) &&
+    Number(item.counters?.closedLoops || 0) === 0
+  ) {
+    return true;
+  }
   const textBlock = [
     item.summary,
     item.nextAction,
@@ -242,6 +258,10 @@ function needsSupervisorRecovery(item = {}) {
     item.diagnosis?.nextAction,
   ].filter(Boolean).join("\n");
   return /缺少\s*NPC\s*监督复盘|补齐监督复盘|production:recover/u.test(textBlock);
+}
+
+function supervisorRecoveryAction() {
+  return "先运行 npm run production:recover 补齐监督复盘；该命令不会发送下一轮指令。";
 }
 
 function deriveNextAction(items, target = {}) {
@@ -267,7 +287,7 @@ function deriveNextAction(items, target = {}) {
   const failed = items.find((item) => item.status && item.status !== "passed");
   if (failed) {
     if (failed.label === "真实运行观测" && needsSupervisorRecovery(failed)) {
-      return failed.nextAction || "先运行 npm run production:recover 补齐监督复盘；该命令不会发送下一轮指令。";
+      return supervisorRecoveryAction();
     }
     if (failed.label === "真实运行观测" && hasPartialClosedLoopEvidence(failed)) {
       return appendTargetConfirmation(failed.nextAction || failed.summary, target);
@@ -317,8 +337,7 @@ function deriveReadiness(items, target = {}) {
     return {
       stage: "blocked",
       summary: "Codex 已完成但还缺少 NPC 监督复盘，暂时不能继续发送下一轮。",
-      nextAction:
-        observation.nextAction || "先运行 npm run production:recover 补齐监督复盘；该命令不会发送下一轮指令。",
+      nextAction: supervisorRecoveryAction(),
     };
   }
 

@@ -352,6 +352,40 @@ test("production observer treats later Codex mirror replies as timeout recovery 
   assert.match(report.timeline.map((item) => item.detail).join("\n"), /Codex 已经完成这一轮开发/);
 });
 
+test("production observer uses structured diagnosis for completions missing supervisor review", async () => {
+  const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), "codex-loop-observer-"));
+  const logDir = path.join(tempRoot, "runtime", "missing-review-loop", "logs");
+  await fs.mkdir(logDir, { recursive: true });
+  await fs.writeFile(
+    path.join(logDir, "events.jsonl"),
+    [
+      { type: "run_started_from_console", at: "2026-06-10T11:00:00.000Z" },
+      {
+        type: "codex_followup_dispatching",
+        at: "2026-06-10T11:01:00.000Z",
+        promptPreview: "继续完成核心链路验证。",
+      },
+      {
+        type: "codex_followup_completed",
+        at: "2026-06-10T11:20:00.000Z",
+        latestAssistantPreview: "Codex 已完成核心链路验证。",
+      },
+    ].map((event) => JSON.stringify(event)).join("\n") + "\n",
+    "utf8",
+  );
+
+  const report = await buildProductionObservation({
+    root: tempRoot,
+    runId: "missing-review-loop",
+  });
+
+  assert.equal(report.status, "attention");
+  assert.equal(report.counters.completions, 1);
+  assert.equal(report.counters.supervisorReviews, 0);
+  assert.equal(report.diagnosis.category, "completion_missing_supervisor_review");
+  assert.match(report.diagnosis.nextAction, /production:recover/);
+});
+
 test("production observer stops asking for recovery after recovered replies are reviewed", async () => {
   const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), "codex-loop-observer-"));
   const logDir = path.join(tempRoot, "runtime", "timeout-reviewed-loop", "logs");

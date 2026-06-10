@@ -344,6 +344,13 @@ function deriveDiagnosis(counters, timeline, { hasRecovery = false } = {}) {
         nextAction: "先运行 npm run production:recover 补齐本地监督复盘；不要因为旧超时重复发送同一条指令。",
       };
     }
+    if ((counters.completions || 0) > (counters.supervisorReviews || 0)) {
+      return {
+        category: "completion_missing_supervisor_review",
+        userMessage: "Codex 已有完成回复，但还缺少 NPC 监督复盘，暂时不能算完整闭环。",
+        nextAction: "先运行 npm run production:recover 补齐监督复盘；该命令不会发送下一轮指令。",
+      };
+    }
     const types = new Set(timeline.map((event) => event.type));
     if (
       types.has("codex_followup_sent_waiting") &&
