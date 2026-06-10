@@ -28,6 +28,8 @@ test("long-run smoke check is exposed and uses simulated controller dependencies
   assert.match(source, /readSnapshot/);
   assert.match(source, /runTurn/);
   assert.match(source, /reviewCompletion/);
+  assert.match(source, /pendingUserGuidance/);
+  assert.match(source, /NPC|监督复盘|generatorSawGuidance/);
   assert.match(source, /runtime[\\/]longrun-smoke/);
   assert.doesNotMatch(source, /codex-dispatcher|sendCodex|native dispatch/i);
 });

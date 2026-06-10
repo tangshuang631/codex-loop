@@ -62,18 +62,36 @@ async function runSmoke() {
   let runCount = 0;
   let reviewCount = 0;
   let stopCount = 0;
+  let generatorSawGuidance = "";
+  let dispatchedPromptWithGuidance = "";
 
   const controller = createLoopController({
     readSnapshot: async () => currentSnapshot,
     runTurn: async () => {
       runCount += 1;
-      events.push(`发送第 ${runCount} 轮`);
+      const pendingUserGuidance = currentSnapshot.thread.pendingUserGuidance || "";
+      if (pendingUserGuidance) {
+        generatorSawGuidance = pendingUserGuidance;
+        dispatchedPromptWithGuidance =
+          "NPC 已结合 Codex 最新回复和用户补充生成下一步：" +
+          pendingUserGuidance;
+      }
+      events.push(
+        pendingUserGuidance
+          ? `发送第 ${runCount} 轮，已融合用户补充`
+          : `发送第 ${runCount} 轮`,
+      );
       currentSnapshot = makeSnapshot({
         thread: {
           continuationStatus: "dispatching",
           latestEventType: "codex_followup_dispatched",
           lastCompletionAt: currentSnapshot.thread.lastCompletionAt,
           lastSupervisorReviewAt: currentSnapshot.thread.lastSupervisorReviewAt,
+          lastDispatchPrompt: pendingUserGuidance
+            ? dispatchedPromptWithGuidance
+            : `第 ${runCount} 轮模拟指令`,
+          pendingUserGuidance: "",
+          pendingUserGuidanceAt: "",
         },
       });
     },
@@ -88,6 +106,8 @@ async function runSmoke() {
           lastSupervisorReviewAt: new Date(
             Date.parse(snapshot.thread.lastCompletionAt) + 1000,
           ).toISOString(),
+          pendingUserGuidance: snapshot.thread.pendingUserGuidance || "",
+          pendingUserGuidanceAt: snapshot.thread.pendingUserGuidanceAt || "",
         },
       });
       return { shouldContinue: true };
@@ -148,6 +168,55 @@ async function runSmoke() {
   }
 
   currentSnapshot = makeSnapshot({
+    thread: {
+      ...currentSnapshot.thread,
+      pendingUserGuidance: "下一轮请优先检查移动端引导是否清楚，并保持小步验证。",
+      pendingUserGuidanceAt: "2026-06-10T08:10:00.000Z",
+    },
+  });
+  await flushScheduled(scheduled);
+  if (runCount !== 2) {
+    throw new Error("用户在 Codex 工作期间补充引导时，不应立刻追发打断。");
+  }
+
+  currentSnapshot = makeSnapshot({
+    state: {
+      elapsedMinutes: 60,
+      budgets: {
+        maxMinutes: 120,
+        maxTokens: 200000,
+        finalizeLeadMinutes: 0,
+        finalizeLeadTokens: 0,
+      },
+    },
+    thread: {
+      continuationStatus: "idle",
+      latestEventType: "codex_followup_completed",
+      lastCompletionAt: "2026-06-10T08:30:00.000Z",
+      pendingUserGuidance: currentSnapshot.thread.pendingUserGuidance,
+      pendingUserGuidanceAt: currentSnapshot.thread.pendingUserGuidanceAt,
+    },
+  });
+  await flushScheduled(scheduled);
+
+  if (
+    reviewCount !== 2 ||
+    runCount !== 3 ||
+    !generatorSawGuidance ||
+    currentSnapshot.thread.pendingUserGuidance
+  ) {
+    throw new Error("Codex 完成后必须让 NPC 看到用户补充，融合到下一轮后再清空。");
+  }
+  if (!/移动端引导/.test(dispatchedPromptWithGuidance)) {
+    throw new Error("融合后的下一轮指令缺少用户补充重点。");
+  }
+
+  await flushScheduled(scheduled);
+  if (runCount !== 3) {
+    throw new Error("融合用户补充后的等待期间不应重复发送。");
+  }
+
+  currentSnapshot = makeSnapshot({
     state: {
       elapsedMinutes: 120,
       budgets: {
@@ -160,8 +229,8 @@ async function runSmoke() {
     thread: {
       continuationStatus: "idle",
       latestEventType: "codex_followup_completed",
-      lastCompletionAt: "2026-06-10T08:30:00.000Z",
-      lastSupervisorReviewAt: "2026-06-10T08:30:10.000Z",
+      lastCompletionAt: "2026-06-10T09:00:00.000Z",
+      lastSupervisorReviewAt: "2026-06-10T09:00:10.000Z",
     },
   });
   await flushScheduled(scheduled);
@@ -178,12 +247,15 @@ async function runSmoke() {
       runCount,
       reviewCount,
       stopCount,
+      generatorSawGuidance,
+      dispatchedPromptWithGuidance,
       events,
     },
     checks: [
       "第一轮发送后进入等待 Codex",
       "Codex 未完成时不追发",
       "Codex 完成后先监督复盘再续发",
+      "用户补充会等 Codex 完成后交给 NPC 合并",
       "预算到达后停止自动发送",
     ],
   };
