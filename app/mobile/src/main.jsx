@@ -105,6 +105,160 @@ function shortThreadId(threadId = "") {
   return `${value.slice(0, 8)}...${value.slice(-6)}`;
 }
 
+function trimPathToken(token) {
+  return asText(token).replace(/[),.;，。；）]+$/u, "");
+}
+
+function looksLikeFilePath(token) {
+  const value = trimPathToken(token);
+  return (
+    /^[A-Za-z]:[\\/][^\s]+/.test(value) ||
+    /^\.{1,2}[\\/][^\s]+/.test(value) ||
+    /^\/[^\s]+/.test(value) ||
+    /^(?:app|scripts|docs|tests|runtime|settings)[\\/][^\s]+/.test(value)
+  );
+}
+
+function InlineMessageText({ text }) {
+  const value = asText(text);
+  if (!value) return null;
+
+  const pattern = /(`[^`]+`|\[[^\]]+\]\([^)]+\)|[A-Za-z]:[\\/][^\s`，。；：、（）()<>"]+|\.{1,2}[\\/][^\s`，。；：、（）()<>"]+|\/[^\s`，。；：、（）()<>"]+|(?:app|scripts|docs|tests|runtime|settings)[\\/][^\s`，。；：、（）()<>"]+)/g;
+  const parts = [];
+  let lastIndex = 0;
+  let match;
+
+  while ((match = pattern.exec(value))) {
+    if (match.index > lastIndex) {
+      parts.push(value.slice(lastIndex, match.index));
+    }
+
+    const raw = match[0];
+    if (raw.startsWith("`") && raw.endsWith("`")) {
+      parts.push(
+        <code className="inline-code" key={`${match.index}-code`}>
+          {raw.slice(1, -1)}
+        </code>,
+      );
+    } else {
+      const linkMatch = raw.match(/^\[([^\]]+)\]\(([^)]+)\)$/);
+      const pathText = linkMatch ? linkMatch[2] : trimPathToken(raw);
+      if (looksLikeFilePath(pathText)) {
+        parts.push(
+          <button
+            type="button"
+            className="file-path-chip"
+            key={`${match.index}-path`}
+            title="复制路径"
+            onClick={() => copyText(pathText)}
+            onContextMenu={(event) => {
+              event.preventDefault();
+              copyText(pathText);
+            }}
+          >
+            {linkMatch ? linkMatch[1] : pathText}
+          </button>,
+        );
+      } else {
+        parts.push(raw);
+      }
+    }
+
+    lastIndex = match.index + raw.length;
+  }
+
+  if (lastIndex < value.length) {
+    parts.push(value.slice(lastIndex));
+  }
+
+  return parts.map((part, index) =>
+    typeof part === "string" ? <React.Fragment key={`text-${index}`}>{part}</React.Fragment> : part,
+  );
+}
+
+function MarkdownMessage({ text }) {
+  const value = asText(text);
+  if (!value) return null;
+
+  const blocks = [];
+  const fencePattern = /```([^\n`]*)\n([\s\S]*?)```/g;
+  let cursor = 0;
+  let match;
+
+  while ((match = fencePattern.exec(value))) {
+    if (match.index > cursor) {
+      blocks.push({ type: "text", content: value.slice(cursor, match.index) });
+    }
+    blocks.push({
+      type: "code",
+      lang: match[1].trim(),
+      content: match[2].replace(/\n$/u, ""),
+    });
+    cursor = match.index + match[0].length;
+  }
+
+  if (cursor < value.length) {
+    blocks.push({ type: "text", content: value.slice(cursor) });
+  }
+
+  const renderText = (blockText, blockIndex) => {
+    const paragraphs = blockText
+      .split(/\n\s*\n/u)
+      .map((item) => item.trim())
+      .filter(Boolean);
+
+    return paragraphs.map((paragraph, index) => {
+      const lines = paragraph.split(/\n/u).map((line) => line.trim()).filter(Boolean);
+      const heading = paragraph.match(/^(#{1,3})\s+(.+)$/u);
+      if (heading) {
+        return (
+          <h3 className="markdown-heading" key={`${blockIndex}-${index}`}>
+            <InlineMessageText text={heading[2]} />
+          </h3>
+        );
+      }
+
+      if (lines.every((line) => /^[-*]\s+/.test(line))) {
+        return (
+          <ul className="markdown-list" key={`${blockIndex}-${index}`}>
+            {lines.map((line, itemIndex) => (
+              <li key={`${blockIndex}-${index}-${itemIndex}`}>
+                <InlineMessageText text={line.replace(/^[-*]\s+/, "")} />
+              </li>
+            ))}
+          </ul>
+        );
+      }
+
+      return lines.map((line, lineIndex) => (
+        <p className="markdown-paragraph" key={`${blockIndex}-${index}-${lineIndex}`}>
+          <InlineMessageText text={line.replace(/^\d+\.\s+/, "")} />
+        </p>
+      ));
+    });
+  };
+
+  return (
+    <div className="markdown-message">
+      {blocks.map((block, index) =>
+        block.type === "code" ? (
+          <figure className="markdown-code-block" key={`code-${index}`}>
+            <figcaption>
+              <span>{block.lang || "代码"}</span>
+              <button type="button" onClick={() => copyText(block.content)}>
+                复制
+              </button>
+            </figcaption>
+            <pre>{block.content}</pre>
+          </figure>
+        ) : (
+          <React.Fragment key={`text-${index}`}>{renderText(block.content, index)}</React.Fragment>
+        ),
+      )}
+    </div>
+  );
+}
+
 function formatReadinessStage(readiness = {}) {
   const stage = readiness?.stage || "";
   if (stage === "production") return "可长跑";
@@ -503,7 +657,7 @@ function Conversation({ mobileView }) {
                 <span>{formatTime(entry.at)} · {isLoop ? "codex-loop" : "Codex"}</span>
                 <strong>{compactText(entry.preview || text, isLoop ? 120 : 220)}</strong>
               </summary>
-              <pre>{text}</pre>
+              <MarkdownMessage text={text} />
               <ConversationDetailBlocks blocks={entry.detailBlocks} />
             </details>
           </article>

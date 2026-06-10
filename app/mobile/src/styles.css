@@ -323,6 +323,106 @@ label {
   line-height: 1.65;
 }
 
+.markdown-message {
+  display: grid;
+  gap: 0.7rem;
+  margin-top: 0.75rem;
+  color: inherit;
+  line-height: 1.72;
+}
+
+.message.is-loop .markdown-message {
+  border-top: 1px solid rgba(31, 33, 31, 0.08);
+  padding-top: 0.72rem;
+}
+
+.markdown-heading,
+.markdown-paragraph {
+  margin: 0;
+}
+
+.markdown-heading {
+  font-size: 1rem;
+  line-height: 1.55;
+}
+
+.markdown-list {
+  margin: 0;
+  padding-left: 1.3rem;
+}
+
+.markdown-list li + li {
+  margin-top: 0.28rem;
+}
+
+.inline-code {
+  border-radius: 0.45rem;
+  background: rgba(31, 33, 31, 0.06);
+  color: #25251f;
+  font-family: "Cascadia Code", "SFMono-Regular", Consolas, monospace;
+  font-size: 0.9em;
+  padding: 0.08rem 0.34rem;
+}
+
+.file-path-chip {
+  display: inline-flex;
+  max-width: 100%;
+  margin: 0 0.1rem;
+  overflow: hidden;
+  border: 1px solid #d8e2ec;
+  border-radius: 999px;
+  background: #f3f7fb;
+  color: #3e5a78;
+  cursor: pointer;
+  font-family: "Cascadia Code", "SFMono-Regular", Consolas, monospace;
+  font-size: 0.88em;
+  padding: 0.05rem 0.42rem;
+  text-overflow: ellipsis;
+  vertical-align: baseline;
+  white-space: nowrap;
+}
+
+.markdown-code-block {
+  margin: 0;
+  overflow: hidden;
+  border: 1px solid rgba(31, 33, 31, 0.1);
+  border-radius: 0.9rem;
+  background: rgba(255, 255, 255, 0.58);
+}
+
+.markdown-code-block figcaption {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  border-bottom: 1px solid rgba(31, 33, 31, 0.08);
+  color: #75766f;
+  font-size: 0.75rem;
+  padding: 0.55rem 0.7rem;
+}
+
+.markdown-code-block button {
+  border: 1px solid rgba(31, 33, 31, 0.12);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.72);
+  color: #363833;
+  cursor: pointer;
+  font-size: 0.72rem;
+  line-height: 1;
+  padding: 0.32rem 0.58rem;
+}
+
+.markdown-code-block pre {
+  margin: 0;
+  overflow-x: auto;
+  color: #25251f;
+  font-family: "Cascadia Code", "SFMono-Regular", Consolas, monospace;
+  font-size: 0.78rem;
+  line-height: 1.62;
+  padding: 0.72rem;
+  white-space: pre;
+}
+
 .conversation-detail-list {
   display: grid;
   gap: 0.45rem;

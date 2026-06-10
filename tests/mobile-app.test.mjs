@@ -60,6 +60,24 @@ test("mobile app uses shared conversation items and collapses Codex-style detail
   assert.match(styleSource, /\.conversation-detail-body/);
 });
 
+test("mobile app renders Codex replies with markdown code blocks and copyable file paths", async () => {
+  const source = await read("app/mobile/src/main.jsx");
+  const styleSource = await read("app/mobile/src/styles.css");
+
+  assert.match(source, /function InlineMessageText/);
+  assert.match(source, /function MarkdownMessage/);
+  assert.match(source, /markdown-code-block/);
+  assert.match(source, /file-path-chip/);
+  assert.match(source, /copyText\(block\.content\)/);
+  assert.match(source, /onContextMenu/);
+  assert.match(source, /title="复制路径"/);
+  assert.match(source, /<MarkdownMessage text=\{text\} \/>/);
+  assert.doesNotMatch(source, /<pre>\{text\}<\/pre>/);
+  assert.match(styleSource, /\.markdown-message/);
+  assert.match(styleSource, /\.markdown-code-block/);
+  assert.match(styleSource, /\.file-path-chip/);
+});
+
 test("mobile app renders history as Codex-like divider flow instead of heavy chat cards", async () => {
   const source = await read("app/mobile/src/main.jsx");
   const styleSource = await read("app/mobile/src/styles.css");
