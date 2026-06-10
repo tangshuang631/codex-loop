@@ -30,8 +30,8 @@ The current top priority is the core local loop business:
 后续进度不按“prompt 写得更聪明”判断，而按 loop 是否更可靠判断。优先建设 loop，而不是堆 prompt。
 
 - P0 可运行闭环：用户能新建任务、绑定线程、开始循环、停止收尾，并在控制台看到 Codex 回复和 codex-loop 指令。
-- P0 远程联动：安卓 App / PWA 必须能作为核心入口查看循环进程、历史对话、待合并引导，并远程发送引导；它不是 P3 之后的附属查看页。
-- P0 Codex 风格对话：桌面端和移动端必须共用接近 Codex 桌面端的历史渲染规则。普通回复按连续对话流呈现；文件改动、命令输出、脚本内容、测试日志、截图证据等大块信息默认折叠，点击后展开详情。
+- P0 远程联动：安卓 App / PWA 必须能作为核心入口查看循环进程、历史对话、待合并引导，并远程发送、编辑、撤回引导；它不是 P3 之后的附属查看页。
+- P0 Codex 风格对话：桌面端和移动端必须共用接近 Codex 桌面端的历史渲染规则。普通回复按连续对话流呈现；文件改动、命令输出、脚本内容、测试日志、截图证据等大块信息默认折叠，点击后展开详情，并提供复制文件路径、命令和脚本内容的入口。
 - P1 可控闭环：系统能识别 Codex 是否仍在工作，用户补充会排队等待当前轮完成，停止条件和预算会阻止下一轮派发。
 - P2 可验证闭环：NPC 会结合项目文档、用户规则和 Codex 最新回复生成下一步；测试、构建、日志或截图验收能写回状态。
 - P3 可长期监控闭环：运行日志可读，失败可恢复，多设备长期授权、重连、撤销和审计稳定。
@@ -67,12 +67,13 @@ Current implementation progress:
 1. strengthen Codex thread linkage and transcript mirror
 2. ship Android App / PWA remote control as a P0 path: paired phone can view task progress, read history, send guidance, edit or recall queued guidance, and reconnect after codex-loop restarts
 3. make desktop and mobile history render like Codex desktop: continuous divider-based conversation, right-side codex-loop guidance, left/full-width Codex replies, and collapsed detail blocks for files, commands, scripts, tests, logs, screenshots, and verification evidence
-4. improve adapter-driven strict defaults for different repositories
-5. keep the local console fast, simple, and reliable
-6. improve startup resilience and recovery messaging
-7. formalize template-driven project loop setup
-8. evaluate optional ccswitch-assisted telemetry enrichments
-9. keep loop differentiation clearly stronger than native Codex automations
+4. keep the same conversation item model across desktop Web, `/mobile`, and `app/mobile`, so remote users see the same process history instead of a separate mobile log page
+5. improve adapter-driven strict defaults for different repositories
+6. keep the local console fast, simple, and reliable
+7. improve startup resilience and recovery messaging
+8. formalize template-driven project loop setup
+9. evaluate optional ccswitch-assisted telemetry enrichments
+10. keep loop differentiation clearly stronger than native Codex automations
 
 ## Later roadmap
 
@@ -123,6 +124,7 @@ The first mobile App capability must be production-shaped, not a debug page:
 - send-guidance composer
 - safe by default
 - consistent with the web task detail content
+- real remote control basics: send, edit, recall queued guidance, and manually advance once when the controller gate says it is safe
 - collapsible detail blocks for edited files, command output, scripts, tests, screenshots, and verification logs
 - a Codex-like conversation flow instead of separated dashboard cards
 - long-lived pairing so the same phone can reconnect after the workstation service restarts
@@ -141,6 +143,7 @@ History rendering requirement:
 - codex-loop and user guidance should appear as compact right-side bubbles.
 - File paths should be visually distinct and copyable.
 - Edited files, command output, script content, test logs, screenshots, and verification evidence should collapse by default with a short Chinese label and expand on tap.
+- Expanded detail blocks should preserve the useful structure from Codex desktop: edited files, executed commands, script output, and verification results should be scannable before the user reads the full raw content.
 - Desktop Web, `/mobile`, and `app/mobile` should consume the same conversation item model so mobile does not drift from the desktop experience.
 
 Phone pairing requirement:
