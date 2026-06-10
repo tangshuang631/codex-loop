@@ -257,7 +257,7 @@ test("production observer marks missing or failed long-run evidence as attention
 
   assert.equal(failed.status, "attention");
   assert.equal(failed.counters.failures, 1);
-  assert.match(failed.summary, /发现 1 条失败记录/);
+  assert.match(failed.summary, /发现 1 条未恢复失败记录/);
   assert.match(failed.nextAction, /先处理失败记录/);
 });
 
@@ -668,4 +668,71 @@ test("production observer judges the latest run cycle while preserving historica
   assert.equal(report.counters.closedLoops, 2);
   assert.match(report.summary, /最近一次运行周期/);
   assert.doesNotMatch(report.timeline.map((item) => item.detail).join("\n"), /旧窗口不可接收/);
+});
+
+test("production observer treats early same-run failures as resolved after two later closed loops", async () => {
+  const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), "codex-loop-observer-"));
+  const logDir = path.join(tempRoot, "runtime", "same-run-recovered-loop", "logs");
+  await fs.mkdir(logDir, { recursive: true });
+  await fs.writeFile(
+    path.join(logDir, "events.jsonl"),
+    [
+      { type: "run_started_from_console", at: "2026-06-10T09:00:00.000Z" },
+      {
+        type: "codex_followup_dispatching",
+        at: "2026-06-10T09:01:00.000Z",
+        promptPreview: "第一次发送失败后重试。",
+      },
+      {
+        type: "codex_followup_failed",
+        at: "2026-06-10T09:02:00.000Z",
+        message: "Codex 桌面端短暂不可接收新指令。",
+      },
+      {
+        type: "codex_followup_dispatching",
+        at: "2026-06-10T09:05:00.000Z",
+        promptGenerator: "ollama",
+        promptPreview: "继续推进第一轮稳定验证。",
+      },
+      {
+        type: "codex_followup_completed",
+        at: "2026-06-10T09:12:00.000Z",
+        latestAssistantPreview: "第一轮稳定验证已完成。",
+      },
+      {
+        type: "supervisor_review_completed",
+        at: "2026-06-10T09:13:00.000Z",
+        summary: "NPC 复盘确认第一轮可继续。",
+      },
+      {
+        type: "codex_followup_dispatching",
+        at: "2026-06-10T09:15:00.000Z",
+        promptGenerator: "ollama",
+        promptPreview: "继续推进第二轮稳定验证。",
+      },
+      {
+        type: "codex_followup_completed",
+        at: "2026-06-10T09:22:00.000Z",
+        latestAssistantPreview: "第二轮稳定验证已完成。",
+      },
+      {
+        type: "supervisor_review_completed",
+        at: "2026-06-10T09:23:00.000Z",
+        summary: "NPC 复盘确认第二轮可继续。",
+      },
+    ].map((event) => JSON.stringify(event)).join("\n") + "\n",
+    "utf8",
+  );
+
+  const report = await buildProductionObservation({
+    root: tempRoot,
+    runId: "same-run-recovered-loop",
+  });
+
+  assert.equal(report.status, "passed");
+  assert.equal(report.counters.failures, 1);
+  assert.equal(report.counters.unresolvedFailures, 0);
+  assert.equal(report.counters.closedLoops, 2);
+  assert.match(report.summary, /2 轮发送、Codex 完成和 NPC 复盘/);
+  assert.match(report.diagnosis.userMessage, /早期失败已被后续稳定闭环覆盖/);
 });

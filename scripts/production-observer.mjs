@@ -110,13 +110,18 @@ function buildCounters(events) {
   const dispatches = dispatching || sentOnly;
   const completions = events.filter((event) => event.type === "codex_followup_completed").length;
   const supervisorReviews = events.filter((event) => event.type === "supervisor_review_completed").length;
+  const failures = events.filter((event) => /failed|stalled|runtime_error/u.test(event.type)).length;
+  const closedLoopsAfterLatestFailure = countClosedLoopsAfterLatestFailure(events);
   return {
     dispatches,
     completions,
     supervisorReviews,
     closedLoops: countOrderedClosedLoops(events),
+    closedLoopsAfterLatestFailure,
     verificationRuns: events.filter((event) => event.type === "supervisor_verification_completed").length,
-    failures: events.filter((event) => /failed|stalled|runtime_error/u.test(event.type)).length,
+    failures,
+    unresolvedFailures:
+      failures > 0 && closedLoopsAfterLatestFailure >= 2 ? 0 : failures,
     stopEvents: events.filter((event) => event.type === "graceful_stop_completed").length,
   };
 }
@@ -150,6 +155,14 @@ function countOrderedClosedLoops(events) {
   }
 
   return closedLoops;
+}
+
+function countClosedLoopsAfterLatestFailure(events) {
+  const latestFailureIndex = events.findLastIndex((event) =>
+    /failed|stalled|runtime_error/u.test(event.type),
+  );
+  if (latestFailureIndex < 0) return 0;
+  return countOrderedClosedLoops(events.slice(latestFailureIndex + 1));
 }
 
 function isDeliveredTimeoutFailure(event = {}) {
@@ -239,10 +252,10 @@ function deriveStatusAndAdvice(counters, timeline, { waiting = null } = {}) {
     };
   }
 
-  if (counters.failures > 0) {
+  if ((counters.unresolvedFailures ?? counters.failures) > 0) {
     return {
       status: "attention",
-      summary: `发现 ${counters.failures} 条失败记录，需要先排查后再长时间运行。`,
+      summary: `发现 ${counters.unresolvedFailures ?? counters.failures} 条未恢复失败记录，需要先排查后再长时间运行。`,
       nextAction: "先处理失败记录，确认线程绑定、Codex 桌面端连接和 Ollama 配置后再重新开始循环。",
     };
   }
@@ -305,11 +318,19 @@ function deriveDiagnosis(counters, timeline, { hasRecovery = false } = {}) {
     };
   }
 
-  if (counters.failures <= 0) {
+  const unresolvedFailures = counters.unresolvedFailures ?? counters.failures;
+
+  if (unresolvedFailures <= 0) {
     if ((counters.closedLoops || 0) > 0) {
+      const recoveredFailureNote = counters.failures > 0
+        ? "早期失败已被后续稳定闭环覆盖。"
+        : "";
       return {
         category: "partial_closed_loop_observed",
-        userMessage: `已经观察到 ${counters.closedLoops} 轮发送、Codex 完成和 NPC 复盘。`,
+        userMessage: [
+          `已经观察到 ${counters.closedLoops} 轮发送、Codex 完成和 NPC 复盘。`,
+          recoveredFailureNote,
+        ].filter(Boolean).join(""),
         nextAction:
           counters.closedLoops >= 2
             ? "真实闭环证据已经达到长期运行基础要求，继续保留日志和人工观察。"
