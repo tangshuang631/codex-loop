@@ -11,6 +11,7 @@
     "loop:summary": "node scripts/export-summary.mjs",
     "loop:scaffold": "node scripts/scaffold-project.mjs",
     "loop:bind-thread": "node scripts/bind-thread.mjs",
+    "loop:smoke": "node scripts/longrun-smoke.mjs",
     "loop:start": "start-codex-loop.bat",
     "production:check": "node scripts/production-check.mjs",
     "dev": "node scripts/dev.mjs",

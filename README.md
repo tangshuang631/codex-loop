@@ -148,7 +148,9 @@ dist/            前端构建产物（git 忽略）
 npm run production:check
 ```
 
-这个命令会顺序执行环境检查、全量测试、桌面端构建、移动端构建和 git 差异检查，并把报告写入 `runtime/production-checks/`。如果它失败，先按报告里的失败命令处理，不要直接开始长期循环。
+这个命令会顺序执行环境检查、长跑 smoke 检查、全量测试、桌面端构建、移动端构建和 git 差异检查，并把报告写入 `runtime/production-checks/`。如果它失败，先按报告里的失败命令处理，不要直接开始长期循环。
+
+其中 `npm run loop:smoke` 是本地模拟检查：它不会向真实 Codex 线程发送消息，只验证 loop 控制器是否能做到“发送后等待 Codex、未完成不追发、完成后先监督复盘、到达预算后停止”。它不能替代真实长时间运行观察，但能提前挡住最危险的节奏错误。
 
 ## 日常使用方式
 
@@ -285,6 +287,7 @@ ollama pull qwen2.5:7b
 - `npm run loop:summary`
 - `npm run loop:scaffold`
 - `npm run loop:bind-thread`
+- `npm run loop:smoke`
 - `npm run loop:start`
 - `npm run production:check`
 - `npm run dev`

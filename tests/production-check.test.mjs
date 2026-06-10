@@ -12,10 +12,24 @@ test("production readiness check is exposed as one verified command", async () =
 
   assert.equal(packageJson.scripts["production:check"], "node scripts/production-check.mjs");
   assert.match(source, /loop:check/);
+  assert.match(source, /loop:smoke/);
   assert.match(source, /npm test/);
   assert.match(source, /npm run build:web/);
   assert.match(source, /npm run build:mobile/);
   assert.match(source, /git diff --check/);
+});
+
+test("long-run smoke check is exposed and uses simulated controller dependencies", async () => {
+  const packageJson = JSON.parse(await read("package.json"));
+  const source = await read("scripts/longrun-smoke.mjs");
+
+  assert.equal(packageJson.scripts["loop:smoke"], "node scripts/longrun-smoke.mjs");
+  assert.match(source, /createLoopController/);
+  assert.match(source, /readSnapshot/);
+  assert.match(source, /runTurn/);
+  assert.match(source, /reviewCompletion/);
+  assert.match(source, /runtime[\\/]longrun-smoke/);
+  assert.doesNotMatch(source, /codex-dispatcher|sendCodex|native dispatch/i);
 });
 
 test("production readiness check writes a Chinese evidence report", async () => {

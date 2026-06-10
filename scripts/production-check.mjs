@@ -18,6 +18,12 @@ const checks = [
     display: "npm run loop:check",
   },
   {
+    name: "长跑 smoke 检查",
+    command: process.execPath,
+    args: ["scripts/longrun-smoke.mjs"],
+    display: "npm run loop:smoke",
+  },
+  {
     name: "验证命令",
     command: process.execPath,
     args: ["--test", "tests/*.test.mjs"],

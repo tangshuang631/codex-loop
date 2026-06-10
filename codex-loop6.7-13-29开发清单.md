@@ -144,7 +144,8 @@
 - `npm test`
 - `npm run build:web`
 - `npm run build:mobile`
-- 生产就绪检查入口：`npm run production:check`，会顺序执行环境检查、测试、桌面端构建、移动端构建和 git 差异检查，并写入 `runtime/production-checks/` 报告。
+- 生产就绪检查入口：`npm run production:check`，会顺序执行环境检查、长跑 smoke 检查、测试、桌面端构建、移动端构建和 git 差异检查，并写入 `runtime/production-checks/` 报告。
+- 长跑 smoke 检查入口：`npm run loop:smoke`，只做本地模拟，不发送真实 Codex 消息；它验证发送后等待 Codex、未完成不追发、完成后先监督复盘、预算到达后停止，是长期运行前的节奏护栏。
 - 已推送分支：
 - `dev`
 - 最新提交：
@@ -204,6 +205,7 @@
 - 再补实现
 - 最后统一跑：
 - `npm run production:check`
+- `npm run loop:smoke`
 - `npm test`
 - `npm run build:web`
 - `npm run build:mobile`
