@@ -44,6 +44,20 @@ test("mobile app is a lightweight task monitor instead of a desktop console clon
   assert.match(styleSource, /position:\s*sticky/);
 });
 
+test("mobile app surfaces production monitoring signals in one compact status block", async () => {
+  const source = await read("app/mobile/src/main.jsx");
+  const styleSource = await read("app/mobile/src/styles.css");
+
+  assert.match(source, /holdReason/);
+  assert.match(source, /pendingGuidancePreview/);
+  assert.match(source, /supervisorVerificationLabel/);
+  assert.match(source, /supervisorVerificationAction/);
+  assert.match(source, /latestInstructionSourceDetail/);
+  assert.match(source, /状态细节|等待原因|独立验收|模型来源/);
+  assert.match(styleSource, /\.status-detail/);
+  assert.match(styleSource, /\.status-detail-grid/);
+});
+
 test("mobile app manifest supports installable Chinese product naming", async () => {
   const manifest = JSON.parse(await read("app/mobile/manifest.webmanifest"));
 

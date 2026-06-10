@@ -165,6 +165,45 @@ label {
   line-height: 1.55;
 }
 
+.status-detail {
+  border-top: 1px solid rgba(31, 33, 31, 0.09);
+  padding: 0.85rem 1rem;
+}
+
+.status-detail summary {
+  color: #75766f;
+  cursor: pointer;
+  font-size: 0.82rem;
+  list-style: none;
+}
+
+.status-detail summary::-webkit-details-marker {
+  display: none;
+}
+
+.status-detail-grid {
+  display: grid;
+  gap: 0.65rem;
+  margin-top: 0.72rem;
+}
+
+.status-detail-row {
+  display: grid;
+  gap: 0.18rem;
+}
+
+.status-detail-row span {
+  color: #85867f;
+  font-size: 0.76rem;
+}
+
+.status-detail-row strong {
+  color: #373933;
+  font-size: 0.92rem;
+  font-weight: 600;
+  line-height: 1.55;
+}
+
 .conversation {
   margin-top: 1rem;
 }

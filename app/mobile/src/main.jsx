@@ -224,6 +224,13 @@ function StatusBlock({ mobileView, statusText }) {
     ["下一步", process.nextAction || mobileView?.suggestedAction || "等待下一轮更新"],
     ["最近指令", process.latestInstructionSourceLabel || "等待生成"],
   ];
+  const details = [
+    ["等待原因", process.holdReason],
+    ["待合并引导", process.pendingGuidancePreview || mobileView?.pendingGuidance?.preview],
+    ["独立验收", process.supervisorVerificationLabel || process.supervisorVerificationStatus],
+    ["验收动作", process.supervisorVerificationAction],
+    ["模型来源", process.latestInstructionSourceDetail],
+  ].filter(([, value]) => asText(value));
 
   return (
     <section className="status-block">
@@ -237,6 +244,19 @@ function StatusBlock({ mobileView, statusText }) {
           <strong>{value}</strong>
         </div>
       ))}
+      {details.length ? (
+        <details className="status-detail">
+          <summary>状态细节</summary>
+          <div className="status-detail-grid">
+            {details.map(([label, value]) => (
+              <div className="status-detail-row" key={label}>
+                <span>{label}</span>
+                <strong>{compactText(value, 150)}</strong>
+              </div>
+            ))}
+          </div>
+        </details>
+      ) : null}
     </section>
   );
 }
