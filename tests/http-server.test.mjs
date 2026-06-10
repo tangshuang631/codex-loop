@@ -481,6 +481,69 @@ test("handler lets paired mobile devices save next-turn guidance", async () => {
   assert.match(chunks.join(""), /"dispatch":"sent"/);
 });
 
+test("handler keeps mobile guidance saved but unsent when production preflight blocks dispatch", async () => {
+  let savedPayload = null;
+  let sendAttempts = 0;
+  const handler = buildHandler({
+    operations: {
+      readProductionPreflight: async () => ({
+        canDispatch: false,
+        nextAction: "真实任务仍在观察中，暂时不要重复发送下一轮。",
+      }),
+      savePendingGuidance: async (_cwd, body) => {
+        savedPayload = body;
+        return { thread: { pendingUserGuidance: body.text } };
+      },
+      sendPendingGuidanceOnce: async () => {
+        sendAttempts += 1;
+        return { thread: { continuationStatus: "dispatching" } };
+      },
+      verifyPairedDevice: async (_cwd, body) => ({
+        valid: true,
+        device: {
+          id: body.deviceId,
+          name: "iPhone",
+        },
+      }),
+    },
+  });
+
+  const chunks = [];
+  const response = {
+    writeHead(statusCode) {
+      this.statusCode = statusCode;
+    },
+    end(text) {
+      chunks.push(text);
+    },
+  };
+
+  await handler(
+    {
+      method: "POST",
+      url: "/api/mobile/guidance",
+      [Symbol.asyncIterator]: async function* iterator() {
+        yield Buffer.from(
+          JSON.stringify({
+            deviceId: "device-1",
+            deviceToken: "stored-token",
+            text: "等这一轮完成后补充产品验收要求。",
+          }),
+          "utf8",
+        );
+      },
+    },
+    response,
+  );
+
+  assert.equal(response.statusCode, 200);
+  assert.equal(savedPayload.text, "等这一轮完成后补充产品验收要求。");
+  assert.equal(sendAttempts, 0);
+  assert.match(chunks.join(""), /"dispatch":"queued"/);
+  assert.match(chunks.join(""), /已保存补充引导/);
+  assert.match(chunks.join(""), /暂时不要重复发送下一轮/);
+});
+
 test("handler keeps mobile guidance queued when Codex is still working", async () => {
   let savedPayload = null;
   let sendAttempts = 0;
@@ -1480,6 +1543,86 @@ test("handler blocks start route when production preflight is not dispatchable",
   assert.equal(startRunCalls, 0);
   assert.equal(controllerStartCalls, 0);
   assert.match(chunks.join(""), /暂不建议启动真实循环/);
+  assert.match(chunks.join(""), /真实任务仍在观察中/);
+});
+
+test("handler blocks manual run-turn route when production preflight is not dispatchable", async () => {
+  let runTurnCalls = 0;
+  const handler = buildHandler({
+    operations: {
+      readProductionPreflight: async () => ({
+        canDispatch: false,
+        nextAction: "Codex 仍在处理上一轮，先不要手动续跑。",
+      }),
+      runLoopTurn: async () => {
+        runTurnCalls += 1;
+        return { continued: true };
+      },
+    },
+  });
+
+  const chunks = [];
+  const response = {
+    writeHead(statusCode) {
+      this.statusCode = statusCode;
+    },
+    end(text) {
+      chunks.push(text);
+    },
+  };
+
+  await handler(
+    {
+      method: "POST",
+      url: "/api/run-turn",
+      [Symbol.asyncIterator]: async function* iterator() {},
+    },
+    response,
+  );
+
+  assert.equal(response.statusCode, 409);
+  assert.equal(runTurnCalls, 0);
+  assert.match(chunks.join(""), /暂不建议发送下一轮/);
+  assert.match(chunks.join(""), /先不要手动续跑/);
+});
+
+test("handler blocks manual guidance dispatch when production preflight is not dispatchable", async () => {
+  let sendCalls = 0;
+  const handler = buildHandler({
+    operations: {
+      readProductionPreflight: async () => ({
+        canDispatch: false,
+        summary: "真实任务仍在观察中，暂时不要重复发送下一轮。",
+      }),
+      sendPendingGuidanceOnce: async () => {
+        sendCalls += 1;
+        return { thread: { continuationStatus: "dispatching" } };
+      },
+    },
+  });
+
+  const chunks = [];
+  const response = {
+    writeHead(statusCode) {
+      this.statusCode = statusCode;
+    },
+    end(text) {
+      chunks.push(text);
+    },
+  };
+
+  await handler(
+    {
+      method: "POST",
+      url: "/api/send-guidance",
+      [Symbol.asyncIterator]: async function* iterator() {},
+    },
+    response,
+  );
+
+  assert.equal(response.statusCode, 409);
+  assert.equal(sendCalls, 0);
+  assert.match(chunks.join(""), /暂不建议发送下一轮/);
   assert.match(chunks.join(""), /真实任务仍在观察中/);
 });
 

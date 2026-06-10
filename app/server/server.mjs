@@ -87,6 +87,27 @@ function shouldDispatchMobileGuidanceOnce(snapshot) {
   return snapshot.state.mode !== "running" || snapshot.state.monitorOnly === true;
 }
 
+async function readDispatchPreflight(operations) {
+  if (typeof operations.readProductionPreflight !== "function") {
+    return { allowed: true, preflight: null, detail: "" };
+  }
+
+  const preflight = await operations.readProductionPreflight();
+  const allowed = preflight.canDispatch !== false;
+  const detail = preflight.nextAction || preflight.summary || "";
+  return { allowed, preflight, detail };
+}
+
+function blockedDispatchPayload({ preflight, detail, action = "发送下一轮" } = {}) {
+  return {
+    error: detail
+      ? `暂不建议${action}：${detail}`
+      : `暂不建议${action}。`,
+    kind: "production_preflight_blocked",
+    preflight,
+  };
+}
+
 export function buildHandler({
   loopController = createLoopController(),
   operations = {
@@ -279,6 +300,23 @@ export function buildHandler({
             : null;
 
         if (shouldDispatchMobileGuidanceOnce(latestSnapshot)) {
+          const preflight = await readDispatchPreflight(operations);
+          if (!preflight.allowed) {
+            dispatchMessage = preflight.detail
+              ? `已保存补充引导；${preflight.detail}`
+              : "已保存补充引导；当前预检不建议发送下一轮。";
+            sendJson(response, 200, {
+              valid: true,
+              device: verification.device,
+              dispatch,
+              message: dispatchMessage,
+              result,
+              dispatchResult,
+              preflight: preflight.preflight,
+            });
+            return;
+          }
+
           try {
             dispatchResult = await operations.sendPendingGuidanceOnce(process.cwd());
             dispatch = "sent";
@@ -430,19 +468,18 @@ export function buildHandler({
       }
 
       if (request.method === "POST" && request.url === "/api/start") {
-        if (typeof operations.readProductionPreflight === "function") {
-          const preflight = await operations.readProductionPreflight();
-          if (!preflight.canDispatch) {
-            const detail = preflight.nextAction || preflight.summary || "";
-            sendJson(response, 409, {
-              error: detail
-                ? `暂不建议启动真实循环：${detail}`
-                : "暂不建议启动真实循环。",
-              kind: "production_preflight_blocked",
-              preflight,
-            });
-            return;
-          }
+        const preflight = await readDispatchPreflight(operations);
+        if (!preflight.allowed) {
+          sendJson(
+            response,
+            409,
+            blockedDispatchPayload({
+              preflight: preflight.preflight,
+              detail: preflight.detail,
+              action: "启动真实循环",
+            }),
+          );
+          return;
         }
         const snapshot = await operations.startRun(process.cwd());
         const loopStarted = await loopController.start(process.cwd());
@@ -454,11 +491,35 @@ export function buildHandler({
       }
 
       if (request.method === "POST" && request.url === "/api/run-turn") {
+        const preflight = await readDispatchPreflight(operations);
+        if (!preflight.allowed) {
+          sendJson(
+            response,
+            409,
+            blockedDispatchPayload({
+              preflight: preflight.preflight,
+              detail: preflight.detail,
+            }),
+          );
+          return;
+        }
         sendJson(response, 200, await operations.runLoopTurn(process.cwd()));
         return;
       }
 
       if (request.method === "POST" && request.url === "/api/send-guidance") {
+        const preflight = await readDispatchPreflight(operations);
+        if (!preflight.allowed) {
+          sendJson(
+            response,
+            409,
+            blockedDispatchPayload({
+              preflight: preflight.preflight,
+              detail: preflight.detail,
+            }),
+          );
+          return;
+        }
         sendJson(
           response,
           200,
