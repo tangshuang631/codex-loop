@@ -1,3 +1,7 @@
+import fs from "node:fs/promises";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+
 import {
   createLoop,
   createProject,
@@ -48,6 +52,23 @@ import { saveUserOverrides } from "./lib/adapter-store.mjs";
 import { readProductionStatusSummary } from "../../scripts/production-status.mjs";
 import { readProductionPreflightSummary } from "../../scripts/production-preflight.mjs";
 
+const MODULE_DIR = path.dirname(fileURLToPath(import.meta.url));
+const REPO_ROOT = path.resolve(MODULE_DIR, "../..");
+const DEFAULT_MOBILE_APP_DIR = path.join(REPO_ROOT, "dist", "mobile");
+const DEFAULT_MOBILE_PUBLIC_DIR = path.join(REPO_ROOT, "app", "mobile", "public");
+
+const contentTypes = new Map([
+  [".html", "text/html; charset=utf-8"],
+  [".js", "text/javascript; charset=utf-8"],
+  [".css", "text/css; charset=utf-8"],
+  [".json", "application/json; charset=utf-8"],
+  [".webmanifest", "application/manifest+json; charset=utf-8"],
+  [".svg", "image/svg+xml; charset=utf-8"],
+  [".png", "image/png"],
+  [".jpg", "image/jpeg"],
+  [".jpeg", "image/jpeg"],
+]);
+
 function sendJson(response, statusCode, value) {
   response.writeHead(statusCode, {
     "Content-Type": "application/json; charset=utf-8",
@@ -56,6 +77,92 @@ function sendJson(response, statusCode, value) {
     "Access-Control-Allow-Headers": "Content-Type",
   });
   response.end(`${JSON.stringify(value)}\n`);
+}
+
+function sendText(response, statusCode, text, contentType = "text/plain; charset=utf-8") {
+  response.writeHead(statusCode, {
+    "Content-Type": contentType,
+    "Access-Control-Allow-Origin": "*",
+  });
+  response.end(text);
+}
+
+async function fileExists(filePath) {
+  try {
+    const stat = await fs.stat(filePath);
+    return stat.isFile();
+  } catch {
+    return false;
+  }
+}
+
+function resolveInside(rootDir, requestPath) {
+  const root = path.resolve(rootDir);
+  const target = path.resolve(root, requestPath.replace(/^[/\\]+/u, ""));
+  if (target !== root && !target.startsWith(`${root}${path.sep}`)) {
+    return "";
+  }
+  return target;
+}
+
+async function sendFile(response, filePath) {
+  const ext = path.extname(filePath).toLowerCase();
+  const contentType = contentTypes.get(ext) || "application/octet-stream";
+  const content = await fs.readFile(filePath);
+  response.writeHead(200, {
+    "Content-Type": contentType,
+    "Access-Control-Allow-Origin": "*",
+    "Cache-Control": ext === ".html" ? "no-store" : "public, max-age=300",
+  });
+  response.end(content);
+}
+
+async function tryServeMobileApp(request, response, {
+  mobileAppDir = DEFAULT_MOBILE_APP_DIR,
+  mobilePublicDir = DEFAULT_MOBILE_PUBLIC_DIR,
+} = {}) {
+  const parsed = new URL(request.url || "/", "http://codex-loop.local");
+  const pathname = decodeURIComponent(parsed.pathname);
+  if (request.method !== "GET") {
+    return false;
+  }
+  if (pathname !== "/mobile-app" && !pathname.startsWith("/mobile-app/")) {
+    return false;
+  }
+
+  const relativePath =
+    pathname === "/mobile-app" || pathname === "/mobile-app/"
+      ? "index.html"
+      : pathname.slice("/mobile-app/".length);
+  const target = resolveInside(mobileAppDir, relativePath);
+  if (target && (await fileExists(target))) {
+    await sendFile(response, target);
+    return true;
+  }
+
+  if (
+    relativePath === "icon.svg" ||
+    relativePath === "mobile-sw.js" ||
+    relativePath === "manifest.webmanifest"
+  ) {
+    const fallback = resolveInside(mobilePublicDir, relativePath);
+    if (fallback && (await fileExists(fallback))) {
+      await sendFile(response, fallback);
+      return true;
+    }
+  }
+
+  if (relativePath === "index.html") {
+    sendText(
+      response,
+      503,
+      "移动端 App 还没有构建。请先运行 npm run build:mobile，然后重新打开 /mobile-app。",
+    );
+    return true;
+  }
+
+  sendText(response, 404, "Not found");
+  return true;
 }
 
 async function readBody(request) {
@@ -98,6 +205,30 @@ async function readDispatchPreflight(operations) {
   return { allowed, preflight, detail };
 }
 
+function pickPendingGuidanceSnapshot(snapshot) {
+  if (!snapshot || typeof snapshot !== "object") {
+    return null;
+  }
+
+  if (snapshot.pendingGuidance && typeof snapshot.pendingGuidance === "object") {
+    return snapshot.pendingGuidance;
+  }
+
+  return null;
+}
+
+function buildPendingGuidanceResponse(snapshot, overrides = {}) {
+  const pendingGuidance = pickPendingGuidanceSnapshot(snapshot);
+  if (!pendingGuidance) {
+    return null;
+  }
+
+  return {
+    ...pendingGuidance,
+    ...overrides,
+  };
+}
+
 function blockedDispatchPayload({ preflight, detail, action = "发送下一轮" } = {}) {
   return {
     error: detail
@@ -110,6 +241,8 @@ function blockedDispatchPayload({ preflight, detail, action = "发送下一轮" 
 
 export function buildHandler({
   loopController = createLoopController(),
+  mobileAppDir = DEFAULT_MOBILE_APP_DIR,
+  mobilePublicDir = DEFAULT_MOBILE_PUBLIC_DIR,
   operations = {
       readLoopSnapshot,
       exportLoopSummary,
@@ -215,6 +348,15 @@ export function buildHandler({
     }
 
     try {
+      if (
+        await tryServeMobileApp(request, response, {
+          mobileAppDir,
+          mobilePublicDir,
+        })
+      ) {
+        return;
+      }
+
       if (request.method === "GET" && request.url === "/api/health") {
         const snapshot = await operations.readLoopSnapshot(process.cwd());
         sendJson(response, 200, {
@@ -292,6 +434,7 @@ export function buildHandler({
 
         let dispatch = "queued";
         let dispatchResult = null;
+        let pendingGuidance = buildPendingGuidanceResponse(result);
         let dispatchMessage = "已保存补充引导，会等 Codex 完成后合并。";
 
         const latestSnapshot =
@@ -311,6 +454,10 @@ export function buildHandler({
               dispatch,
               message: dispatchMessage,
               result,
+              pendingGuidance:
+                buildPendingGuidanceResponse(latestSnapshot, {
+                  userMessage: dispatchMessage,
+                }) || pendingGuidance,
               dispatchResult,
               preflight: preflight.preflight,
             });
@@ -340,6 +487,10 @@ export function buildHandler({
           dispatch,
           message: dispatchMessage,
           result,
+          pendingGuidance:
+            buildPendingGuidanceResponse(latestSnapshot, {
+              userMessage: dispatchMessage,
+            }) || pendingGuidance,
           dispatchResult,
         });
         return;
@@ -523,7 +674,12 @@ export function buildHandler({
         sendJson(
           response,
           200,
-          await operations.sendPendingGuidanceOnce(process.cwd()),
+          {
+            ...(await operations.sendPendingGuidanceOnce(process.cwd())),
+            pendingGuidance: buildPendingGuidanceResponse(
+              await operations.readLoopSnapshot(process.cwd()),
+            ),
+          },
         );
         return;
       }
@@ -675,10 +831,14 @@ export function buildHandler({
 
       if (request.method === "POST" && request.url === "/api/pending-guidance") {
         const body = await readBody(request);
+        const result = await operations.savePendingGuidance(process.cwd(), body);
         sendJson(
           response,
           200,
-          await operations.savePendingGuidance(process.cwd(), body),
+          {
+            ...result,
+            pendingGuidance: buildPendingGuidanceResponse(result),
+          },
         );
         return;
       }
@@ -687,7 +847,22 @@ export function buildHandler({
         sendJson(
           response,
           200,
-          await operations.clearPendingGuidance(process.cwd()),
+          {
+            ...(await operations.clearPendingGuidance(process.cwd())),
+            pendingGuidance: {
+              text: "",
+              preview: "",
+              hasPending: false,
+              status: "cleared",
+              statusLabel: "已撤回",
+              statusDetail: "这条补充已经撤回，不会再合并到下一条指令。",
+              mergeTiming: "codex_completed",
+              mergeTimingLabel: "等 Codex 完成后合并到下一条指令",
+              mergeProcessor: "ollama_npc",
+              mergeProcessorLabel: "本地模型 / NPC 合并",
+              userMessage: "已撤回待合并引导。",
+            },
+          },
         );
         return;
       }

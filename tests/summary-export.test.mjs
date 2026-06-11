@@ -392,6 +392,14 @@ test("exportMobileView returns a direct process status for production monitoring
   assert.match(mobile.processStatus.pendingGuidanceMergeDetail, /Codex.*完成|合并/);
   assert.match(mobile.processStatus.stopLimit, /\u6700\u957f.*\u5206\u949f/);
   assert.match(mobile.processStatus.stopLimit, /token/);
+  assert.match(
+    mobile.runtimeEvents.map((event) => `${event.title} ${event.detail}`).join("\n"),
+    /等待本地模型|NPC|合并/,
+  );
+  assert.match(
+    mobile.runtimeEvents.map((event) => `${event.title} ${event.detail}`).join("\n"),
+    /补充：.*移动端进程状态/,
+  );
 });
 
 test("exportMobileView blocks next turn when stop limits are already reached", async () => {
@@ -613,6 +621,10 @@ test("exportMobileView explains why the loop is waiting before sending again", a
   assert.match(mobile.pendingGuidance.statusLabel, /等待 Codex 完成/);
   assert.match(mobile.pendingGuidance.statusDetail, /Codex.*当前轮|完成后.*本地模型|NPC/);
   assert.match(mobile.pendingGuidance.userMessage, /等待 Codex 完成|不会打断/);
+  assert.match(
+    mobile.runtimeEvents.map((event) => `${event.title} ${event.detail}`).join("\n"),
+    /等待 Codex 完成/,
+  );
 });
 
 test("exportMobileView explains the recovery action after continuation failure", async () => {

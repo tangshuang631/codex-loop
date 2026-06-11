@@ -275,6 +275,9 @@ function readableRuntimeEventTitle(type, event = {}) {
       }).label
     );
   }
+  if (type === "pending_guidance_updated") {
+    return "已更新下一轮补充";
+  }
 
   const titles = {
     artifacts_verified: "运行文件已就绪",
@@ -343,6 +346,23 @@ function readableRuntimeEventDetail(event = {}) {
       event.latestAssistantPreview,
       event.summary,
       "已收到 Codex 新回复，等待下一次指令。",
+    );
+  }
+  if (type === "pending_guidance_saved" || type === "pending_guidance_updated") {
+    return [
+      safeText(event.statusLabel || event.guidanceStageLabel, ""),
+      safeText(event.statusDetail || event.guidanceStageDetail, ""),
+      safeText(event.preview, "") ? "补充：" + safeText(event.preview, "") : "",
+    ]
+      .filter(Boolean)
+      .join(" ");
+  }
+  if (type === "pending_guidance_cleared") {
+    return firstNonEmpty(
+      safeText(event.preview, "") ? "已撤回：" + safeText(event.preview, "") : "",
+      event.summary,
+      event.note,
+      "已撤回未发送的补充引导。",
     );
   }
   if (type === "graceful_stop_completed") {
@@ -3370,7 +3390,7 @@ function buildFollowupPrompt(snapshot) {
   return [
     "继续推进「" + loopName + "」，分支「" + branch + "」。",
     "下一步：" + focus,
-    "优先遵守项目文档和开发规则。先完成一小批可验证任务，再回复进展、验证结果和下一步。",
+    "先按产品经理、测试人员和真实用户视角收紧范围，完成一小批可验证任务，再回复进展、验证结果和下一步。",
   ].join("\n");
 }
 
@@ -3402,7 +3422,7 @@ function buildVisibleThreadPrompt(snapshot) {
       "Continue in this same Codex thread.",
       "Next: " + (conciseFocus || "Continue the highest-priority verified task."),
       pendingGuidance ? "User added guidance: " + pendingGuidance : "",
-      "Follow project docs and rules first. Do one small verifiable batch, then report progress, verification, and next step.",
+      "Follow project docs and rules first. Keep the scope tight, do one small verifiable batch, then report progress, verification, and next step.",
     ].filter(Boolean).join("\n");
   }
 
@@ -3410,7 +3430,7 @@ function buildVisibleThreadPrompt(snapshot) {
     "继续在同一个 Codex 线程中推进。",
     "下一步：" + (conciseFocus || "继续当前最高优先级、可验证的小任务。"),
     pendingGuidance ? "用户临时补充：" + pendingGuidance : "",
-    "优先遵守项目文档和开发规则。完成一小批可验证任务后，再回复进展、验证结果和下一步。",
+    "优先遵守项目文档和开发规则。保持范围收紧，完成一小批可验证任务后，再回复进展、验证结果和下一步。",
   ].filter(Boolean).join("\n");
 }
 
@@ -4163,6 +4183,29 @@ export async function saveThreadBinding(startDir = process.cwd(), payload) {
   return readLoopSnapshot(startDir);
 }
 
+function describePendingGuidanceStage(snapshot = {}) {
+  const continuationStatus = safeText(snapshot.thread?.continuationStatus, "idle");
+  if (continuationStatus === "dispatching") {
+    return {
+      status: "waiting_codex",
+      statusLabel: "等待 Codex 完成",
+      statusDetail: "补充已保存，不会打断当前轮；Codex 完成后再交给本地模型 / NPC 合并。",
+    };
+  }
+  if (continuationStatus === "reviewing") {
+    return {
+      status: "waiting_npc",
+      statusLabel: "等待 NPC 复盘",
+      statusDetail: "补充已保存，会在本地模型 / NPC 复盘后合并进下一条指令。",
+    };
+  }
+  return {
+    status: "ready_to_merge",
+    statusLabel: "等待本地模型 / NPC 合并",
+    statusDetail: "Codex 当前空闲，下一次发送时会结合最新回复和这条补充生成指令。",
+  };
+}
+
 export async function savePendingGuidance(startDir = process.cwd(), payload = {}) {
   const snapshot = await ensureLoopArtifacts(startDir);
   const text = safeText(payload.text, "");
@@ -4175,6 +4218,7 @@ export async function savePendingGuidance(startDir = process.cwd(), payload = {}
   const replacingGuidance = payload.replace === true;
   const nextGuidance = replacingGuidance || !previousGuidance ? text : `${previousGuidance}\n${text}`;
   const visibleAction = replacingGuidance ? "已更新补充引导" : "已记录补充引导";
+  const guidanceStage = describePendingGuidanceStage(snapshot);
   const nextThread = await persistThreadMirror(
     snapshot.paths.threadPath,
     snapshot.thread,
@@ -4198,6 +4242,13 @@ export async function savePendingGuidance(startDir = process.cwd(), payload = {}
     at,
     threadId: nextThread.threadId,
     preview: buildPromptPreview(text),
+    mergedPreview: buildPromptPreview(nextGuidance),
+    replacing: replacingGuidance,
+    guidanceStage: guidanceStage.status,
+    statusLabel: guidanceStage.statusLabel,
+    statusDetail: guidanceStage.statusDetail,
+    mergeTiming: "codex_completed",
+    mergeProcessor: "ollama_npc",
   });
   await appendTranscriptEntry(snapshot.paths.transcriptPath, {
     at,
@@ -4212,6 +4263,7 @@ export async function savePendingGuidance(startDir = process.cwd(), payload = {}
 export async function clearPendingGuidance(startDir = process.cwd()) {
   const snapshot = await ensureLoopArtifacts(startDir);
   const at = nowIso();
+  const clearedGuidance = safeText(snapshot.thread.pendingUserGuidance, "");
   const nextThread = await persistThreadMirror(
     snapshot.paths.threadPath,
     snapshot.thread,
@@ -4234,6 +4286,7 @@ export async function clearPendingGuidance(startDir = process.cwd()) {
     type: "pending_guidance_cleared",
     at,
     threadId: nextThread.threadId,
+    preview: buildPromptPreview(clearedGuidance),
   });
   await appendTranscriptEntry(snapshot.paths.transcriptPath, {
     at,
@@ -5419,9 +5472,9 @@ function buildFallbackMilestoneReview(snapshot) {
       ? "Codex 已完成上一轮，可进入监督复盘后的下一步推进。"
       : "Codex 已返回完成信号，可继续下一轮小步推进。",
     nextInstruction:
-      "请基于项目文档、开发规则和上一轮结果，继续推进：" +
+      "请先按产品经理、测试人员和真实用户视角收紧范围，再继续推进：" +
       summarizeForFollowup(focus, 260) +
-      "。优先做一小批可验证改动；完成后回复改动摘要、验证结果和下一步建议。",
+      "。优先只做一小批最关键、可验证的改动；完成后回复改动摘要、验证结果和下一步建议。",
     shouldContinue: true,
     needsIndependentVerification: true,
     verificationCommands,

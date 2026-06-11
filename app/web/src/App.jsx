@@ -3,6 +3,24 @@ import QRCode from "qrcode";
 
 import { deriveDashboardGuide } from "./dashboard-guide.mjs";
 import { dedupeRuntimeEventsForDisplay } from "./runtime-events.mjs";
+import {
+  buildProductionFocusSummary,
+  buildModelPipelineSummary,
+  buildStatusHeroSummary,
+  buildLongRunDecision,
+  getConversationActionLabel,
+  getConversationDetailKindLabel,
+  getConversationEntryLabel,
+  getConversationRoleLabel,
+  presentStatusRowLabel as presentSharedStatusRowLabel,
+} from "../../shared/presentation.mjs";
+import {
+  getConversationDetailLabel,
+  getConversationDetailMeta,
+  parseMarkdownTextBlock,
+  splitMarkdownBlocks,
+} from "../../shared/conversation-format.mjs";
+import { buildConversationItemsFromMobileView } from "../../shared/conversation-items.mjs";
 
 function resolveApiBase() {
   if (import.meta.env.VITE_CODEX_LOOP_API_BASE) {
@@ -126,6 +144,13 @@ function groupLoopsByProject(loops = [], projects = []) {
     ...project,
     isEmpty: project.loops.length === 0,
   }));
+}
+
+function presentStatusRowLabel(label) {
+  if (label === "longrun") {
+    return "长跑判断";
+  }
+  return label;
 }
 function filterVisibleLoops(loops = []) {
   return loops.filter((loop) => {
@@ -272,6 +297,52 @@ function summarizeVisibleText(value, fallback = "暂无", maxLength = 120) {
   return compact.length > maxLength ? compact.slice(0, maxLength) + "..." : compact;
 }
 
+function presentPendingGuidanceStatus(result, fallback = "已记录下一轮补充。") {
+  const pending = result?.pendingGuidance;
+  const primary = formatValue(result?.message, "").trim();
+  if (primary) {
+    return primary;
+  }
+  if (!pending || typeof pending !== "object") {
+    return fallback;
+  }
+
+  const statusLabel = formatValue(pending.statusLabel, "").trim();
+  const detail =
+    formatValue(pending.userMessage, "").trim() ||
+    formatValue(pending.statusDetail, "").trim();
+
+  if (statusLabel && detail) {
+    return `${statusLabel}：${detail}`;
+  }
+  if (detail) {
+    return detail;
+  }
+  if (statusLabel) {
+    return statusLabel;
+  }
+  return fallback;
+}
+
+function applyPendingGuidanceFeedback(result, fallback, setMessage) {
+  const text = presentPendingGuidanceStatus(result, fallback);
+  setMessage(text);
+}
+
+function buildUserFacingProcessDigest(processStatus, fallbackDetail = "") {
+  const headline = formatValue(processStatus?.headline, "当前可继续推进");
+  const detail = formatValue(processStatus?.detail || fallbackDetail, "系统正在同步最新状态。");
+  const holdReason = formatValue(processStatus && processStatus.holdReason, "");
+  const nextAction = formatValue(processStatus?.nextAction, "先看最新记录，再决定是否继续发送下一轮。");
+  const now = holdReason ? `${headline}，${holdReason}` : headline;
+  return {
+    now,
+    detail,
+    nextAction,
+    holdReason,
+  };
+}
+
 function copyTextToClipboard(text) {
   const value = formatValue(text, "");
   if (!value) return;
@@ -408,111 +479,38 @@ function InlineMessageText({ text }) {
 function MarkdownMessage({ text }) {
   const value = formatValue(text, "");
   if (!value) return null;
-
-  const blocks = [];
-  const fencePattern = /```([^\n`]*)\n([\s\S]*?)```/g;
-  let cursor = 0;
-  let match;
-
-  while ((match = fencePattern.exec(value))) {
-    if (match.index > cursor) {
-      blocks.push({ type: "text", content: value.slice(cursor, match.index) });
-    }
-    blocks.push({
-      type: "code",
-      lang: match[1].trim(),
-      content: match[2].replace(/\n$/u, ""),
-    });
-    cursor = match.index + match[0].length;
-  }
-
-  if (cursor < value.length) {
-    blocks.push({ type: "text", content: value.slice(cursor) });
-  }
+  const blocks = splitMarkdownBlocks(value);
 
   function renderTextBlock(blockText, blockIndex) {
-    const paragraphs = blockText
-      .split(/\n\s*\n/u)
-      .map((item) => item.trim())
-      .filter(Boolean);
+    const segments = parseMarkdownTextBlock(blockText);
 
-    return paragraphs.map((paragraph, index) => {
-      const lines = paragraph.split(/\n/u).map((line) => line.trim()).filter(Boolean);
-      const heading = paragraph.match(/^(#{1,3})\s+(.+)$/u);
-      if (heading) {
-        const Tag = heading[1].length === 1 ? "h3" : "h4";
+    return segments.map((segment, index) => {
+      if (segment.type === "heading") {
+        const Tag = segment.depth === 1 ? "h3" : "h4";
         return (
           <Tag className="markdown-heading" key={`${blockIndex}-${index}`}>
-            <InlineMessageText text={heading[2]} />
+            <InlineMessageText text={segment.text} />
           </Tag>
         );
       }
 
-      if (lines.every((line) => /^[-*]\s+/.test(line))) {
+      if (segment.type === "list") {
+        const ListTag = segment.ordered ? "ol" : "ul";
         return (
-          <ul className="markdown-list" key={`${blockIndex}-${index}`}>
-            {lines.map((line, itemIndex) => (
+          <ListTag className="markdown-list" key={`${blockIndex}-${index}`}>
+            {segment.items.map((item, itemIndex) => (
               <li key={`${blockIndex}-${index}-${itemIndex}`}>
-                <InlineMessageText text={line.replace(/^[-*]\s+/, "")} />
+                <InlineMessageText text={item} />
               </li>
             ))}
-          </ul>
+          </ListTag>
         );
-      }
-
-      if (lines.every((line) => /^\d+\.\s+/.test(line))) {
-        return (
-          <ol className="markdown-list" key={`${blockIndex}-${index}`}>
-            {lines.map((line, itemIndex) => (
-              <li key={`${blockIndex}-${index}-${itemIndex}`}>
-                <InlineMessageText text={line.replace(/^\d+\.\s+/, "")} />
-              </li>
-            ))}
-          </ol>
-        );
-      }
-
-      const mixedNodes = [];
-      let cursor = 0;
-      while (cursor < lines.length) {
-        const line = lines[cursor];
-        const bullet = /^[-*]\s+/.test(line);
-        const numbered = /^\d+\.\s+/.test(line);
-
-        if (bullet || numbered) {
-          const listLines = [];
-          while (
-            cursor < lines.length &&
-            (bullet ? /^[-*]\s+/.test(lines[cursor]) : /^\d+\.\s+/.test(lines[cursor]))
-          ) {
-            listLines.push(lines[cursor]);
-            cursor += 1;
-          }
-          const ListTag = numbered ? "ol" : "ul";
-          mixedNodes.push(
-            <ListTag className="markdown-list" key={`${blockIndex}-${index}-list-${cursor}`}>
-              {listLines.map((item, itemIndex) => (
-                <li key={`${blockIndex}-${index}-list-${cursor}-${itemIndex}`}>
-                  <InlineMessageText text={item.replace(numbered ? /^\d+\.\s+/ : /^[-*]\s+/, "")} />
-                </li>
-              ))}
-            </ListTag>,
-          );
-          continue;
-        }
-
-        mixedNodes.push(
-          <p className="markdown-paragraph" key={`${blockIndex}-${index}-p-${cursor}`}>
-            <InlineMessageText text={line} />
-          </p>,
-        );
-        cursor += 1;
       }
 
       return (
-        <React.Fragment key={`${blockIndex}-${index}`}>
-          {mixedNodes}
-        </React.Fragment>
+        <p className="markdown-paragraph" key={`${blockIndex}-${index}`}>
+          <InlineMessageText text={segment.text} />
+        </p>
       );
     });
   }
@@ -770,7 +768,13 @@ function MobileAccessFold({
   onRevokePairedDevice,
 }) {
   const [pairingQrDataUrl, setPairingQrDataUrl] = useState("");
-  const mobileUrl = remoteAccessStatus?.url || remoteAccessStatus?.publicBaseUrl || launcherWebUrl || "";
+  const mobileUrl =
+    remoteAccessStatus?.mobileAppUrl ||
+    remoteAccessStatus?.primaryMobileUrl ||
+    remoteAccessStatus?.url ||
+    remoteAccessStatus?.publicBaseUrl ||
+    launcherWebUrl ||
+    "";
   const candidateUrls = remoteAccessStatus?.candidateUrls || [];
   const steps = remoteAccessStatus?.recommendedSteps || [];
   const devicePairing = remoteAccessStatus?.devicePairing || {};
@@ -859,7 +863,7 @@ function MobileAccessFold({
           {candidateUrls.map((candidate) => (
             <div className="mobile-access-candidate" key={candidate.url}>
               <span>{candidate.label || "手机地址"}</span>
-              <code>{candidate.url}</code>
+              <code>{candidate.appUrl || candidate.url}</code>
               <button type="button" onClick={() => copyTextToClipboard(candidate.url)}>
                 复制
               </button>
@@ -1089,6 +1093,12 @@ function parsePairingPayload(value) {
 }
 
 function buildMobileConversationEntries(mobileView) {
+  return buildConversationItemsFromMobileView(mobileView, {
+    latestPromptLabel: "codex-loop 指令",
+    assistantFallbackLabel: "Codex 回复",
+    runtimeFallbackLabel: "运行记录",
+  });
+
   if (mobileView?.conversationItems?.length) {
     return dedupeConversationEntries(mobileView.conversationItems);
   }
@@ -1189,11 +1199,20 @@ function MobileConversationTimeline({ mobileView }) {
             >
               <summary>
                 <span className="conversation-meta">
-                  {formatTime(entry.at, "未知时间")} · {isLoopMessage ? "codex-loop 指令" : "Codex 回复"}
+                  {formatTime(entry.at, "未知时间")} · {getConversationEntryLabel({
+                    isGuidance: false,
+                    isLoop: isLoopMessage,
+                  })}
                 </span>
                 <strong>{summary}</strong>
                 <span className="conversation-actions">
-                  <em>{isLoopMessage ? "查看完整指令" : "查看完整回复"}</em>
+                  <em>
+                    {getConversationActionLabel({
+                      hasText: Boolean(fullText),
+                      isGuidance: false,
+                      isLoop: isLoopMessage,
+                    })}
+                  </em>
                   {fullText ? (
                     <button
                       type="button"
@@ -1226,6 +1245,8 @@ function MobileTaskApp() {
   const [sessionId, setSessionId] = useState("");
   const [guidanceText, setGuidanceText] = useState("");
   const [mobileGuidanceEditMode, setMobileGuidanceEditMode] = useState(false);
+  const [mobileProductionStatus, setMobileProductionStatus] = useState(null);
+  const [mobileProductionPreflight, setMobileProductionPreflight] = useState(null);
   const [statusText, setStatusText] = useState("正在连接 codex-loop。");
   const [errorText, setErrorText] = useState("");
   const [submitting, setSubmitting] = useState(false);
@@ -1245,14 +1266,20 @@ function MobileTaskApp() {
       setStatusText("正在同步任务。");
     }
     try {
-      const result = await requestJson("/mobile/view", {
-        method: "POST",
-        body: JSON.stringify({
-          deviceId: mobileDevice?.deviceId,
-          deviceToken: mobileDevice?.deviceToken,
+      const [result, productionStatusResult, productionPreflightResult] = await Promise.all([
+        requestJson("/mobile/view", {
+          method: "POST",
+          body: JSON.stringify({
+            deviceId: mobileDevice?.deviceId,
+            deviceToken: mobileDevice?.deviceToken,
+          }),
         }),
-      });
+        requestJson("/production-status").catch(() => null),
+        requestJson("/production-preflight").catch(() => null),
+      ]);
       setMobileView(result.mobile);
+      setMobileProductionStatus(productionStatusResult);
+      setMobileProductionPreflight(productionPreflightResult);
       setErrorText("");
       setStatusText("手机已绑定，任务状态已同步。");
     } catch (error) {
@@ -1343,6 +1370,13 @@ function MobileTaskApp() {
             ? "已发送引导，正在等待 Codex 完成当前轮。"
             : "已保存补充引导，会等 Codex 完成后交给本地模型 / NPC 合并。"),
       );
+      applyPendingGuidanceFeedback(
+        guidanceResult,
+        guidanceResult?.dispatch === "sent"
+          ? "已发送补充引导，正在等待 Codex 完成当前轮。"
+          : "已记录补充引导，会在 Codex 完成后合并发送。",
+        setStatusText,
+      );
       await loadProtectedMobileView({ silent: true });
     } catch (error) {
       setErrorText(error?.message || "发送引导失败，请稍后重试。");
@@ -1367,6 +1401,7 @@ function MobileTaskApp() {
         }),
       });
       setStatusText(result?.message || "已撤回待合并引导。");
+      applyPendingGuidanceFeedback(result, "已撤回待合并引导。", setStatusText);
       setGuidanceText("");
       setMobileGuidanceEditMode(false);
       await loadProtectedMobileView({ silent: true });
@@ -1381,6 +1416,41 @@ function MobileTaskApp() {
   const processStatus = mobileView?.processStatus || {};
   const headline = processStatus.headline || mobileView?.suggestedAction || statusText;
   const threadTitle = mobileView?.thread?.title || mobileView?.thread?.threadId || "未绑定线程";
+  const mobileProductionObservation = mobileProductionStatus?.sections?.find(
+    (section) => section.label === "真实运行观察",
+  );
+  const mobileClosedLoopEvidence = mobileProductionStatus?.closedLoopEvidence || {};
+  const mobileGuidanceEvidence = mobileProductionStatus?.guidanceEvidence || {};
+  const mobileClosedLoopCount = Math.max(
+    0,
+    Number(mobileClosedLoopEvidence.current ?? mobileProductionObservation?.counters?.closedLoops ?? 0),
+  );
+  const mobileClosedLoopTarget = Math.max(1, Number(mobileClosedLoopEvidence.target ?? 2));
+  const mobileGuidanceEvidenceCount = Math.max(0, Number(mobileGuidanceEvidence.current ?? 0));
+  const mobileGuidanceEvidenceTarget = Math.max(1, Number(mobileGuidanceEvidence.target ?? 1));
+  const mobileProductionFocus = buildProductionFocusSummary({
+    productionStatus: mobileProductionStatus,
+    productionPreflight: mobileProductionPreflight,
+    productionObservation: mobileProductionObservation,
+    closedLoopCount: mobileClosedLoopCount,
+    closedLoopTarget: mobileClosedLoopTarget,
+    guidanceEvidenceCount: mobileGuidanceEvidenceCount,
+    guidanceEvidenceTarget: mobileGuidanceEvidenceTarget,
+  });
+  const mobileModelPipeline = buildModelPipelineSummary(processStatus);
+  const mobileProductionTarget = formatProductionTarget(
+    mobileProductionPreflight?.target || mobileProductionStatus?.target,
+  );
+  const mobileStatusRows = [
+    mobileProductionFocus.summary ? ["生产判断", mobileProductionFocus.summary] : null,
+    mobileModelPipeline.headline ? ["模型链路", mobileModelPipeline.headline] : null,
+    mobileProductionTarget ? ["验证目标", mobileProductionTarget] : null,
+  ].filter(Boolean);
+  const mobileStatusDetails = [
+    mobileProductionFocus.attention ? ["当前要留意", mobileProductionFocus.attention] : null,
+    mobileProductionFocus.nextAction ? ["生产建议", mobileProductionFocus.nextAction] : null,
+    mobileModelPipeline.detail ? ["模型说明", mobileModelPipeline.detail] : null,
+  ].filter(Boolean);
 
   return (
     <main className="mobile-task-shell">
@@ -1430,6 +1500,25 @@ function MobileTaskApp() {
       ) : (
         <>
           <section className="mobile-task-panel">
+            {mobileStatusRows.map(([label, value]) => (
+              <div className="mobile-task-panel-row" key={label}>
+                <span>{label}</span>
+                <strong>{value}</strong>
+              </div>
+            ))}
+            {mobileStatusDetails.length ? (
+              <details className="mobile-task-panel-details">
+                <summary>查看判断依据</summary>
+                <div className="mobile-task-panel-detail-list">
+                  {mobileStatusDetails.map(([label, value]) => (
+                    <p key={label}>
+                      <span>{label}</span>
+                      <strong>{value}</strong>
+                    </p>
+                  ))}
+                </div>
+              </details>
+            ) : null}
             <div className="mobile-task-panel-row">
               <span>当前状态</span>
               <strong>{processStatus.monitorLabel || mobileView?.loop?.modeLabel || "监控中"}</strong>
@@ -1553,6 +1642,11 @@ function StatusSummaryPanel({
 }) {
   const processDetail = processStatus?.detail || codexWorkStatus;
   const monitorText = processStatus?.monitorLabel || processStatus?.headline || continuationStatus;
+  const statusHero = buildStatusHeroSummary({
+    headline: processStatus?.headline || monitorText,
+    detail: processStatus?.detail || codexWorkStatus,
+    nextAction: processStatus?.nextAction,
+  });
   const productionObservation = productionStatus?.sections?.find(
     (section) => section.label === "真实运行观测",
   );
@@ -1618,15 +1712,43 @@ function StatusSummaryPanel({
       : productionStatus?.status === "waiting"
         ? "等待中"
         : productionStatus?.status
-          ? "需留意"
+          ? "需要留意"
           : "";
   const productionDetail =
     productionObservation?.status === "stale"
-      ? "真实运行观测已过期，需要重新生成运行记录后再判断长期稳定性。"
+      ? productionStatus?.nextAction ||
+        "真实运行观测已过期，需要重新生成运行记录后再判断长期稳定性。"
       : productionObservation?.summary ||
         productionStatus?.nextAction ||
         "等待形成 2 轮真实闭环后，再作为长期运行基本证据。";
   const readinessDetail = readiness.summary || readiness.nextAction || productionDetail;
+  const productionStageSummary = summarizeVisibleText(
+    maturity?.summary || readinessDetail,
+    "等待更多真实闭环证据。",
+    76,
+  );
+  const productionObservationSummary = summarizeVisibleText(
+    productionDetail,
+    productionObservation?.status === "stale" ? "真实运行观测已过期。" : "等待形成新的真实观测。",
+    76,
+  );
+  const longRunDecision = buildLongRunDecision({
+    hasProductionStatus: Boolean(productionStatus),
+    closedLoopCount,
+    closedLoopTarget,
+    guidanceEvidenceCount,
+    guidanceEvidenceTarget,
+  });
+  const productionFocus = buildProductionFocusSummary({
+    productionStatus,
+    productionPreflight,
+    productionObservation,
+    closedLoopCount,
+    closedLoopTarget,
+    guidanceEvidenceCount,
+    guidanceEvidenceTarget,
+  });
+  const modelPipeline = buildModelPipelineSummary(processStatus);
   const verificationStatus = processStatus?.supervisorVerificationStatus || "";
   const verificationLabel =
     processStatus?.supervisorVerificationLabel ||
@@ -1634,28 +1756,28 @@ function StatusSummaryPanel({
       ? "未通过"
       : verificationStatus === "passed"
         ? "已通过"
-        : "已跳过");
+        : verificationStatus === "running"
+          ? "进行中"
+          : "");
   const verificationText =
-    verificationStatus && verificationStatus !== "not_requested"
-      ? [
-          verificationLabel,
-          processStatus?.supervisorVerificationSummary,
-          processStatus?.supervisorVerificationAction,
-        ]
-          .filter(Boolean)
-          .join("：")
-      : "";
+    verificationLabel || processStatus?.supervisorVerificationAction || "";
   const rows = [
+    productionStatus ? ["longrun", longRunDecision] : null,
     ["当前", `${modeText} · ${monitorText}`],
     ["说明", processDetail],
     processStatus?.nextAction ? ["下一步", processStatus.nextAction] : null,
+    productionFocus.summary ? ["生产判断", productionFocus.summary] : null,
+    modelPipeline.headline ? ["模型链路", modelPipeline.headline] : null,
     productionTarget ? ["验证目标", productionTarget] : null,
     productionPreflight ? ["启动预检", `${preflightLabel} · ${preflightDetail}`] : null,
-    productionStatus ? ["生产阶段", `${maturityLabel} · ${maturity?.summary || readinessDetail}`] : null,
-    productionStatus ? ["生产观测", `${productionLabel} · ${productionDetail}`] : null,
+    productionStatus ? ["生产阶段", `${maturityLabel} · ${productionStageSummary}`] : null,
+    productionStatus ? ["生产观测", `${productionLabel} · ${productionObservationSummary}`] : null,
   ].filter(Boolean);
-  const primaryLabels = new Set(["当前", "说明", "下一步", "验证目标", "启动预检", "生产阶段", "生产观测"]);
+  const primaryLabels = new Set(["当前", "说明", "下一步", "生产判断", "模型链路", "验证目标", "启动预检", "生产阶段", "生产观测"]);
   const detailRows = [
+    productionFocus.attention ? ["当前要留意", productionFocus.attention] : null,
+    productionFocus.nextAction ? ["生产建议", productionFocus.nextAction] : null,
+    modelPipeline.detail ? ["模型说明", modelPipeline.detail] : null,
     controllerStatus?.label
       ? [
           "自动循环",
@@ -1751,6 +1873,14 @@ function StatusSummaryPanel({
         ]
       : null,
     productionStatus?.maturity ? ["剩余缺口", maturityGapText] : null,
+    productionStatus
+      ? [
+          "长跑提示",
+          closedLoopCount >= closedLoopTarget
+            ? "已经具备长跑基础证据，可以继续观察更长时间稳定性。"
+            : `距离可长跑还差 ${Math.max(0, closedLoopTarget - closedLoopCount)} 轮真实闭环证据。`,
+        ]
+      : null,
     productionStatus?.guidanceEvidence
       ? [
           "补充合并证据",
@@ -1808,12 +1938,26 @@ function StatusSummaryPanel({
     ["刷新状态", pollStatus],
   ].filter(Boolean);
   const primaryRows = rows.filter(([label]) => primaryLabels.has(label));
+  if (productionStatus) {
+    primaryRows.unshift(["longrun", longRunDecision]);
+  }
 
   return (
     <div className="status-summary-panel">
+      <div className="status-summary-hero">
+        <div className="status-summary-hero-block">
+          <span>这一轮在做什么</span>
+          <strong>{statusHero.headline}</strong>
+          <p>{statusHero.detail}</p>
+        </div>
+        <div className="status-summary-hero-block">
+          <span>你下一步该做什么</span>
+          <strong>{statusHero.nextAction}</strong>
+        </div>
+      </div>
       {primaryRows.map(([label, value]) => (
         <div className="status-summary-row" key={label}>
-          <span>{label}</span>
+          <span>{presentSharedStatusRowLabel(label)}</span>
           <strong>{value}</strong>
         </div>
       ))}
@@ -1822,6 +1966,16 @@ function StatusSummaryPanel({
           <div>
             <span>闭环证据</span>
             <strong>{closedLoopCount}/{closedLoopTarget} · {closedLoopText}</strong>
+          </div>
+          <div className="closed-loop-evidence-metrics">
+            <div className="closed-loop-evidence-metric">
+              <span>已完成闭环</span>
+              <strong>{closedLoopCount}/{closedLoopTarget}</strong>
+            </div>
+            <div className="closed-loop-evidence-metric">
+              <span>补充合并证据</span>
+              <strong>{guidanceEvidenceCount}/{guidanceEvidenceTarget}</strong>
+            </div>
           </div>
           <div className="closed-loop-evidence-bar" aria-hidden="true">
             <span style={{ width: `${closedLoopProgress}%` }} />
@@ -1858,7 +2012,7 @@ function ConversationDetailBlocks({ blocks = [] }) {
     return null;
   }
 
-  const detailLabel = (block) => {
+  const detailLabelFallback = (block) => {
     if (block.displayLabel || block.summary) {
       return formatValue(block.displayLabel || block.summary, "查看详情");
     }
@@ -1866,6 +2020,14 @@ function ConversationDetailBlocks({ blocks = [] }) {
       return "脚本内容 · 1 段脚本";
     }
     return "查看详情";
+  };
+
+  const detailMetaFallback = (block) => {
+    const parts = [
+      formatValue(block.countLabel, ""),
+      formatValue(block.summary, ""),
+    ].filter(Boolean);
+    return parts.join(" · ");
   };
 
   return (
@@ -1876,7 +2038,19 @@ function ConversationDetailBlocks({ blocks = [] }) {
           key={`${block.kind || "detail"}-${index}`}
           open={block.collapsedByDefault === false}
         >
-          <summary>{detailLabel(block)}</summary>
+          <summary>
+            <span className="conversation-detail-heading">
+              <span className="conversation-detail-kind">
+                {getConversationDetailKindLabel(block.kind)}
+              </span>
+              <span className="conversation-detail-label">
+                {formatValue(getConversationDetailLabel(block), "查看详情")}
+              </span>
+            </span>
+            {getConversationDetailMeta(block) ? (
+              <span className="conversation-detail-meta">{getConversationDetailMeta(block)}</span>
+            ) : null}
+          </summary>
           {Array.isArray(block.copyTargets) && block.copyTargets.length ? (
             <div className="conversation-detail-actions">
               {block.copyTargets.map((target, targetIndex) => (
@@ -1940,6 +2114,7 @@ function ConversationTimeline({
   onClearPendingGuidance,
   onEditPendingGuidance,
   onSendPendingGuidance,
+  guidanceStatusMessage,
   fallbackEntries,
 }) {
   const baseConversationEntries = entries.length
@@ -2034,22 +2209,26 @@ function ConversationTimeline({
             })}
           >
               <summary>
-                <span className="conversation-meta">
-                  {formatTime(entry.at, "未知时间")} · {isGuidance ? "你的补充" : isLoopMessage ? "codex-loop 指令" : "Codex 回复"}
+                <span className="conversation-meta-line">
+                  <span className="conversation-role">
+                    {getConversationRoleLabel(entry.role)}
+                  </span>
+                  <span className="conversation-meta">
+                    {formatTime(entry.at, "未知时间")}
+                  </span>
                 </span>
                 <strong>{summary}</strong>
                 <span className="conversation-actions">
                   <em>
-                    {fullText
-                      ? isGuidance
-                        ? "待下一轮合并"
-                        : isLoopMessage
-                          ? "查看完整指令"
-                          : "查看完整回复"
-                      : "等待完整内容同步"}
+                    {getConversationActionLabel({
+                      hasText: Boolean(fullText),
+                      isGuidance,
+                      isLoop: isLoopMessage,
+                    })}
                   </em>
                   {fullText ? (
                     <button
+                      className="conversation-copy-button"
                       type="button"
                       onClick={(event) => {
                         event.preventDefault();
@@ -2108,6 +2287,9 @@ function ConversationTimeline({
           绑定线程并开始循环后，这里会像 Codex 对话一样展示 codex-loop 发出的指令和 Codex 的回复。
         </div>
       )}
+      {guidanceStatusMessage ? (
+        <div className="conversation-inline-status">{guidanceStatusMessage}</div>
+      ) : null}
       <PendingGuidanceComposer
         pendingGuidanceText={pendingGuidanceText}
         setPendingGuidanceText={setPendingGuidanceText}
@@ -2443,6 +2625,14 @@ function ManagePane({
         : isRunning
         ? "系统会等待 Codex 完整结束一轮，再决定是否继续发送。"
         : "需要继续时点击开始循环；如需本地模型参与，请先开启全局 Ollama。";
+  const stopLimitSummary =
+    snapshot?.state?.budgets &&
+    (snapshot.state.budgets.maxMinutes ||
+      snapshot.state.budgets.maxTokens ||
+      snapshot.state.budgets.finalizeLeadMinutes ||
+      snapshot.state.budgets.finalizeLeadTokens)
+      ? `当前：${snapshot?.mobileView?.processStatus?.stopLimit || "已设置停止条件"}`
+      : "当前：未设置停止条件";
   const thinkingStateClass = isFinalizing
     ? "is-finalizing"
     : isDispatching || isReviewing || isRunning
@@ -2663,6 +2853,7 @@ function ManagePane({
             }}
           >
             <summary>Ollama 设置</summary>
+            <p className="settings-note">{stopLimitSummary}</p>
             <div className="settings-grid">
               <label className="toggle-row">
                 <input
@@ -3385,6 +3576,7 @@ function DashboardHome({
               onClearPendingGuidance={onClearPendingGuidance}
               onEditPendingGuidance={handleEditPendingGuidance}
               onSendPendingGuidance={onSendPendingGuidance}
+              guidanceStatusMessage={guidanceStatusMessage}
               fallbackEntries={visibleTranscriptEntries}
             />
           </Section>
@@ -3433,6 +3625,7 @@ function DesktopConsoleApp() {
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [uiError, setUiError] = useState("");
+  const [guidanceStatusMessage, setGuidanceStatusMessage] = useState("");
   const [pendingGuidanceText, setPendingGuidanceText] = useState("");
   const [pendingGuidanceEditMode, setPendingGuidanceEditMode] = useState(false);
   const [collapsedProjects, setCollapsedProjects] = useState({});
@@ -3715,13 +3908,20 @@ function DesktopConsoleApp() {
     }
 
     await withSubmit(async () => {
-      await requestJson("/pending-guidance", {
+      const result = await requestJson("/pending-guidance", {
         method: "POST",
         body: JSON.stringify({
           text: cleanText,
           replace: pendingGuidanceEditMode,
         }),
       });
+      applyPendingGuidanceFeedback(
+        result,
+        pendingGuidanceEditMode
+          ? "已更新下一轮补充。"
+          : "已记录下一轮补充，会在安全时机合并。",
+        setGuidanceStatusMessage,
+      );
       setPendingGuidanceText("");
       setPendingGuidanceEditMode(false);
     });
@@ -3729,9 +3929,10 @@ function DesktopConsoleApp() {
 
   async function clearPendingGuidance() {
     await withSubmit(async () => {
-      await requestJson("/pending-guidance", {
+      const result = await requestJson("/pending-guidance", {
         method: "DELETE",
       });
+      applyPendingGuidanceFeedback(result, "已撤回待合并引导。", setGuidanceStatusMessage);
       setPendingGuidanceText("");
       setPendingGuidanceEditMode(false);
     });
@@ -3739,9 +3940,14 @@ function DesktopConsoleApp() {
 
   async function sendPendingGuidance() {
     await withSubmit(async () => {
-      await requestJson("/send-guidance", {
+      const result = await requestJson("/send-guidance", {
         method: "POST",
       });
+      applyPendingGuidanceFeedback(
+        result,
+        "已发出下一轮补充，正在等待 Codex 完成当前任务。",
+        setGuidanceStatusMessage,
+      );
       setPendingGuidanceText("");
       setPendingGuidanceEditMode(false);
     });
@@ -3749,10 +3955,11 @@ function DesktopConsoleApp() {
 
   async function createDevicePairingSession() {
     const mobileBaseUrl =
+      remoteAccessStatus?.mobileAppUrl ||
       remoteAccessStatus?.primaryMobileUrl ||
+      remoteAccessStatus?.mobileUrlHint ||
       remoteAccessStatus?.url ||
       remoteAccessStatus?.publicBaseUrl ||
-      remoteAccessStatus?.mobileUrlHint ||
       "";
     setDevicePairingLoading(true);
     setDevicePairingError("");
@@ -3972,7 +4179,8 @@ function DesktopConsoleApp() {
                 }`}
                 onClick={() => void openCreatePane("project")}
               >
-                新建项目
+                <span className="sidebar-action-icon" aria-hidden="true">＋</span>
+                <span>创建项目</span>
               </button>
               <button
                 type="button"
@@ -3982,14 +4190,15 @@ function DesktopConsoleApp() {
                 }`}
                 onClick={() => void openCreatePane("task")}
               >
-                新建任务
+                <span className="sidebar-action-icon" aria-hidden="true">＋</span>
+                <span>创建任务</span>
               </button>
             </div>
 
             {!showingCreationPane ? (
               <div className="sidebar-projects" aria-label="项目任务导航">
                 <div className="sidebar-projects-head">
-                  <span>项目</span>
+                  <span>项目与任务</span>
                   <span>{visibleLoops.length} 个任务</span>
                 </div>
                 <div className="sidebar-loop-groups">
@@ -4011,7 +4220,6 @@ function DesktopConsoleApp() {
                           }
                         >
                           <span className="sidebar-project-title">{projectName}</span>
-                          <span className="sidebar-project-count">{loops.length}</span>
                           <span className="sidebar-project-chevron" aria-hidden="true">
                             {collapsed ? "+" : "-"}
                           </span>

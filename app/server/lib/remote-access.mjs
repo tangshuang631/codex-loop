@@ -19,6 +19,23 @@ function normalizePort(value, fallback = 3001) {
   return Number.isFinite(port) && port > 0 ? port : fallback;
 }
 
+function toMobileAppUrl(value) {
+  const text = safeText(value, "");
+  if (!text) {
+    return "";
+  }
+
+  try {
+    const url = new URL(text);
+    url.pathname = "/mobile-app";
+    url.search = "";
+    url.hash = "";
+    return url.toString().replace(/\/$/u, "");
+  } catch {
+    return `${text.replace(/\/+$/u, "")}/mobile-app`;
+  }
+}
+
 function isTailscaleAddress(address) {
   return /^100\./.test(safeText(address, ""));
 }
@@ -66,8 +83,10 @@ function buildCandidateUrls({ webPort, networkInterfaces = os.networkInterfaces 
       }
 
       seen.add(address);
+      const baseUrl = `http://${address}:${webPort}`;
       candidates.push({
-        url: `http://${address}:${webPort}`,
+        url: baseUrl,
+        appUrl: toMobileAppUrl(baseUrl),
         label: tailscale ? "Tailscale 地址" : `${name || "局域网"} 局域网地址`,
         transport: tailscale ? "tailscale" : "lan",
         address,
@@ -113,16 +132,17 @@ export async function readRemoteAccessStatus({
   const cloudflaredInstalled = await existsCommand("cloudflared", ["--version"]);
   const devicePairing = await readPairingStatus();
   const publicBaseUrl = safeText(launcherStatus.webUrl, "");
+  const mobileAppUrl = toMobileAppUrl(publicBaseUrl);
   const isLocalOnly = isLocalOnlyUrl(publicBaseUrl);
   const mobileReachable = Boolean(publicBaseUrl && !isLocalOnly);
   const webPort = normalizePort(launcherStatus.webPort, 3001);
   const candidateUrls = buildCandidateUrls({ webPort, networkInterfaces });
   const primaryMobileUrl = mobileReachable
-    ? publicBaseUrl
-    : candidateUrls[0]?.url || "";
+    ? mobileAppUrl
+    : candidateUrls[0]?.appUrl || "";
   const mobileUrlHint = isLocalOnly
     ? primaryMobileUrl || `http://这台电脑的 Tailscale 地址或局域网 IP:${webPort}`
-    : publicBaseUrl;
+    : mobileAppUrl;
 
   const recommendedTransport = tailscaleInstalled
     ? "tailscale"
@@ -186,6 +206,7 @@ export async function readRemoteAccessStatus({
     isLocalOnly,
     url: publicBaseUrl,
     publicBaseUrl,
+    mobileAppUrl,
     recommendedSteps,
     devicePairing,
     pairingAction,

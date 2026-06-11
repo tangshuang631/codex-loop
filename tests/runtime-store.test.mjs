@@ -1616,6 +1616,8 @@ test("runLoopTurn degrades to compact template when default ollama is unavailabl
   });
 
   assert.match(dispatchedPrompt, /继续在同一个 Codex 线程中推进。/u);
+  assert.match(dispatchedPrompt, /范围收紧|产品经理|测试人员|真实用户/);
+  assert.match(dispatchedPrompt, /一小批可验证任务/);
   assert.match(snapshot.thread.promptGenerationWarning, /Ollama/);
   assert.equal(snapshot.thread.continuationStatus, "idle");
   assert.equal(snapshot.thread.latestEventType, "codex_followup_completed");
@@ -2523,6 +2525,8 @@ test("ollama follow-up prompt includes prior instruction and verification eviden
   assert.match(requestBody.prompt, /Codex 风格左右对话/);
   assert.match(requestBody.prompt, /独立验收未通过/);
   assert.match(requestBody.prompt, /loop prompt bubble missing expand action/);
+  assert.match(requestBody.prompt, /第一句必须直接告诉 Codex 下一步做什么/);
+  assert.match(requestBody.prompt, /不要复述已知背景/);
 });
 
 test("ollama milestone review prompt includes prior instruction and verification evidence", async () => {
@@ -2603,6 +2607,60 @@ test("ollama milestone review prompt includes prior instruction and verification
   assert.match(requestBody.prompt, /修复移动端底部补充输入框遮挡问题/);
   assert.match(requestBody.prompt, /独立验收未通过/);
   assert.match(requestBody.prompt, /mobile composer hidden below viewport/);
+  assert.match(requestBody.prompt, /JSON 契约/);
+  assert.match(requestBody.prompt, /nextInstruction 必须以上一条最具体的下一步动作开头/);
+});
+
+test("fallback milestone review keeps PM QA user framing and tight verifiable scope", async () => {
+  const configRoot = await createWorkspace();
+  await ensureLoopArtifacts(configRoot);
+  await saveThreadBinding(configRoot, {
+    workspaceName: "demo",
+    threadTitle: "降级复盘线程",
+    threadId: "thread-fallback-review",
+    singleThreadMode: true,
+  });
+  await syncCodexThreadMirror(configRoot, {
+    latestCodexSummary: "Codex 已完成移动端首页初版，但状态判断仍然不够清楚。",
+    lastUserInstructionSummary: "把 codex-loop 做成可长期使用的产品",
+  });
+  let requestBody = null;
+  const fetchImpl = async (_url, init) => {
+    requestBody = JSON.parse(init.body);
+    return {
+      ok: true,
+      json: async () => ({
+        response: JSON.stringify({
+          summary: "监督复盘：继续推进。",
+          nextInstruction: "继续推进。",
+          shouldContinue: true,
+          needsIndependentVerification: true,
+          verificationCommands: ["npm run test"],
+          acceptanceFocus: ["移动端状态"],
+          risks: [],
+        }),
+      }),
+    };
+  };
+
+  const snapshot = await readLoopSnapshot(configRoot);
+  await generateMilestoneReviewWithOllama({
+    snapshot,
+    fallbackReview: {
+      summary: "降级复盘",
+      nextInstruction: "继续推进。",
+      shouldContinue: true,
+      needsIndependentVerification: true,
+      verificationCommands: ["npm run test"],
+      acceptanceFocus: ["移动端状态"],
+      risks: [],
+    },
+    fetchImpl,
+  });
+
+  assert.match(requestBody.prompt, /产品经理 \+ 测试人员 \+ 真实用户|产品经理 \+ QA \+ real user/);
+  assert.match(requestBody.prompt, /JSON 契约/);
+  assert.match(requestBody.prompt, /最重要的几项|most important items/);
 });
 
 test("readLoopSnapshot marks health issue when selected loop rule docs are missing", async () => {

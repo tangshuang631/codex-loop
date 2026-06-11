@@ -4,6 +4,7 @@ import path from "node:path";
 
 export default defineConfig({
   plugins: [react()],
+  base: "/mobile-app/",
   root: path.resolve("app/mobile"),
   server: {
     host: "127.0.0.1",

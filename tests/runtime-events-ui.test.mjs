@@ -88,6 +88,7 @@ test("dashboard uses mobile process status as the primary runtime status source"
   assert.match(appSource, /待合并补充/);
   assert.match(appSource, /pendingGuidanceMergeLabel/);
   assert.match(appSource, /pendingGuidanceMergeDetail/);
+  assert.match(appSource, /conversation-inline-status/);
   assert.match(appSource, /本地模型|NPC|Ollama/);
 });
 
@@ -106,6 +107,16 @@ test("dashboard surfaces merged guidance evidence without adding a new card", as
   assert.doesNotMatch(appSource, /merged-guidance-card/);
 });
 
+test("dashboard conversation composer shows inline guidance feedback instead of a new card", async () => {
+  const appSource = await fs.readFile("app/web/src/App.jsx", "utf8");
+  const stylesSource = await fs.readFile("app/web/src/styles.css", "utf8");
+
+  assert.match(appSource, /presentPendingGuidanceStatus/);
+  assert.match(appSource, /guidanceStatusMessage/);
+  assert.match(appSource, /conversation-inline-status/);
+  assert.match(stylesSource, /\.conversation-inline-status/);
+});
+
 test("dashboard shows loop controller status as one compact status row", async () => {
   const appSource = await fs.readFile("app/web/src/App.jsx", "utf8");
 
@@ -117,9 +128,21 @@ test("dashboard shows loop controller status as one compact status row", async (
   assert.doesNotMatch(appSource, /controller-status-card/);
 });
 
-test("dashboard folds low-frequency status details by default", async () => {
+test("dashboard folds low-frequency status details (legacy assertion kept for reference)", async () => {
   const appSource = await fs.readFile("app/web/src/App.jsx", "utf8");
   const stylesSource = await fs.readFile("app/web/src/styles.css", "utf8");
+
+  assert.match(appSource, /primaryRows/);
+  assert.match(appSource, /buildProductionFocusSummary/);
+  assert.match(appSource, /productionFocus\.summary/);
+  assert.match(appSource, /rows\.filter\(\(\[label\]\) => primaryLabels\.has\(label\)\)/);
+  assert.match(appSource, /detailRows/);
+  assert.match(appSource, /status-detail-fold/);
+  assert.match(appSource, /鏇村鐘舵€?|更多状态/);
+  assert.match(appSource, /杩愯璁板綍|运行记录/);
+  assert.match(stylesSource, /\.status-detail-fold/);
+  assert.match(stylesSource, /\.status-detail-fold summary/);
+  return;
 
   assert.match(appSource, /primaryRows/);
   assert.match(appSource, /const primaryLabels = new Set\(\["当前", "说明", "下一步", "验证目标", "启动预检", "生产阶段", "生产观测"\]\)/);
@@ -155,6 +178,84 @@ test("dashboard keeps production status inside folded status details", async () 
   assert.match(appSource, /下一步建议/);
   assert.match(appSource, /status-detail-fold/);
   assert.doesNotMatch(appSource, /production-status-card/);
+});
+
+test("dashboard and mobile compress production status rows while keeping detail folds", async () => {
+  const appSource = await fs.readFile("app/web/src/App.jsx", "utf8");
+  const mobileSource = await fs.readFile("app/mobile/src/main.jsx", "utf8");
+  const statusStart = appSource.indexOf("function StatusSummaryPanel");
+  const statusEnd = appSource.indexOf("const StatusSummaryPanelV2", statusStart);
+  const statusSource = appSource.slice(statusStart, statusEnd);
+
+  assert.notEqual(statusStart, -1);
+  assert.match(statusSource, /productionStageSummary/);
+  assert.match(statusSource, /productionObservationSummary/);
+  assert.match(statusSource, /buildProductionFocusSummary/);
+  assert.match(statusSource, /buildModelPipelineSummary/);
+  assert.match(statusSource, /生产判断/);
+  assert.match(statusSource, /模型链路/);
+  assert.match(statusSource, /summarizeVisibleText\(/);
+  assert.match(mobileSource, /productionStageSummary/);
+  assert.match(mobileSource, /productionObservationSummary/);
+  assert.match(mobileSource, /buildProductionFocusSummary/);
+  assert.match(mobileSource, /buildModelPipelineSummary/);
+  assert.match(mobileSource, /生产判断/);
+  assert.match(mobileSource, /模型链路/);
+  assert.match(mobileSource, /compactText\(/);
+});
+
+test("dashboard keeps production judgment in primary rows and leaves deeper evidence folded", async () => {
+  const appSource = await fs.readFile("app/web/src/App.jsx", "utf8");
+
+  assert.match(appSource, /buildProductionFocusSummary/);
+  assert.match(appSource, /productionFocus\.summary/);
+  assert.match(appSource, /\["生产判断", productionFocus\.summary\]/);
+  assert.match(appSource, /productionFocus\.attention/);
+  assert.match(appSource, /productionFocus\.nextAction/);
+  assert.match(appSource, /const primaryLabels = new Set\(\["当前", "说明", "下一步", "生产判断", "模型链路", "验证目标", "启动预检", "生产阶段", "生产观测"\]\)/);
+  assert.match(appSource, /status-detail-fold/);
+});
+
+test("dashboard still keeps next action primary while independent verification stays in folded details", async () => {
+  const appSource = await fs.readFile("app/web/src/App.jsx", "utf8");
+
+  const nextActionRowIndex = appSource.indexOf('processStatus?.nextAction ? ["下一步", processStatus.nextAction] : null');
+  const productionJudgmentRowIndex = appSource.indexOf('productionFocus.summary ? ["生产判断", productionFocus.summary] : null');
+  const primaryLabelsIndex = appSource.indexOf("const primaryLabels = new Set(");
+  const detailRowsIndex = appSource.indexOf("const detailRows = [");
+  const modelPipelineRowIndex = appSource.indexOf('modelPipeline.headline ? ["模型链路", modelPipeline.headline] : null');
+  const verificationRowIndex = appSource.indexOf('verificationText ? ["独立验收"');
+  const holdReasonRowIndex = appSource.indexOf("processStatus?.holdReason");
+
+  assert.notEqual(nextActionRowIndex, -1);
+  assert.notEqual(productionJudgmentRowIndex, -1);
+  assert.notEqual(modelPipelineRowIndex, -1);
+  assert.notEqual(primaryLabelsIndex, -1);
+  assert.notEqual(detailRowsIndex, -1);
+  assert.notEqual(verificationRowIndex, -1);
+  assert.notEqual(holdReasonRowIndex, -1);
+  assert.ok(nextActionRowIndex < primaryLabelsIndex);
+  assert.ok(productionJudgmentRowIndex < primaryLabelsIndex);
+  assert.ok(modelPipelineRowIndex < primaryLabelsIndex);
+  assert.ok(detailRowsIndex < verificationRowIndex && verificationRowIndex < holdReasonRowIndex);
+});
+
+test("dashboard and mobile use production nextAction when stale observation needs clearer evidence guidance", async () => {
+  const appSource = await fs.readFile("app/web/src/App.jsx", "utf8");
+  const mobileSource = await fs.readFile("app/mobile/src/main.jsx", "utf8");
+  const statusStart = appSource.indexOf("function StatusSummaryPanel");
+  const statusEnd = appSource.indexOf("const StatusSummaryPanelV2", statusStart);
+  const statusSource = appSource.slice(statusStart, statusEnd);
+
+  assert.notEqual(statusStart, -1);
+  assert.match(
+    statusSource,
+    /productionObservation\?\.status === "stale"[\s\S]*productionStatus\?\.nextAction/,
+  );
+  assert.match(
+    mobileSource,
+    /productionObservation\?\.status === "stale"[\s\S]*productionStatus\?\.nextAction/,
+  );
 });
 
 test("dashboard uses structured maturity instead of parsing production prose", async () => {
@@ -245,16 +346,37 @@ test("dashboard surfaces supervisor verification plan as compact status rows", a
   assert.match(appSource, /验证命令/);
 });
 
-test("dashboard keeps next action primary and folds independent verification details", async () => {
+test("dashboard keeps next action primary and folds independent verification details (legacy assertion kept for reference)", async () => {
   const appSource = await fs.readFile("app/web/src/App.jsx", "utf8");
+
+  const modernNextActionRowIndex = appSource.indexOf('processStatus?.nextAction ? ["下一步", processStatus.nextAction] : null');
+  const modernProductionJudgmentRowIndex = appSource.indexOf('productionFocus.summary ? ["生产判断", productionFocus.summary] : null');
+  const modernModelPipelineRowIndex = appSource.indexOf('modelPipeline.headline ? ["模型链路", modelPipeline.headline] : null');
+  const modernPrimaryLabelsIndex = appSource.indexOf('const primaryLabels = new Set(["当前", "说明", "下一步", "生产判断", "模型链路", "验证目标", "启动预检", "生产阶段", "生产观测"])');
+  const modernDetailRowsIndex = appSource.indexOf("const detailRows = [");
+  const modernVerificationRowIndex = appSource.indexOf('verificationText ? ["独立验收"');
+  const modernHoldReasonRowIndex = appSource.indexOf("processStatus?.holdReason");
+
+  assert.notEqual(modernNextActionRowIndex, -1);
+  assert.notEqual(modernProductionJudgmentRowIndex, -1);
+  assert.notEqual(modernModelPipelineRowIndex, -1);
+  assert.notEqual(modernPrimaryLabelsIndex, -1);
+  assert.notEqual(modernDetailRowsIndex, -1);
+  assert.notEqual(modernVerificationRowIndex, -1);
+  assert.notEqual(modernHoldReasonRowIndex, -1);
+  assert.ok(modernNextActionRowIndex < modernPrimaryLabelsIndex);
+  assert.ok(modernProductionJudgmentRowIndex < modernPrimaryLabelsIndex);
+  assert.ok(modernModelPipelineRowIndex < modernPrimaryLabelsIndex);
+  assert.ok(modernDetailRowsIndex < modernVerificationRowIndex && modernVerificationRowIndex < modernHoldReasonRowIndex);
+  return;
 
   const verificationRowIndex = appSource.indexOf('verificationText ? ["独立验收"');
   const holdReasonRowIndex = appSource.indexOf("processStatus?.holdReason");
   const nextActionRowIndex = appSource.indexOf("processStatus?.nextAction");
   const primaryLabelsIndex = appSource.indexOf('const primaryLabels = new Set(["当前", "说明", "下一步", "验证目标", "启动预检", "生产阶段", "生产观测"])');
-  const productionStageRowIndex = appSource.indexOf('productionStatus ? ["生产阶段"');
+  const productionStageRowIndex = appSource.indexOf('productionStatus ? ["生产阶段",');
   const detailRowsIndex = appSource.indexOf("const detailRows = [");
-  const productionRowIndex = appSource.indexOf('productionStatus ? ["生产观测"');
+  const productionRowIndex = appSource.indexOf('productionStatus ? ["生产观测",');
   const primaryRowsIndex = appSource.indexOf("rows.filter(([label]) => primaryLabels.has(label))");
 
   assert.notEqual(verificationRowIndex, -1);
@@ -361,7 +483,7 @@ test("dashboard exposes mobile viewing as a folded product entry instead of nois
   assert.match(appSource, /function MobileAccessFold/);
   assert.match(appSource, /<MobileAccessFold/);
   assert.match(appSource, /手机查看/);
-  assert.match(appSource, /remoteAccessStatus\?\.url \|\| remoteAccessStatus\?\.publicBaseUrl/);
+  assert.match(appSource, /remoteAccessStatus\?\.mobileAppUrl\s*\|\|\s*remoteAccessStatus\?\.primaryMobileUrl/);
   assert.match(appSource, /remoteAccessStatus\?\.statusText/);
   assert.match(appSource, /remoteAccessStatus\?\.nextAction/);
   assert.match(appSource, /remoteAccessStatus\?\.mobileUrlHint/);
@@ -379,7 +501,7 @@ test("dashboard can create a reusable mobile app pairing session from the mobile
   assert.match(appSource, /const \[devicePairingSession,\s*setDevicePairingSession\]/);
   assert.match(appSource, /async function createDevicePairingSession/);
   assert.match(appSource, /requestJson\("\/device-pairing\/session"/);
-  assert.match(appSource, /remoteAccessStatus\?\.primaryMobileUrl\s*\|\|\s*remoteAccessStatus\?\.url/);
+  assert.match(appSource, /remoteAccessStatus\?\.mobileAppUrl\s*\|\|\s*remoteAccessStatus\?\.primaryMobileUrl/);
   assert.match(appSource, /onCreateDevicePairingSession=\{createDevicePairingSession\}/);
   assert.match(appSource, /remoteAccessStatus\?\.devicePairing\?\.summary/);
   assert.match(appSource, /remoteAccessStatus\?\.pairingAction/);
@@ -486,17 +608,30 @@ test("dashboard prefers shared conversation items and renders collapsible Codex 
   const mobileSource = await fs.readFile("app/mobile/src/main.jsx", "utf8");
   const mobileStylesSource = await fs.readFile("app/mobile/src/styles.css", "utf8");
 
+  assert.match(appSource, /from "\.\.\/\.\.\/shared\/conversation-format\.mjs"/);
+  assert.match(appSource, /from "\.\.\/\.\.\/shared\/conversation-items\.mjs"/);
+  assert.match(appSource, /splitMarkdownBlocks/);
+  assert.match(appSource, /parseMarkdownTextBlock/);
+  assert.match(appSource, /getConversationDetailLabel/);
+  assert.match(appSource, /getConversationDetailMeta/);
+  assert.match(appSource, /buildConversationItemsFromMobileView/);
+  assert.doesNotMatch(appSource, /const detailLabel = \(block\) =>/);
+  assert.doesNotMatch(appSource, /const detailMeta = \(block\) =>/);
   assert.match(appSource, /mobileView\?\.conversationItems/);
   assert.match(appSource, /detailBlocks/);
   assert.match(appSource, /conversation-detail-block/);
   assert.match(appSource, /collapsedByDefault/);
   assert.match(appSource, /block\.displayLabel \|\| block\.summary/);
   assert.match(appSource, /copyTargets/);
+  assert.match(appSource, /countLabel/);
+  assert.match(appSource, /conversation-detail-meta/);
   assert.match(appSource, /复制命令/);
   assert.match(appSource, /复制文件/);
   assert.match(appSource, /script_snippet/);
   assert.match(appSource, /脚本内容/);
   assert.match(mobileSource, /copyTargets/);
+  assert.match(mobileSource, /countLabel/);
+  assert.match(mobileSource, /conversation-detail-meta/);
   assert.match(mobileSource, /block\.displayLabel \|\| block\.summary/);
   assert.match(mobileSource, /复制命令/);
   assert.match(mobileSource, /复制文件/);
@@ -604,8 +739,8 @@ test("create task entry is an explicit new-task action and does not wait for ful
   assert.notEqual(actionGridStart, -1);
   assert.notEqual(collapsedStart, -1);
   assert.match(actionGridSource, /aria-label="新建任务"/);
-  assert.match(actionGridSource, /新建任务/);
-  assert.doesNotMatch(actionGridSource, />创建任务</);
+  assert.match(actionGridSource, /创建任务/);
+  assert.match(actionGridSource, /sidebar-action-icon/);
   assert.match(collapsedSource, /aria-label="新建任务"/);
   assert.match(collapsedSource, />新建</);
   assert.match(appSource, /handleDashboardAction\("open-create"\)/);
@@ -695,6 +830,27 @@ test("mobile route renders a protected task app with durable pairing credentials
   assert.match(stylesSource, /\.mobile-task-shell/);
   assert.match(stylesSource, /\.mobile-task-composer/);
   assert.match(stylesSource, /\.mobile-task-pairing/);
+});
+
+test("mobile route mirrors production judgment and model pipeline status", async () => {
+  const appSource = await fs.readFile("app/web/src/App.jsx", "utf8");
+  const stylesSource = await fs.readFile("app/web/src/styles.css", "utf8");
+  const mobileStart = appSource.indexOf("function MobileTaskApp");
+  const mobileEnd = appSource.indexOf("function DesktopConsoleApp", mobileStart);
+  const mobileSource = appSource.slice(mobileStart, mobileEnd);
+
+  assert.notEqual(mobileStart, -1);
+  assert.match(mobileSource, /requestJson\("\/production-status"\)\.catch/);
+  assert.match(mobileSource, /requestJson\("\/production-preflight"\)\.catch/);
+  assert.match(mobileSource, /mobileProductionStatus/);
+  assert.match(mobileSource, /mobileProductionPreflight/);
+  assert.match(mobileSource, /buildProductionFocusSummary/);
+  assert.match(mobileSource, /buildModelPipelineSummary/);
+  assert.match(mobileSource, /生产判断/);
+  assert.match(mobileSource, /模型链路/);
+  assert.match(mobileSource, /模型说明/);
+  assert.match(stylesSource, /\.mobile-task-panel-details/);
+  assert.match(stylesSource, /\.mobile-task-panel-detail-list/);
 });
 
 test("mobile guidance uses server dispatch result instead of a fixed saved message", async () => {

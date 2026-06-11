@@ -106,10 +106,25 @@ function isTimelineEvent(event = {}) {
   ].includes(safeText(event.type));
 }
 
+function isDispatchEventType(type = "") {
+  return [
+    "codex_followup_dispatching",
+    "codex_followup_dispatched",
+    "codex_followup_sent_waiting",
+  ].includes(safeText(type));
+}
+
+function isDeliveredWaitingEventType(type = "") {
+  return [
+    "codex_followup_dispatched",
+    "codex_followup_sent_waiting",
+  ].includes(safeText(type));
+}
+
 function buildCounters(events) {
   const dispatching = events.filter((event) => event.type === "codex_followup_dispatching").length;
-  const sentOnly = events.filter((event) => event.type === "codex_followup_sent_waiting").length;
-  const dispatches = dispatching || sentOnly;
+  const deliveredWaiting = events.filter((event) => isDeliveredWaitingEventType(event.type)).length;
+  const dispatches = Math.max(dispatching, deliveredWaiting);
   const completions = events.filter((event) => event.type === "codex_followup_completed").length;
   const supervisorReviews = events.filter((event) => event.type === "supervisor_review_completed").length;
   const failures = events.filter((event) => /failed|stalled|runtime_error/u.test(event.type)).length;
@@ -188,10 +203,7 @@ function countOrderedClosedLoops(events) {
   let state = "idle";
 
   for (const event of events) {
-    if (
-      event.type === "codex_followup_dispatching" ||
-      event.type === "codex_followup_sent_waiting"
-    ) {
+    if (isDispatchEventType(event.type)) {
       state = "dispatched";
       continue;
     }
@@ -281,7 +293,7 @@ function latestRunCycle(timeline) {
 }
 
 function buildWaitingObservation(timeline, now = new Date()) {
-  const latestWaiting = timeline.findLast((event) => event.type === "codex_followup_sent_waiting");
+  const latestWaiting = timeline.findLast((event) => isDeliveredWaitingEventType(event.type));
   const waitingAt = Date.parse(latestWaiting?.at || "");
   const nowMs = now instanceof Date ? now.getTime() : Date.parse(String(now || ""));
   const waitingMinutes =
@@ -319,7 +331,7 @@ function deriveStatusAndAdvice(counters, timeline, { waiting = null } = {}) {
 
   const types = new Set(timeline.map((event) => event.type));
   if (
-    types.has("codex_followup_sent_waiting") &&
+    Array.from(types).some((type) => isDeliveredWaitingEventType(type)) &&
     !types.has("codex_followup_completed")
   ) {
     const waitLabel = waiting?.waitingMinutes
@@ -410,7 +422,7 @@ function deriveDiagnosis(counters, timeline, { hasRecovery = false } = {}) {
     }
     const types = new Set(timeline.map((event) => event.type));
     if (
-      types.has("codex_followup_sent_waiting") &&
+      Array.from(types).some((type) => isDeliveredWaitingEventType(type)) &&
       !types.has("codex_followup_completed")
     ) {
       return {

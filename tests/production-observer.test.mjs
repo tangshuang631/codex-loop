@@ -822,3 +822,70 @@ test("production observer treats early same-run failures as resolved after two l
   assert.match(report.summary, /2 轮发送、Codex 完成和 NPC 复盘/);
   assert.match(report.diagnosis.userMessage, /早期失败已被后续稳定闭环覆盖/);
 });
+test("production observer counts dispatched events as delivered waiting evidence", async () => {
+  const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), "codex-loop-observer-"));
+  const logDir = path.join(tempRoot, "runtime", "dispatched-cycle-loop", "logs");
+  await fs.mkdir(logDir, { recursive: true });
+  await fs.writeFile(
+    path.join(logDir, "events.jsonl"),
+    [
+      { type: "run_started_from_console", at: "2026-06-10T08:00:00.000Z" },
+      {
+        type: "codex_followup_dispatched",
+        at: "2026-06-10T08:01:00.000Z",
+        summary: "娑堟伅宸查€佽揪缁戝畾绾跨▼锛屾鍦ㄧ瓑寰?Codex 瀹屾垚杩欎竴杞洖澶嶃€?",
+      },
+      {
+        type: "codex_followup_completed",
+        at: "2026-06-10T08:10:00.000Z",
+        latestAssistantPreview: "Codex 宸插畬鎴愯繖涓€杞牳蹇冧换鍔°.€?",
+      },
+      {
+        type: "supervisor_review_completed",
+        at: "2026-06-10T08:12:00.000Z",
+        summary: "NPC 澶嶇洏纭鍙互缁х画銆?",
+      },
+    ].map((event) => JSON.stringify(event)).join("\n") + "\n",
+    "utf8",
+  );
+
+  const report = await buildProductionObservation({
+    root: tempRoot,
+    runId: "dispatched-cycle-loop",
+  });
+
+  assert.equal(report.counters.dispatches, 1);
+  assert.equal(report.counters.closedLoops, 1);
+  assert.equal(report.status, "attention");
+  assert.match(report.summary, /只观察到 1 轮完整闭环/);
+});
+
+test("production observer treats dispatched waiting events as waiting instead of failure", async () => {
+  const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), "codex-loop-observer-"));
+  const logDir = path.join(tempRoot, "runtime", "dispatched-waiting-loop", "logs");
+  await fs.mkdir(logDir, { recursive: true });
+  await fs.writeFile(
+    path.join(logDir, "events.jsonl"),
+    [
+      {
+        type: "run_started_from_console",
+        at: "2026-06-10T14:00:00.000Z",
+      },
+      {
+        type: "codex_followup_dispatched",
+        at: "2026-06-10T14:01:02.000Z",
+        summary: "娑堟伅宸查€佽揪缁戝畾绾跨▼锛屾鍦ㄧ瓑寰?Codex 瀹屾垚杩欎竴杞洖澶嶃€?",
+      },
+    ].map((event) => JSON.stringify(event)).join("\n") + "\n",
+    "utf8",
+  );
+
+  const report = await buildProductionObservation({
+    root: tempRoot,
+    runId: "dispatched-waiting-loop",
+  });
+
+  assert.equal(report.status, "waiting");
+  assert.equal(report.diagnosis.category, "codex_waiting_after_delivery");
+  assert.match(report.summary, /正在等待 Codex/);
+});

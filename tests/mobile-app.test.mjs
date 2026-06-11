@@ -10,6 +10,9 @@ test("mobile app shell exists as a separate PWA build target", async () => {
   const files = [
     "app/mobile/index.html",
     "app/mobile/manifest.webmanifest",
+    "app/mobile/public/manifest.webmanifest",
+    "app/mobile/public/icon.svg",
+    "app/mobile/public/mobile-sw.js",
     "app/mobile/vite.config.mjs",
     "app/mobile/src/main.jsx",
     "app/mobile/src/styles.css",
@@ -27,6 +30,34 @@ test("mobile app shell exists as a separate PWA build target", async () => {
   );
 });
 
+test("mobile app is installable and keeps realtime APIs out of offline cache", async () => {
+  const html = await read("app/mobile/index.html");
+  const manifest = JSON.parse(await read("app/mobile/manifest.webmanifest"));
+  const publicManifest = JSON.parse(await read("app/mobile/public/manifest.webmanifest"));
+  const source = await read("app/mobile/src/main.jsx");
+  const serviceWorker = await read("app/mobile/public/mobile-sw.js");
+  const viteConfig = await read("app/mobile/vite.config.mjs");
+
+  assert.equal(manifest.name, "codex-loop 移动监控");
+  assert.deepEqual(publicManifest, manifest);
+  assert.equal(manifest.display, "standalone");
+  assert.equal(manifest.lang, "zh-CN");
+  assert.equal(manifest.start_url, "/mobile-app");
+  assert.equal(manifest.scope, "/mobile-app/");
+  assert.equal(manifest.icons.some((icon) => icon.src === "/mobile-app/icon.svg"), true);
+  assert.match(html, /apple-mobile-web-app-capable/);
+  assert.match(html, /codex-loop 移动监控/);
+  assert.match(html, /\/mobile-app\/manifest\.webmanifest/);
+  assert.match(viteConfig, /base:\s*"\/mobile-app\/"/);
+  assert.match(source, /registerMobileServiceWorker/);
+  assert.match(source, /navigator\.serviceWorker\.register\("\/mobile-app\/mobile-sw\.js"\)/);
+  assert.match(serviceWorker, /CACHE_NAME/);
+  assert.match(serviceWorker, /SHELL_URLS/);
+  assert.doesNotMatch(serviceWorker, /"\/manifest\.webmanifest"/);
+  assert.match(serviceWorker, /url\.pathname\.startsWith\("\/api\/"\)/);
+  assert.match(serviceWorker, /request\.mode === "navigate"/);
+});
+
 test("mobile app is a lightweight task monitor instead of a desktop console clone", async () => {
   const source = await read("app/mobile/src/main.jsx");
   const styleSource = await read("app/mobile/src/styles.css");
@@ -41,6 +72,7 @@ test("mobile app is a lightweight task monitor instead of a desktop console clon
   assert.match(source, /pending\.statusLabel/);
   assert.match(source, /pending\.statusDetail/);
   assert.match(source, /pending\.actionLabel/);
+  assert.match(source, /presentPendingGuidanceStatus/);
   assert.doesNotMatch(source, /彻底关闭|新建项目|新建任务|Ollama 设置|运行治理/);
   assert.doesNotMatch(source, /app\/web|\\.\\.\/web|MobileTaskApp/);
   assert.match(styleSource, /border-top/);
@@ -64,6 +96,11 @@ test("mobile app renders Codex replies with markdown code blocks and copyable fi
   const source = await read("app/mobile/src/main.jsx");
   const styleSource = await read("app/mobile/src/styles.css");
 
+  assert.match(source, /from "\.\.\/\.\.\/shared\/conversation-format\.mjs"/);
+  assert.match(source, /from "\.\.\/\.\.\/shared\/conversation-items\.mjs"/);
+  assert.match(source, /splitMarkdownBlocks/);
+  assert.match(source, /parseMarkdownTextBlock/);
+  assert.match(source, /buildConversationItemsFromMobileView/);
   assert.match(source, /function InlineMessageText/);
   assert.match(source, /function MarkdownMessage/);
   assert.match(source, /markdown-code-block/);
@@ -82,6 +119,7 @@ test("mobile app renders history as Codex-like divider flow instead of heavy cha
   const source = await read("app/mobile/src/main.jsx");
   const styleSource = await read("app/mobile/src/styles.css");
 
+  assert.doesNotMatch(source, /function ConversationLegacy/);
   assert.match(source, /className=\{isLoop \? "message is-loop" : "message is-codex"\}/);
   assert.match(styleSource, /\.message\s*\{/);
   assert.match(styleSource, /\.message\.is-codex/);
@@ -199,7 +237,8 @@ test("mobile app manifest supports installable Chinese product naming", async ()
 
   assert.equal(manifest.name, "codex-loop 移动监控");
   assert.equal(manifest.short_name, "codex-loop");
-  assert.equal(manifest.start_url, "/mobile");
+  assert.equal(manifest.start_url, "/mobile-app");
+  assert.equal(manifest.scope, "/mobile-app/");
   assert.equal(manifest.display, "standalone");
   assert.equal(manifest.lang, "zh-CN");
 });

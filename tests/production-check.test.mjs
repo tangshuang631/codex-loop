@@ -807,7 +807,7 @@ test("production status marks stale live runtime observations by log age", async
     assert.equal(observation.isStale, true);
     assert.match(observation.summary, /已过期/);
     assert.doesNotMatch(observation.summary, /上一轮|等待超时|已经同步/);
-    assert.match(status.nextAction, /重新启动一次真实任务|重新运行 npm run production:observe/);
+    assert.match(status.nextAction, /npm run production:observe|assistant-loop|鐪熷疄杩愯瑙傛祴/);
   } finally {
     process.chdir(previousCwd);
   }
@@ -1434,6 +1434,106 @@ test("production status exposes structured maturity and remaining gaps", async (
       status.closedLoopEvidence.evidencePlan.steps.map((step) => `${step.label} ${step.detail}`).join("\n"),
       /dispatch|completion|supervisor|debug|internal/i,
     );
+  } finally {
+    process.chdir(previousCwd);
+  }
+});
+
+test("production status keeps concrete evidence gaps when live observation is stale", async () => {
+  const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), "codex-loop-status-"));
+  const writeReport = async (dirLabel, fileName, report) => {
+    const dir = path.join(tempRoot, ...dirLabel.split("/"));
+    await fs.mkdir(dir, { recursive: true });
+    await fs.writeFile(path.join(dir, fileName), `${JSON.stringify(report, null, 2)}\n`, "utf8");
+  };
+  const now = "2026-06-11T02:08:35.000Z";
+  await writeReport("runtime/production-checks", "latest-production-check.json", {
+    status: "passed",
+    finishedAt: "2026-06-10T16:41:20.946Z",
+    durationMs: 1,
+    checks: [{ status: "passed" }],
+  });
+  await writeReport("runtime/frontend-evidence", "latest-frontend-evidence.json", {
+    status: "passed",
+    finishedAt: "2026-06-10T16:41:20.654Z",
+    durationMs: 1,
+    results: [{ status: "passed" }],
+  });
+  await writeReport("runtime/longrun-smoke", "latest-longrun-smoke.json", {
+    status: "passed",
+    finishedAt: "2026-06-10T16:40:19.389Z",
+    durationMs: 1,
+    checks: [{ status: "passed" }],
+  });
+
+  const logDir = path.join(tempRoot, "runtime", "assistant-loop", "logs");
+  await fs.mkdir(logDir, { recursive: true });
+  const logPath = path.join(logDir, "events.jsonl");
+  await fs.writeFile(
+    logPath,
+    [
+      { type: "run_started_from_console", at: "2026-06-10T11:55:00.000Z" },
+      { type: "codex_followup_dispatching", at: "2026-06-10T12:00:00.000Z" },
+      { type: "codex_followup_completed", at: "2026-06-10T12:05:00.000Z" },
+      { type: "supervisor_review_completed", at: "2026-06-10T12:06:00.000Z" },
+      { type: "codex_followup_dispatching", at: "2026-06-10T12:12:00.000Z" },
+    ].map((event) => JSON.stringify(event)).join("\n") + "\n",
+    "utf8",
+  );
+  await fs.utimes(logPath, new Date("2026-06-10T12:07:00.000Z"), new Date("2026-06-10T12:07:00.000Z"));
+
+  const threadDir = path.join(tempRoot, "runtime", "assistant-loop");
+  await fs.writeFile(
+    path.join(threadDir, "thread.json"),
+    `${JSON.stringify({
+      threadId: "019e9db5-73ae-7292-877f-83b6bf6ab13a",
+      threadTitle: "按清单继续开发",
+      workspaceRoot: "E:\\2026\\opencow",
+      workspaceName: "按清单继续开发",
+      continuationStatus: "idle",
+    }, null, 2)}\n`,
+    "utf8",
+  );
+  await fs.mkdir(path.join(tempRoot, "settings"), { recursive: true });
+  await fs.writeFile(
+    path.join(tempRoot, "settings", "loops.json"),
+    `${JSON.stringify({
+      currentLoopId: "assistant-loop",
+      loops: [
+        {
+          id: "assistant-loop",
+          runId: "assistant-loop",
+          name: "按清单继续开发",
+          projectName: "按清单继续开发",
+          workspaceRoot: "E:\\2026\\opencow",
+          threadBinding: {
+            threadId: "019e9db5-73ae-7292-877f-83b6bf6ab13a",
+            threadTitle: "按清单继续开发",
+            workspaceRoot: "E:\\2026\\opencow",
+          },
+        },
+      ],
+    }, null, 2)}\n`,
+    "utf8",
+  );
+
+  const previousCwd = process.cwd();
+  try {
+    process.chdir(tempRoot);
+    const status = await readProductionStatusSummary({
+      refreshObservation: true,
+      now: new Date(now),
+    });
+
+    assert.equal(status.readiness.stage, "trial");
+    assert.equal(status.maturity.percent, 75);
+    assert.equal(status.closedLoopEvidence.current, 1);
+    assert.equal(status.guidanceEvidence.current, 0);
+    assert.match(status.nextAction, /production:observe/);
+    assert.match(status.nextAction, /还差 1 轮真实闭环/);
+    assert.match(status.nextAction, /还差 1 次用户补充合并证据/);
+    assert.match(status.nextAction, /按清单继续开发/);
+    assert.match(status.nextAction, /E:\\2026\\opencow/);
   } finally {
     process.chdir(previousCwd);
   }

@@ -168,6 +168,12 @@ export async function generatePromptWithOllama({
       ? "Generate the next message as a practical PM/NPC decision. If Codex asks for ordinary product or design confirmation, choose the safest small verified path and tell it to continue. Do not defer to the human unless the choice is destructive, irreversible, credential/permission-related, security-sensitive, or has very different costs."
       : "请像真实产品经理/NPC 一样生成下一条消息。如果 Codex 在询问普通产品边界、设计方案或实现偏好，请直接代表用户选择最安全、最小、可验证的路径，并让它继续。不要写“等用户确认后再继续”，除非涉及高风险删除、不可逆操作、凭证权限、强安全风险或代价差异很大的选择。",
     englishPreferred
+      ? "Output contract: the first sentence must directly tell Codex the next concrete action. If verification is needed, add only the 1-3 most important checks. Prefer evidence from the previous failed verification, the latest Codex reply, the user guidance, and project docs."
+      : "输出契约：第一句必须直接告诉 Codex 下一步做什么。如果需要验证，只补 1-3 个最关键检查点。优先引用上一轮失败验收、最新 Codex 回复、用户补充和项目文档里的证据。",
+    englishPreferred
+      ? "Do not restate known background, do not repeat long summaries, do not output polite filler, and do not waste tokens."
+      : "不要复述已知背景，不要重复长摘要，不要输出客套废话，不要浪费 token。",
+    englishPreferred
       ? "Keep it concise. Do not output JSON. Do not explain your generation process."
       : "保持简洁，不输出 JSON，不解释生成原因，不复述系统说明。",
     "",
@@ -544,6 +550,9 @@ export async function generateMilestoneReviewWithOllama({
     englishPreferred
       ? "Act like a PM + QA + real user: identify what is done, what still feels weak, whether independent testing is needed now, and write the next short actionable instruction. Avoid token-wasteful restatement."
       : "请像产品经理 + 测试人员 + 真实用户一样判断：完成了什么、哪里还不够好、是否需要现在做独立测试、下一步应该让 Codex 做什么。不要重复大段背景，不要浪费 token。",
+    englishPreferred
+      ? "JSON contract: summary should be 1-2 sentences; nextInstruction should start with the next concrete action and stay within 2 short sentences; verificationCommands and acceptanceFocus should keep only the most important items."
+      : "JSON 契约：summary 保持 1-2 句；nextInstruction 必须以上一条最具体的下一步动作开头，最多 2 句；verificationCommands 和 acceptanceFocus 只保留最重要的几项。",
     englishPreferred
       ? "Only set shouldContinue=false for destructive, irreversible, credential, permission, security, high-cost, or genuinely blocked choices."
       : "只有遇到高风险删除、不可逆操作、凭证权限、安全强风险、高成本选择或真正阻塞时，才把 shouldContinue 设为 false。",

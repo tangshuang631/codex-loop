@@ -1,6 +1,23 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import "./styles.css";
+import {
+  buildProductionFocusSummary,
+  buildModelPipelineSummary,
+  buildStatusHeroSummary,
+  buildLongRunDecision,
+  getConversationActionLabel,
+  getConversationDetailKindLabel,
+  getConversationRoleLabel,
+  presentStatusRowLabel as presentSharedStatusRowLabel,
+} from "../../shared/presentation.mjs";
+import {
+  getConversationDetailLabel,
+  getConversationDetailMeta,
+  parseMarkdownTextBlock,
+  splitMarkdownBlocks,
+} from "../../shared/conversation-format.mjs";
+import { buildConversationItemsFromMobileView } from "../../shared/conversation-items.mjs";
 
 const DEVICE_KEY = "codex-loop-mobile-device";
 const POLL_MS = 8000;
@@ -99,10 +116,42 @@ function compactText(value, length = 180) {
   return `${text.slice(0, length - 1)}…`;
 }
 
+function presentPendingGuidanceStatus(result, fallback = "已记录下一轮补充。") {
+  const pending = result?.pendingGuidance;
+  const primary = asText(result?.message);
+  if (primary) {
+    return primary;
+  }
+  if (!pending || typeof pending !== "object") {
+    return fallback;
+  }
+
+  const statusLabel = asText(pending.statusLabel);
+  const detail = asText(pending.userMessage) || asText(pending.statusDetail);
+
+  if (statusLabel && detail) {
+    return `${statusLabel}：${detail}`;
+  }
+  if (detail) {
+    return detail;
+  }
+  if (statusLabel) {
+    return statusLabel;
+  }
+  return fallback;
+}
+
 function shortThreadId(threadId = "") {
   const value = asText(threadId);
   if (value.length <= 18) return value;
   return `${value.slice(0, 8)}...${value.slice(-6)}`;
+}
+
+function presentStatusRowLabel(label) {
+  if (label === "longrun") {
+    return "长跑判断";
+  }
+  return label;
 }
 
 function trimPathToken(token) {
@@ -179,62 +228,39 @@ function InlineMessageText({ text }) {
 function MarkdownMessage({ text }) {
   const value = asText(text);
   if (!value) return null;
-
-  const blocks = [];
-  const fencePattern = /```([^\n`]*)\n([\s\S]*?)```/g;
-  let cursor = 0;
-  let match;
-
-  while ((match = fencePattern.exec(value))) {
-    if (match.index > cursor) {
-      blocks.push({ type: "text", content: value.slice(cursor, match.index) });
-    }
-    blocks.push({
-      type: "code",
-      lang: match[1].trim(),
-      content: match[2].replace(/\n$/u, ""),
-    });
-    cursor = match.index + match[0].length;
-  }
-
-  if (cursor < value.length) {
-    blocks.push({ type: "text", content: value.slice(cursor) });
-  }
+  const blocks = splitMarkdownBlocks(value);
 
   const renderText = (blockText, blockIndex) => {
-    const paragraphs = blockText
-      .split(/\n\s*\n/u)
-      .map((item) => item.trim())
-      .filter(Boolean);
+    const segments = parseMarkdownTextBlock(blockText);
 
-    return paragraphs.map((paragraph, index) => {
-      const lines = paragraph.split(/\n/u).map((line) => line.trim()).filter(Boolean);
-      const heading = paragraph.match(/^(#{1,3})\s+(.+)$/u);
-      if (heading) {
+    return segments.map((segment, index) => {
+      if (segment.type === "heading") {
+        const Tag = segment.depth === 1 ? "h3" : "h4";
         return (
-          <h3 className="markdown-heading" key={`${blockIndex}-${index}`}>
-            <InlineMessageText text={heading[2]} />
-          </h3>
+          <Tag className="markdown-heading" key={`${blockIndex}-${index}`}>
+            <InlineMessageText text={segment.text} />
+          </Tag>
         );
       }
 
-      if (lines.every((line) => /^[-*]\s+/.test(line))) {
+      if (segment.type === "list") {
+        const ListTag = segment.ordered ? "ol" : "ul";
         return (
-          <ul className="markdown-list" key={`${blockIndex}-${index}`}>
-            {lines.map((line, itemIndex) => (
+          <ListTag className="markdown-list" key={`${blockIndex}-${index}`}>
+            {segment.items.map((item, itemIndex) => (
               <li key={`${blockIndex}-${index}-${itemIndex}`}>
-                <InlineMessageText text={line.replace(/^[-*]\s+/, "")} />
+                <InlineMessageText text={item} />
               </li>
             ))}
-          </ul>
+          </ListTag>
         );
       }
 
-      return lines.map((line, lineIndex) => (
-        <p className="markdown-paragraph" key={`${blockIndex}-${index}-${lineIndex}`}>
-          <InlineMessageText text={line.replace(/^\d+\.\s+/, "")} />
+      return (
+        <p className="markdown-paragraph" key={`${blockIndex}-${index}`}>
+          <InlineMessageText text={segment.text} />
         </p>
-      ));
+      );
     });
   };
 
@@ -287,6 +313,8 @@ function dedupe(entries) {
 }
 
 function buildConversation(mobileView) {
+  return buildConversationItemsFromMobileView(mobileView);
+
   if (mobileView?.conversationItems?.length) {
     return dedupe(mobileView.conversationItems).sort((a, b) => {
       const left = Date.parse(a.at || "");
@@ -426,6 +454,11 @@ function PairingView({ onPaired }) {
 
 function StatusBlock({ mobileView, productionStatus, productionPreflight, statusText }) {
   const process = mobileView?.processStatus || {};
+  const statusHero = buildStatusHeroSummary({
+    headline: process.headline || mobileView?.summary?.recentSummary,
+    detail: process.detail || mobileView?.suggestedAction,
+    nextAction: process.nextAction || mobileView?.suggestedAction,
+  });
   const productionObservation = productionStatus?.sections?.find(
     (section) => section.label === "真实运行观测",
   );
@@ -455,6 +488,9 @@ function StatusBlock({ mobileView, productionStatus, productionPreflight, status
       ? "已达到长期运行基本证据"
       : `还差 ${closedLoopTarget - closedLoopCount} 轮真实闭环`);
   const guidanceEvidence = productionStatus?.guidanceEvidence || {};
+  const longRunHint = closedLoopCount >= closedLoopTarget
+    ? "已经具备长跑基础证据，可以继续观察更长时间稳定性。"
+    : `距离可长跑还差 ${Math.max(0, closedLoopTarget - closedLoopCount)} 轮真实闭环证据。`;
   const guidanceEvidenceCount = Math.max(0, Number(guidanceEvidence.current ?? 0));
   const guidanceEvidenceTarget = Math.max(1, Number(guidanceEvidence.target ?? 1));
   const guidanceEvidenceText = guidanceEvidence.label ||
@@ -495,19 +531,49 @@ function StatusBlock({ mobileView, productionStatus, productionPreflight, status
           : "";
   const productionDetail =
     productionObservation?.status === "stale"
-      ? "真实运行观测已过期，请重新运行 npm run production:observe，或重新启动一次真实任务生成新的运行记录。"
+      ? productionStatus?.nextAction ||
+        "真实运行观测已过期，请重新运行 npm run production:observe，或重新启动一次真实任务生成新的运行记录。"
       : productionStatus?.nextAction || productionObservation?.summary || "";
   const readinessDetail = readiness.summary || readiness.nextAction || productionDetail;
+  const productionStageSummary = compactText(maturity?.summary || readinessDetail, 110) || "等待更多真实闭环证据。";
+  const productionObservationSummary =
+    compactText(
+      productionDetail,
+      110,
+    ) || (productionObservation?.status === "stale" ? "真实运行观测已过期。" : "等待形成新的真实观测。");
+  const longRunDecision = buildLongRunDecision({
+    hasProductionStatus: Boolean(productionStatus),
+    closedLoopCount,
+    closedLoopTarget,
+    guidanceEvidenceCount,
+    guidanceEvidenceTarget,
+  });
+  const productionFocus = buildProductionFocusSummary({
+    productionStatus,
+    productionPreflight,
+    productionObservation,
+    closedLoopCount,
+    closedLoopTarget,
+    guidanceEvidenceCount,
+    guidanceEvidenceTarget,
+  });
+  const modelPipeline = buildModelPipelineSummary(process);
   const rows = [
+    productionStatus ? ["longrun", longRunDecision] : null,
     ["当前状态", process.monitorLabel || mobileView?.loop?.modeLabel || "监控中"],
     ["下一步", process.nextAction || mobileView?.suggestedAction || "等待下一轮更新"],
+    productionFocus.summary ? ["生产判断", productionFocus.summary] : null,
+    modelPipeline.headline ? ["模型链路", modelPipeline.headline] : null,
     productionTarget ? ["验证目标", productionTarget] : null,
     productionPreflight ? ["启动预检", `${preflightLabel} · ${preflightDetail}`] : null,
-    productionStatus ? ["生产阶段", `${maturityLabel} · ${maturity?.summary || readinessDetail}`] : null,
-    productionStatus ? ["生产观测", `${productionLabel} · ${productionDetail}`] : null,
+    productionStatus ? ["生产阶段", `${maturityLabel} · ${productionStageSummary}`] : null,
+    productionStatus ? ["生产观测", `${productionLabel} · ${productionObservationSummary}`] : null,
     ["最近指令", process.latestInstructionSourceLabel || "等待生成"],
   ].filter(Boolean);
   const details = [
+    productionFocus.attention ? ["当前要留意", productionFocus.attention] : null,
+    productionFocus.nextAction ? ["生产建议", productionFocus.nextAction] : null,
+    modelPipeline.detail ? ["模型说明", modelPipeline.detail] : null,
     productionStatus
       ? [
           "生产成熟度",
@@ -521,6 +587,7 @@ function StatusBlock({ mobileView, productionStatus, productionPreflight, status
         ]
       : null,
     productionStatus?.maturity ? ["剩余缺口", maturityGapText] : null,
+    productionStatus ? ["长跑提示", longRunHint] : null,
     productionStatus?.guidanceEvidence
       ? [
           "补充合并证据",
@@ -553,8 +620,10 @@ function StatusBlock({ mobileView, productionStatus, productionPreflight, status
             .join("："),
         ]
       : null,
-    ["等待原因", process.holdReason],
-    ["待合并引导", process.pendingGuidancePreview || mobileView?.pendingGuidance?.preview],
+    process.holdReason ? ["等待原因", process.holdReason] : null,
+    process.pendingGuidancePreview || mobileView?.pendingGuidance?.preview
+      ? ["待合并引导", process.pendingGuidancePreview || mobileView?.pendingGuidance?.preview]
+      : null,
     process.lastMergedGuidanceStatus
       ? [
           "已合并补充",
@@ -567,7 +636,9 @@ function StatusBlock({ mobileView, productionStatus, productionPreflight, status
             .join("："),
         ]
       : null,
-    ["独立验收", process.supervisorVerificationLabel || process.supervisorVerificationStatus],
+    process.supervisorVerificationLabel || process.supervisorVerificationStatus
+      ? ["独立验收", process.supervisorVerificationLabel || process.supervisorVerificationStatus]
+      : null,
     process.supervisorPerspectiveRows?.length
       ? [
           "NPC 视角",
@@ -576,35 +647,48 @@ function StatusBlock({ mobileView, productionStatus, productionPreflight, status
             .join("；"),
         ]
       : null,
-    ["验收动作", process.supervisorVerificationAction],
-    [
-      "截图证据",
-      process.supervisorVerificationEvidencePreview ||
-        (process.supervisorVerificationEvidenceCount
-          ? `${process.supervisorVerificationEvidenceCount} 个截图证据`
-          : ""),
-    ],
-    ["模型来源", process.latestInstructionSourceDetail],
-    [
-      "回复摘要",
-      [
-        process.latestCodexSummarySourceLabel,
-        process.latestCodexSummarySourceDetail,
-      ]
-        .filter(Boolean)
-        .join("："),
-    ],
+    process.supervisorVerificationAction ? ["验收动作", process.supervisorVerificationAction] : null,
+    process.supervisorVerificationEvidencePreview || process.supervisorVerificationEvidenceCount
+      ? [
+          "截图证据",
+          process.supervisorVerificationEvidencePreview ||
+            `${process.supervisorVerificationEvidenceCount} 个截图证据`,
+        ]
+      : null,
+    process.latestInstructionSourceDetail ? ["模型来源", process.latestInstructionSourceDetail] : null,
+    process.latestCodexSummarySourceLabel || process.latestCodexSummarySourceDetail
+      ? [
+          "回复摘要",
+          [
+            process.latestCodexSummarySourceLabel,
+            process.latestCodexSummarySourceDetail,
+          ]
+            .filter(Boolean)
+            .join("："),
+        ]
+      : null,
   ].filter((row) => row && asText(row[1]));
 
   return (
     <section className="status-block">
+      <div className="status-hero">
+        <div className="status-hero-block">
+          <span>这一轮在做什么</span>
+          <strong>{statusHero.headline}</strong>
+          <p>{statusHero.detail}</p>
+        </div>
+        <div className="status-hero-block">
+          <span>你下一步该做什么</span>
+          <strong>{statusHero.nextAction}</strong>
+        </div>
+      </div>
       <div className="status-head">
         <span>{statusText}</span>
         <strong>{process.headline || mobileView?.summary?.recentSummary || "正在同步任务状态"}</strong>
       </div>
       {rows.map(([label, value]) => (
         <div className="status-row" key={label}>
-          <span>{label}</span>
+          <span>{presentSharedStatusRowLabel(label)}</span>
           <strong>{value}</strong>
         </div>
       ))}
@@ -613,6 +697,16 @@ function StatusBlock({ mobileView, productionStatus, productionPreflight, status
           <div>
             <span>闭环证据</span>
             <strong>{closedLoopCount}/{closedLoopTarget} · {closedLoopText}</strong>
+          </div>
+          <div className="closed-loop-evidence-metrics">
+            <div className="closed-loop-evidence-metric">
+              <span>已完成闭环</span>
+              <strong>{closedLoopCount}/{closedLoopTarget}</strong>
+            </div>
+            <div className="closed-loop-evidence-metric">
+              <span>补充合并证据</span>
+              <strong>{guidanceEvidenceCount}/{guidanceEvidenceTarget}</strong>
+            </div>
           </div>
           <div className="closed-loop-evidence-bar" aria-hidden="true">
             <span style={{ width: `${closedLoopProgress}%` }} />
@@ -650,6 +744,14 @@ function ConversationDetailBlocks({ blocks = [] }) {
     return "查看详情";
   };
 
+  const detailMeta = (block) => {
+    const parts = [
+      asText(block.countLabel),
+      asText(block.summary),
+    ].filter(Boolean);
+    return parts.join(" · ");
+  };
+
   return (
     <div className="conversation-detail-list">
       {visibleBlocks.map((block, index) => (
@@ -658,7 +760,19 @@ function ConversationDetailBlocks({ blocks = [] }) {
           key={`${block.kind || "detail"}-${index}`}
           open={block.collapsedByDefault === false}
         >
-          <summary>{detailLabel(block)}</summary>
+          <summary>
+            <span className="conversation-detail-heading">
+              <span className="conversation-detail-kind">
+                {getConversationDetailKindLabel(block.kind)}
+              </span>
+              <span className="conversation-detail-label">
+                {asText(getConversationDetailLabel(block), "查看详情")}
+              </span>
+            </span>
+            {getConversationDetailMeta(block) ? (
+              <span className="conversation-detail-meta">{getConversationDetailMeta(block)}</span>
+            ) : null}
+          </summary>
           {Array.isArray(block.copyTargets) && block.copyTargets.length ? (
             <div className="conversation-detail-actions">
               {block.copyTargets.map((target, targetIndex) => (
@@ -682,13 +796,14 @@ function ConversationDetailBlocks({ blocks = [] }) {
   );
 }
 
-function Conversation({ mobileView }) {
+function ArchivedConversationPreview({ mobileView }) {
   const entries = useMemo(() => buildConversation(mobileView), [mobileView]);
   const bottomRef = useRef(null);
+  const latestEntry = entries.at(-1);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ block: "end", behavior: "auto" });
-  }, [entries.length]);
+  }, [entries.length, latestEntry?.at, latestEntry?.role]);
 
   if (!entries.length) {
     return <section className="empty">还没有历史对话。绑定任务后，这里会显示 Codex 回复和 codex-loop 发出的指令。</section>;
@@ -698,14 +813,87 @@ function Conversation({ mobileView }) {
     <section className="conversation" aria-label="历史对话">
       <h2>历史对话</h2>
       {entries.map((entry, index) => {
-        const isLoop = entry.role === "user" || entry.role === "loop" || entry.role === "guidance";
+        const isGuidance = entry.role === "guidance";
+        const isLoop = entry.role === "user" || entry.role === "loop" || isGuidance;
         const text = asText(entry.text || entry.summary || entry.preview);
+        const preview = compactText(entry.preview || text, isLoop ? 120 : 220);
+        const roleLabel = getConversationRoleLabel(entry.role);
         return (
-          <article className={isLoop ? "message is-loop" : "message is-codex"} key={`${entry.at || index}-${entry.role}-${index}`}>
+          <article
+            className={isLoop ? "message is-loop" : "message is-codex"}
+            key={`${entry.at || index}-${entry.role}-${index}`}
+          >
             <details open={index >= entries.length - 2}>
               <summary>
                 <span>{formatTime(entry.at)} · {isLoop ? "codex-loop" : "Codex"}</span>
                 <strong>{compactText(entry.preview || text, isLoop ? 120 : 220)}</strong>
+              </summary>
+              <MarkdownMessage text={text} />
+              <ConversationDetailBlocks blocks={entry.detailBlocks} />
+            </details>
+          </article>
+        );
+      })}
+      <div ref={bottomRef} />
+    </section>
+  );
+}
+
+function Conversation({ mobileView }) {
+  const entries = useMemo(() => buildConversation(mobileView), [mobileView]);
+  const bottomRef = useRef(null);
+  const latestEntry = entries.at(-1);
+
+  useEffect(() => {
+    bottomRef.current?.scrollIntoView({ block: "end", behavior: "auto" });
+  }, [entries.length, latestEntry?.at, latestEntry?.role]);
+
+  if (!entries.length) {
+    return <section className="empty">还没有历史对话。绑定任务后，这里会显示 Codex 回复和 codex-loop 发出的指令。</section>;
+  }
+
+  return (
+    <section className="conversation" aria-label="历史对话">
+      <h2>历史对话</h2>
+      {entries.map((entry, index) => {
+        const isGuidance = entry.role === "guidance";
+        const isLoop = entry.role === "user" || entry.role === "loop" || isGuidance;
+        const text = asText(entry.text || entry.summary || entry.preview);
+        const preview = compactText(entry.preview || text, isLoop ? 120 : 220);
+        const roleLabel = getConversationRoleLabel(entry.role);
+        const actionLabel = getConversationActionLabel({
+          hasText: Boolean(text),
+          isGuidance,
+          isLoop,
+        });
+
+        return (
+          <article
+            className={isGuidance ? "message is-guidance" : isLoop ? "message is-loop" : "message is-codex"}
+            key={`${entry.at || index}-${entry.role}-${index}`}
+          >
+            <details open={index >= entries.length - 2}>
+              <summary>
+                <span className="message-meta-line">
+                  <span className="message-role">{roleLabel}</span>
+                  <span>{formatTime(entry.at)}</span>
+                </span>
+                <strong>{preview}</strong>
+                <span className="message-action-line">
+                  <em>{actionLabel}</em>
+                  {text ? (
+                    <button
+                      type="button"
+                      className="message-copy-button"
+                      onClick={(event) => {
+                        event.preventDefault();
+                        copyText(text);
+                      }}
+                    >
+                      复制全文
+                    </button>
+                  ) : null}
+                </span>
               </summary>
               <MarkdownMessage text={text} />
               <ConversationDetailBlocks blocks={entry.detailBlocks} />
@@ -830,7 +1018,12 @@ function TaskMonitorApp() {
           replace: editing,
         }),
       });
-      setStatusText(result.message || "已保存补充引导");
+      setStatusText(
+        presentPendingGuidanceStatus(
+          result,
+          "已记录下一轮补充，会在安全时机合并。",
+        ),
+      );
       setGuidance("");
       setEditing(false);
       await load({ silent: true });
@@ -852,7 +1045,7 @@ function TaskMonitorApp() {
           deviceToken: device.deviceToken,
         }),
       });
-      setStatusText(result.message || "已撤回待合并引导");
+      setStatusText(presentPendingGuidanceStatus(result, "已撤回待合并引导。"));
       setGuidance("");
       setEditing(false);
       await load({ silent: true });
@@ -922,4 +1115,15 @@ function TaskMonitorApp() {
   );
 }
 
+function registerMobileServiceWorker() {
+  if (!("serviceWorker" in navigator)) return;
+
+  window.addEventListener("load", () => {
+    navigator.serviceWorker.register("/mobile-app/mobile-sw.js").catch(() => {
+      // 手机 App 壳增强失败时保持网页可用，不把安装能力变成主链路阻塞项。
+    });
+  });
+}
+
+registerMobileServiceWorker();
 createRoot(document.getElementById("root")).render(<TaskMonitorApp />);

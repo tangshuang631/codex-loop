@@ -1,5 +1,8 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import fs from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
 
 import { buildHandler } from "../app/server/server.mjs";
 
@@ -303,6 +306,74 @@ test("handler dispatches mobile route", async () => {
   assert.match(chunks.join(""), /"mobile":true/);
 });
 
+test("handler serves the installable mobile app without intercepting mobile APIs", async () => {
+  const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), "codex-loop-mobile-app-"));
+  const mobileAppDir = path.join(tempRoot, "dist-mobile");
+  const mobilePublicDir = path.join(tempRoot, "public");
+  await fs.mkdir(path.join(mobileAppDir, "assets"), { recursive: true });
+  await fs.mkdir(mobilePublicDir, { recursive: true });
+  await fs.writeFile(
+    path.join(mobileAppDir, "index.html"),
+    '<!doctype html><title>codex-loop 移动监控</title><script src="/mobile-app/assets/app.js"></script>',
+  );
+  await fs.writeFile(path.join(mobileAppDir, "assets", "app.js"), "console.log('mobile app');");
+  await fs.writeFile(path.join(mobilePublicDir, "mobile-sw.js"), "const APP_BASE = '/mobile-app';");
+  await fs.writeFile(
+    path.join(mobilePublicDir, "manifest.webmanifest"),
+    '{"name":"codex-loop 移动监控","start_url":"/mobile-app"}',
+  );
+
+  const handler = buildHandler({
+    mobileAppDir,
+    mobilePublicDir,
+    operations: {
+      exportMobileView: async () => ({ mobile: true }),
+    },
+  });
+
+  async function request(url) {
+    const chunks = [];
+    const response = {
+      writeHead(statusCode, headers) {
+        this.statusCode = statusCode;
+        this.headers = headers;
+      },
+      end(text) {
+        chunks.push(Buffer.isBuffer(text) ? text.toString("utf8") : String(text || ""));
+      },
+    };
+    await handler(
+      {
+        method: "GET",
+        url,
+        [Symbol.asyncIterator]: async function* iterator() {},
+      },
+      response,
+    );
+    return { response, body: chunks.join("") };
+  }
+
+  const app = await request("/mobile-app");
+  assert.equal(app.response.statusCode, 200);
+  assert.match(app.response.headers["Content-Type"], /text\/html/);
+  assert.match(app.body, /codex-loop 移动监控/);
+
+  const sw = await request("/mobile-app/mobile-sw.js");
+  assert.equal(sw.response.statusCode, 200);
+  assert.match(sw.response.headers["Content-Type"], /javascript/);
+  assert.match(sw.body, /APP_BASE/);
+
+  const manifest = await request("/mobile-app/manifest.webmanifest");
+  assert.equal(manifest.response.statusCode, 200);
+  assert.match(manifest.response.headers["Content-Type"], /manifest\+json/);
+  assert.match(manifest.body, /codex-loop 移动监控/);
+
+  const api = await request("/api/mobile");
+  assert.equal(api.response.statusCode, 200);
+  assert.match(api.response.headers["Content-Type"], /application\/json/);
+  assert.match(api.body, /"mobile":true/);
+});
+
 test("handler protects paired mobile view with reusable device credentials", async () => {
   let verificationPayload = null;
   let exported = false;
@@ -424,11 +495,29 @@ test("handler lets paired mobile devices save next-turn guidance", async () => {
     operations: {
       savePendingGuidance: async (_cwd, body) => {
         savedPayload = body;
-        return { thread: { pendingUserGuidance: body.text } };
+        return {
+          thread: { pendingUserGuidance: body.text },
+          pendingGuidance: {
+            text: body.text,
+            preview: body.text,
+            hasPending: true,
+            status: "ready_to_merge",
+            statusLabel: "等待本地模型 / NPC 合并",
+          },
+        };
       },
       sendPendingGuidanceOnce: async () => {
         sentOnce = true;
-        return { thread: { continuationStatus: "dispatching" } };
+        return {
+          thread: { continuationStatus: "dispatching" },
+          pendingGuidance: {
+            text: "下一轮先检查移动端历史记录是否清晰。",
+            preview: "下一轮先检查移动端历史记录是否清晰。",
+            hasPending: true,
+            status: "waiting_codex",
+            statusLabel: "等待 Codex 完成",
+          },
+        };
       },
       verifyPairedDevice: async (_cwd, body) => {
         verificationPayload = body;
@@ -479,6 +568,8 @@ test("handler lets paired mobile devices save next-turn guidance", async () => {
   assert.equal(sentOnce, true);
   assert.match(chunks.join(""), /移动端历史记录/);
   assert.match(chunks.join(""), /"dispatch":"sent"/);
+  assert.match(chunks.join(""), /"pendingGuidance"/);
+  assert.match(chunks.join(""), /"status":"waiting_codex"/);
 });
 
 test("handler keeps mobile guidance saved but unsent when production preflight blocks dispatch", async () => {
@@ -492,7 +583,16 @@ test("handler keeps mobile guidance saved but unsent when production preflight b
       }),
       savePendingGuidance: async (_cwd, body) => {
         savedPayload = body;
-        return { thread: { pendingUserGuidance: body.text } };
+        return {
+          thread: { pendingUserGuidance: body.text },
+          pendingGuidance: {
+            text: body.text,
+            preview: body.text,
+            hasPending: true,
+            status: "ready_to_merge",
+            statusLabel: "等待本地模型 / NPC 合并",
+          },
+        };
       },
       sendPendingGuidanceOnce: async () => {
         sendAttempts += 1;
@@ -540,6 +640,8 @@ test("handler keeps mobile guidance saved but unsent when production preflight b
   assert.equal(savedPayload.text, "等这一轮完成后补充产品验收要求。");
   assert.equal(sendAttempts, 0);
   assert.match(chunks.join(""), /"dispatch":"queued"/);
+  assert.match(chunks.join(""), /"pendingGuidance"/);
+  assert.match(chunks.join(""), /"hasPending":true/);
   assert.match(chunks.join(""), /已保存补充引导/);
   assert.match(chunks.join(""), /暂时不要重复发送下一轮/);
 });
@@ -551,7 +653,16 @@ test("handler keeps mobile guidance queued when Codex is still working", async (
     operations: {
       savePendingGuidance: async (_cwd, body) => {
         savedPayload = body;
-        return { thread: { pendingUserGuidance: body.text } };
+        return {
+          thread: { pendingUserGuidance: body.text },
+          pendingGuidance: {
+            text: body.text,
+            preview: body.text,
+            hasPending: true,
+            status: "ready_to_merge",
+            statusLabel: "等待本地模型 / NPC 合并",
+          },
+        };
       },
       sendPendingGuidanceOnce: async () => {
         sendAttempts += 1;
@@ -600,6 +711,7 @@ test("handler keeps mobile guidance queued when Codex is still working", async (
   assert.equal(sendAttempts, 1);
   assert.equal(savedPayload.text, "等 Codex 完成后补一轮移动端验收。");
   assert.match(chunks.join(""), /"dispatch":"queued"/);
+  assert.match(chunks.join(""), /"pendingGuidance"/);
   assert.match(chunks.join(""), /Codex 正在处理当前轮/);
 });
 
@@ -1750,7 +1862,16 @@ test("handler dispatches pending guidance route", async () => {
       syncCodexThreadMirror: async () => ({}),
       savePendingGuidance: async (_cwd, body) => {
         savedPayload = body;
-        return { thread: { pendingUserGuidance: body.text } };
+        return {
+          thread: { pendingUserGuidance: body.text },
+          pendingGuidance: {
+            text: body.text,
+            preview: body.text,
+            hasPending: true,
+            status: "ready_to_merge",
+            statusLabel: "等待本地模型 / NPC 合并",
+          },
+        };
       },
       recordHeartbeat: async () => ({}),
       recordError: async () => ({}),
@@ -1836,6 +1957,8 @@ test("handler dispatches clear pending guidance route", async () => {
   assert.equal(response.statusCode, 200);
   assert.equal(cleared, true);
   assert.match(chunks.join(""), /pendingUserGuidance/);
+  assert.match(chunks.join(""), /"pendingGuidance"/);
+  assert.match(chunks.join(""), /"status":"cleared"/);
 });
 
 test("handler dispatches current loop supervisor route", async () => {

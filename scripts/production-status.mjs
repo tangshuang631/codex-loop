@@ -327,10 +327,31 @@ function supervisorRecoveryAction() {
   return "先运行 npm run production:recover 补齐监督复盘；该命令不会发送下一轮指令。";
 }
 
+function summarizeEvidenceGaps(item = {}) {
+  const parts = [];
+  const closedLoops = Math.max(0, Number(item.counters?.closedLoops || 0));
+  const closedLoopRemaining = Math.max(0, 2 - closedLoops);
+  if (closedLoopRemaining > 0) {
+    parts.push(`还差 ${closedLoopRemaining} 轮真实闭环证据。`);
+  }
+  const mergedGuidance = countMergedGuidanceEvidence(item);
+  if (mergedGuidance < 1) {
+    parts.push("还差 1 次用户补充合并证据。");
+  }
+  return parts;
+}
+
 function deriveNextAction(items, target = {}) {
   const stale = items.find((item) => item.status === "stale");
   if (stale) {
     if (stale.label === "真实运行观测") {
+      const gapText = summarizeEvidenceGaps(stale).join("");
+      if (gapText) {
+        return appendTargetConfirmation(
+          `真实运行观测已过期，请重新运行 npm run production:observe，或重新启动一次真实任务生成新的运行记录。${gapText}`,
+          target,
+        );
+      }
       return `${stale.label}已过期，请重新运行 npm run production:observe，或重新启动一次真实任务生成新的运行记录。`;
     }
     return `${stale.label}已过期，请重新运行 npm run production:check 后再判断是否适合继续长期运行。`;

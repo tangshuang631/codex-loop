@@ -21,4 +21,6 @@ test("settings exposes loop stop conditions outside Ollama settings", async () =
   assert.match(manageSource, /最长运行时间/);
   assert.match(manageSource, /最大 token 预算/);
   assert.match(manageSource, /到达限制后不会再发送下一条指令/);
+  assert.match(manageSource, /settings-note/);
+  assert.match(manageSource, /未设置停止条件|当前：/);
 });

@@ -13,6 +13,7 @@ test("remote access status exposes a copyable mobile entry and plain Chinese gui
 
   assert.equal(status.url, "http://127.0.0.1:3001");
   assert.equal(status.publicBaseUrl, "http://127.0.0.1:3001");
+  assert.equal(status.mobileAppUrl, "http://127.0.0.1:3001/mobile-app");
   assert.equal(status.remoteReady, true);
   assert.equal(status.isLocalOnly, true);
   assert.match(status.headline, /手机查看/);
@@ -77,6 +78,8 @@ test("remote access status marks non-local dashboard url as phone-ready", async 
   assert.equal(status.isLocalOnly, false);
   assert.equal(status.mobileReachable, true);
   assert.equal(status.url, "http://100.64.0.10:3001");
+  assert.equal(status.mobileAppUrl, "http://100.64.0.10:3001/mobile-app");
+  assert.equal(status.primaryMobileUrl, "http://100.64.0.10:3001/mobile-app");
   assert.match(status.statusText, /手机可以打开|可用/);
   assert.match(status.nextAction, /手机浏览器/);
 });
@@ -104,11 +107,15 @@ test("remote access status suggests phone-ready urls from local network interfac
   });
 
   assert.equal(status.mobileReachable, false);
-  assert.equal(status.primaryMobileUrl, "http://100.101.102.103:3001");
+  assert.equal(status.primaryMobileUrl, "http://100.101.102.103:3001/mobile-app");
   assert.equal(status.candidateUrls.length, 2);
   assert.deepEqual(
     status.candidateUrls.map((candidate) => candidate.url),
     ["http://100.101.102.103:3001", "http://192.168.31.25:3001"],
+  );
+  assert.deepEqual(
+    status.candidateUrls.map((candidate) => candidate.appUrl),
+    ["http://100.101.102.103:3001/mobile-app", "http://192.168.31.25:3001/mobile-app"],
   );
   assert.match(status.candidateUrls[0].label, /Tailscale/);
   assert.match(status.candidateUrls[1].label, /局域网|Wi-Fi/);
@@ -146,7 +153,7 @@ test("remote access status hides low-value virtual adapter urls by default", asy
     status.candidateUrls.map((candidate) => candidate.url),
     ["http://172.30.202.40:3001"],
   );
-  assert.equal(status.primaryMobileUrl, "http://172.30.202.40:3001");
+  assert.equal(status.primaryMobileUrl, "http://172.30.202.40:3001/mobile-app");
   assert.doesNotMatch(
     status.candidateUrls.map((candidate) => candidate.label).join("\n"),
     /VMware|WSL|Docker|本地连接\*/,
