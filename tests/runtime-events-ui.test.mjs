@@ -180,6 +180,7 @@ test("dashboard keeps production status inside folded status details", async () 
   assert.doesNotMatch(appSource, /production-status-card/);
 });
 
+
 test("dashboard and mobile compress production status rows while keeping detail folds", async () => {
   const appSource = await fs.readFile("app/web/src/App.jsx", "utf8");
   const mobileSource = await fs.readFile("app/mobile/src/main.jsx", "utf8");
@@ -212,7 +213,7 @@ test("dashboard keeps production judgment in primary rows and leaves deeper evid
   assert.match(appSource, /\["生产判断", productionFocus\.summary\]/);
   assert.match(appSource, /productionFocus\.attention/);
   assert.match(appSource, /productionFocus\.nextAction/);
-  assert.match(appSource, /const primaryLabels = new Set\(\["当前", "说明", "下一步", "生产判断", "模型链路", "验证目标", "启动预检", "生产阶段", "生产观测"\]\)/);
+  assert.match(appSource, /const primaryLabels = new Set\(\["当前", "说明", "下一步"\]\)/);
   assert.match(appSource, /status-detail-fold/);
 });
 
@@ -221,7 +222,7 @@ test("dashboard still keeps next action primary while independent verification s
 
   const nextActionRowIndex = appSource.indexOf('processStatus?.nextAction ? ["下一步", processStatus.nextAction] : null');
   const productionJudgmentRowIndex = appSource.indexOf('productionFocus.summary ? ["生产判断", productionFocus.summary] : null');
-  const primaryLabelsIndex = appSource.indexOf("const primaryLabels = new Set(");
+  const primaryLabelsIndex = appSource.indexOf('const primaryLabels = new Set(["当前", "说明", "下一步"])');
   const detailRowsIndex = appSource.indexOf("const detailRows = [");
   const modelPipelineRowIndex = appSource.indexOf('modelPipeline.headline ? ["模型链路", modelPipeline.headline] : null');
   const verificationRowIndex = appSource.indexOf('verificationText ? ["独立验收"');
@@ -235,8 +236,9 @@ test("dashboard still keeps next action primary while independent verification s
   assert.notEqual(verificationRowIndex, -1);
   assert.notEqual(holdReasonRowIndex, -1);
   assert.ok(nextActionRowIndex < primaryLabelsIndex);
-  assert.ok(productionJudgmentRowIndex < primaryLabelsIndex);
-  assert.ok(modelPipelineRowIndex < primaryLabelsIndex);
+  assert.ok(primaryLabelsIndex < detailRowsIndex);
+  assert.ok(detailRowsIndex < productionJudgmentRowIndex);
+  assert.ok(detailRowsIndex < modelPipelineRowIndex);
   assert.ok(detailRowsIndex < verificationRowIndex && verificationRowIndex < holdReasonRowIndex);
 });
 
@@ -352,7 +354,7 @@ test("dashboard keeps next action primary and folds independent verification det
   const modernNextActionRowIndex = appSource.indexOf('processStatus?.nextAction ? ["下一步", processStatus.nextAction] : null');
   const modernProductionJudgmentRowIndex = appSource.indexOf('productionFocus.summary ? ["生产判断", productionFocus.summary] : null');
   const modernModelPipelineRowIndex = appSource.indexOf('modelPipeline.headline ? ["模型链路", modelPipeline.headline] : null');
-  const modernPrimaryLabelsIndex = appSource.indexOf('const primaryLabels = new Set(["当前", "说明", "下一步", "生产判断", "模型链路", "验证目标", "启动预检", "生产阶段", "生产观测"])');
+  const modernPrimaryLabelsIndex = appSource.indexOf('const primaryLabels = new Set(["当前", "说明", "下一步"])');
   const modernDetailRowsIndex = appSource.indexOf("const detailRows = [");
   const modernVerificationRowIndex = appSource.indexOf('verificationText ? ["独立验收"');
   const modernHoldReasonRowIndex = appSource.indexOf("processStatus?.holdReason");
@@ -365,44 +367,10 @@ test("dashboard keeps next action primary and folds independent verification det
   assert.notEqual(modernVerificationRowIndex, -1);
   assert.notEqual(modernHoldReasonRowIndex, -1);
   assert.ok(modernNextActionRowIndex < modernPrimaryLabelsIndex);
-  assert.ok(modernProductionJudgmentRowIndex < modernPrimaryLabelsIndex);
-  assert.ok(modernModelPipelineRowIndex < modernPrimaryLabelsIndex);
+  assert.ok(modernPrimaryLabelsIndex < modernDetailRowsIndex);
+  assert.ok(modernDetailRowsIndex < modernProductionJudgmentRowIndex);
+  assert.ok(modernDetailRowsIndex < modernModelPipelineRowIndex);
   assert.ok(modernDetailRowsIndex < modernVerificationRowIndex && modernVerificationRowIndex < modernHoldReasonRowIndex);
-  return;
-
-  const verificationRowIndex = appSource.indexOf('verificationText ? ["独立验收"');
-  const holdReasonRowIndex = appSource.indexOf("processStatus?.holdReason");
-  const nextActionRowIndex = appSource.indexOf("processStatus?.nextAction");
-  const primaryLabelsIndex = appSource.indexOf('const primaryLabels = new Set(["当前", "说明", "下一步", "验证目标", "启动预检", "生产阶段", "生产观测"])');
-  const productionStageRowIndex = appSource.indexOf('productionStatus ? ["生产阶段",');
-  const detailRowsIndex = appSource.indexOf("const detailRows = [");
-  const productionRowIndex = appSource.indexOf('productionStatus ? ["生产观测",');
-  const primaryRowsIndex = appSource.indexOf("rows.filter(([label]) => primaryLabels.has(label))");
-
-  assert.notEqual(verificationRowIndex, -1);
-  assert.notEqual(holdReasonRowIndex, -1);
-  assert.notEqual(nextActionRowIndex, -1);
-  assert.notEqual(primaryLabelsIndex, -1);
-  assert.notEqual(productionStageRowIndex, -1);
-  assert.notEqual(detailRowsIndex, -1);
-  assert.notEqual(productionRowIndex, -1);
-  assert.notEqual(primaryRowsIndex, -1);
-  assert.ok(
-    nextActionRowIndex < primaryLabelsIndex,
-    "下一步要留在主要状态来源里，避免用户看不到下一步动作。",
-  );
-  assert.ok(
-    productionStageRowIndex < primaryLabelsIndex,
-    "生产阶段是长期运行门槛，应在主要状态里直接可见。",
-  );
-  assert.ok(
-    productionRowIndex < primaryLabelsIndex,
-    "生产观测是长期运行判断，应在主要状态里直接可见。",
-  );
-  assert.ok(
-    detailRowsIndex < verificationRowIndex && verificationRowIndex < holdReasonRowIndex,
-    "独立验收和判断应进入折叠详情，避免首页默认状态过重。",
-  );
 });
 
 test("dashboard exposes supervisor screenshot evidence inside compact status details", async () => {
@@ -482,12 +450,13 @@ test("dashboard exposes mobile viewing as a folded product entry instead of nois
 
   assert.match(appSource, /function MobileAccessFold/);
   assert.match(appSource, /<MobileAccessFold/);
-  assert.match(appSource, /手机查看/);
+  assert.match(appSource, /移动端使用/);
   assert.match(appSource, /remoteAccessStatus\?\.mobileAppUrl\s*\|\|\s*remoteAccessStatus\?\.primaryMobileUrl/);
   assert.match(appSource, /remoteAccessStatus\?\.statusText/);
   assert.match(appSource, /remoteAccessStatus\?\.nextAction/);
   assert.match(appSource, /remoteAccessStatus\?\.mobileUrlHint/);
   assert.match(appSource, /remoteAccessStatus\?\.candidateUrls/);
+  assert.match(appSource, /copyTextToClipboard\(candidate\.appUrl \|\| candidate\.url\)/);
   assert.match(appSource, /推荐手机地址/);
   assert.match(stylesSource, /\.mobile-access-fold/);
   assert.match(stylesSource, /\.mobile-access-steps/);
@@ -503,12 +472,15 @@ test("dashboard can create a reusable mobile app pairing session from the mobile
   assert.match(appSource, /requestJson\("\/device-pairing\/session"/);
   assert.match(appSource, /remoteAccessStatus\?\.mobileAppUrl\s*\|\|\s*remoteAccessStatus\?\.primaryMobileUrl/);
   assert.match(appSource, /onCreateDevicePairingSession=\{createDevicePairingSession\}/);
+  assert.match(appSource, /onCreatePairingSession=\{onCreateDevicePairingSession\}/);
   assert.match(appSource, /remoteAccessStatus\?\.devicePairing\?\.summary/);
   assert.match(appSource, /remoteAccessStatus\?\.pairingAction/);
-  assert.match(appSource, /生成扫码绑定/);
+  assert.match(appSource, /移动端使用/);
   assert.match(appSource, /长期绑定/);
   assert.match(appSource, /重启后不用重复扫码/);
   assert.match(appSource, /pairingSession\?\.pairingCode/);
+  assert.match(appSource, /pairingSession\?\.browserPairingUrl/);
+  assert.match(appSource, /复制绑定链接/);
   assert.match(appSource, /pairingSession\?\.qrPayload/);
   assert.match(appSource, /QRCode\.toDataURL/);
   assert.match(appSource, /pairingQrDataUrl/);
@@ -531,8 +503,20 @@ test("dashboard lets users revoke paired phones and see pairing audit hints", as
   assert.match(appSource, /撤销绑定/);
   assert.match(appSource, /最近绑定记录/);
   assert.match(appSource, /onRevokePairedDevice=\{revokePairedDevice\}/);
+  assert.match(appSource, /onRevokePairedDevice=\{onRevokePairedDevice\}/);
   assert.match(stylesSource, /\.mobile-pairing-devices/);
   assert.match(stylesSource, /\.mobile-pairing-audit/);
+});
+
+test("dashboard home uses passed-in pairing handlers and guidance status instead of outer-scope names", async () => {
+  const appSource = await fs.readFile("app/web/src/App.jsx", "utf8");
+
+  assert.match(appSource, /function DashboardHome\(\{[\s\S]*guidanceStatusMessage,/);
+  assert.match(appSource, /function DashboardHome\(\{[\s\S]*onCreateDevicePairingSession,/);
+  assert.match(appSource, /function DashboardHome\(\{[\s\S]*onRevokePairedDevice,/);
+  assert.match(appSource, /guidanceStatusMessage=\{guidanceStatusMessage\}/);
+  assert.match(appSource, /onCreatePairingSession=\{onCreateDevicePairingSession\}/);
+  assert.match(appSource, /onRevokePairedDevice=\{onRevokePairedDevice\}/);
 });
 
 test("dashboard labels default ollama auto mode without turning it into strict mode", async () => {
@@ -674,6 +658,7 @@ test("sidebar uses compact project navigation instead of task tab cards", async 
   assert.doesNotMatch(sidebarSource, /\["loops", "任务"\]/);
   assert.doesNotMatch(sidebarSource, /sidebar-pane-tab/);
   assert.match(sidebarSource, /sidebar-project-title/);
+  assert.match(sidebarSource, /aria-label=\{`管理项目 \$\{projectName\}`\}/);
   assert.match(sidebarSource, /sidebar-loop-name/);
   assert.doesNotMatch(sidebarSource, /formatValue\(loop\.branch,\s*"dev"\)/);
   assert.doesNotMatch(sidebarSource, />管理</);
@@ -683,6 +668,8 @@ test("sidebar uses compact project navigation instead of task tab cards", async 
   assert.ok(footerSource.indexOf("帮助") < footerSource.indexOf("设置"));
   assert.match(stylesSource, /\.sidebar-action-grid/);
   assert.match(stylesSource, /\.sidebar-footer-button/);
+  assert.match(stylesSource, /\.sidebar-project-row/);
+  assert.match(stylesSource, /\.sidebar-project-tools/);
   assert.match(stylesSource, /\.sidebar-loop-name/);
 });
 
@@ -696,6 +683,9 @@ test("sidebar groups tasks from persisted projects so empty projects remain visi
   assert.match(appSource, /loopRegistry\.projects/);
   assert.match(sidebarSource, /project\.isEmpty/);
   assert.match(sidebarSource, /还没有任务/);
+  assert.match(sidebarSource, /在这个项目下新建任务/);
+  assert.match(sidebarSource, /删除这个项目/);
+  assert.match(appSource, /requestJson\("\/projects\/delete"/);
 });
 
 test("create project entry submits a real project before tasks are added", async () => {
@@ -732,12 +722,13 @@ test("create task entry is an explicit new-task action and does not wait for ful
   const collapsedStart = sidebarSource.indexOf("<div className=\"sidebar-collapsed-list\">");
   const collapsedSource = sidebarSource.slice(collapsedStart);
   const openCreatePaneStart = appSource.indexOf("async function openCreatePane");
-  const openCreatePaneEnd = appSource.indexOf("async function handleDashboardAction", openCreatePaneStart);
+  const openCreatePaneEnd = appSource.indexOf("async function openTaskCreationForProject", openCreatePaneStart);
   const openCreatePaneSource = appSource.slice(openCreatePaneStart, openCreatePaneEnd);
 
   assert.notEqual(sidebarStart, -1);
   assert.notEqual(actionGridStart, -1);
   assert.notEqual(collapsedStart, -1);
+  assert.notEqual(openCreatePaneEnd, -1);
   assert.match(actionGridSource, /aria-label="新建任务"/);
   assert.match(actionGridSource, /创建任务/);
   assert.match(actionGridSource, /sidebar-action-icon/);
@@ -775,8 +766,63 @@ test("create task view does not show previously created tasks as the creation en
   assert.doesNotMatch(paneSource, /assistant-result/);
   assert.doesNotMatch(paneSource, /createdLoop\.name/);
   assert.match(paneSource, /开始新建任务/);
+  assert.match(paneSource, /assistant-prefill-hint/);
   assert.match(workspaceSource, /nextAssistantState\?\.status === "completed"/);
   assert.match(workspaceSource, /setActiveSidebarPane\("loops"\)/);
+});
+
+test("project menu can open task creation with project context prefilled", async () => {
+  const appSource = await fs.readFile("app/web/src/App.jsx", "utf8");
+
+  assert.match(appSource, /async function openTaskCreationForProject/);
+  assert.match(appSource, /setProjectCreationDraft\(\{/);
+  assert.match(appSource, /projectName,/);
+  assert.match(appSource, /workspaceRoot,/);
+  assert.match(appSource, /requestJson\("\/loop-creation-assistant\/reset"/);
+  assert.match(appSource, /body: JSON\.stringify\(\{\s*projectName,\s*workspaceRoot,\s*\}\)/);
+  assert.match(appSource, /将直接在项目「\$\{projectCreationDraft\.projectName\}」下创建任务/);
+});
+
+test("manage workspace view is framed as current-task settings instead of generic global settings", async () => {
+  const appSource = await fs.readFile("app/web/src/App.jsx", "utf8");
+
+  assert.match(appSource, /workspace-focus-eyebrow">当前任务设置/);
+  assert.match(appSource, /调整「\{currentLoopName\}」/);
+  assert.match(appSource, /保存默认规则/);
+  assert.match(appSource, /这里是工作区默认规则/);
+  assert.match(appSource, /当前任务操作/);
+  assert.match(appSource, /删除当前任务/);
+});
+
+test("run and safety fold keeps developer-style connection details collapsed by default", async () => {
+  const appSource = await fs.readFile("app/web/src/App.jsx", "utf8");
+
+  assert.match(appSource, /<Metric label="手机查看" value=\{remoteAccessStatus\?\.mobileReachable \? "已就绪" : "待确认"\} \/>/);
+  assert.match(appSource, /<summary>连接细节<\/summary>/);
+  assert.match(appSource, /<Metric label="连接方式" value=\{remoteTransport \|\| "未识别"\} \/>/);
+  assert.match(appSource, /<Metric label="控制台地址" value=\{launcherWebUrl \|\| "未提供"\} \/>/);
+  assert.doesNotMatch(appSource, /<Metric label="远程访问" value=\{remoteTransport\} \/>/);
+});
+
+test("loop deletion can switch away before removing the currently active task", async () => {
+  const appSource = await fs.readFile("app/web/src/App.jsx", "utf8");
+
+  assert.match(appSource, /async function switchLoop\(loopId\)/);
+  assert.match(appSource, /async function deleteLoopFromSidebar\(loop = \{\}\)/);
+  assert.match(appSource, /const alternativeLoop = visibleLoops\.find\(\(item\) => item\.id !== loopId\)/);
+  assert.match(appSource, /if \(loopId === \(currentLoop\?\.id \|\| loopRegistry\.currentLoopId\)\) \{/);
+  assert.match(appSource, /await switchLoop\(alternativeLoop\.id\)/);
+});
+
+test("dashboard stop and idle copy no longer imply automatic looping by default", async () => {
+  const appSource = await fs.readFile("app/web/src/App.jsx", "utf8");
+
+  assert.match(appSource, /"手动监控中"/);
+  assert.match(appSource, /"等待启动"/);
+  assert.match(appSource, /当前不会自动续跑；你可以先查看记录，或手动发送一条补充引导。/);
+  assert.match(appSource, /"尚未绑定线程"/);
+  assert.match(appSource, /const canStartAutomaticLoop = Boolean\(snapshot\?\.thread\?\.threadId\)/);
+  assert.match(appSource, /title=\{canStartAutomaticLoop \? "开始自动循环" : "请先绑定线程，或等待当前状态结束后再启动自动循环"\}/);
 });
 
 test("create pane hides historical task navigation and keeps creation entry available", async () => {

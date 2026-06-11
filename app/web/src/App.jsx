@@ -175,6 +175,10 @@ function pickVisibleLoop(loops = [], preferredId = "") {
   );
 }
 
+function buildProjectMenuId(projectName = "") {
+  return `project:${projectName}`;
+}
+
 function getInitialSidebarOpen() {
   if (typeof window === "undefined") {
     return true;
@@ -593,17 +597,25 @@ function formatProductionTarget(target = {}) {
 }
 
 function isUsefulTranscriptEntry(entry) {
-  const summary = formatValue(entry?.summary, "");
-  if (!summary) {
+  const summary = formatValue(entry?.summary || entry?.note, "");
+  const note = formatValue(entry?.note, "");
+  if (!summary && !note) {
     return false;
   }
-  if (summary.includes("???") || summary.includes("锟")) {
+  const text = `${summary}\n${note}`;
+  if (text.includes("???") || text.includes("锟")) {
     return false;
   }
-  if (summary.includes("循环已启动") || summary.includes("正在等待第一轮")) {
+  if (text.includes("循环已启动") || text.includes("正在等待第一轮")) {
     return false;
   }
-  if (summary.includes("正在向绑定的 Codex 线程发送")) {
+  if (text.includes("正在向绑定的 Codex 线程发送")) {
+    return false;
+  }
+  if (text.includes("已收到停止指令") || text.includes("已清空未发送的补充引导")) {
+    return false;
+  }
+  if (text.includes("manual stop") || note === "pending_guidance_cleared") {
     return false;
   }
   return true;
@@ -842,7 +854,7 @@ function MobileAccessFold({
   return (
     <details className="mobile-access-fold">
       <summary>
-        <span>手机查看</span>
+        <span>移动端使用</span>
         <strong>{remoteAccessStatus?.mobileReachable ? "手机可打开" : "需要换地址"}</strong>
       </summary>
       <p className="mobile-access-status">{statusText}</p>
@@ -864,7 +876,7 @@ function MobileAccessFold({
             <div className="mobile-access-candidate" key={candidate.url}>
               <span>{candidate.label || "手机地址"}</span>
               <code>{candidate.appUrl || candidate.url}</code>
-              <button type="button" onClick={() => copyTextToClipboard(candidate.url)}>
+              <button type="button" onClick={() => copyTextToClipboard(candidate.appUrl || candidate.url)}>
                 复制
               </button>
             </div>
@@ -877,11 +889,11 @@ function MobileAccessFold({
       <div className="mobile-pairing-panel">
         <div className="mobile-pairing-head">
           <div>
-            <strong>手机绑定</strong>
+            <strong>扫码绑定</strong>
             <p>{pairingSummary}</p>
           </div>
           <button type="button" disabled={pairingLoading} onClick={onCreatePairingSession}>
-            {pairingLoading ? "生成中" : "生成扫码绑定"}
+            {pairingLoading ? "加载中" : "移动端使用"}
           </button>
         </div>
         <p>{pairingAction}</p>
@@ -928,6 +940,15 @@ function MobileAccessFold({
                 复制配对码
               </button>
             </div>
+            {pairingSession?.browserPairingUrl ? (
+              <div className="mobile-pairing-code">
+                <span>手机浏览器直达</span>
+                <code>{pairingSession.browserPairingUrl}</code>
+                <button type="button" onClick={() => copyTextToClipboard(pairingSession.browserPairingUrl)}>
+                  复制绑定链接
+                </button>
+              </div>
+            ) : null}
             {pairingSession?.qrPayload ? (
               <div className="mobile-pairing-qr">
                 <span>扫码内容</span>
@@ -1766,18 +1787,18 @@ function StatusSummaryPanel({
     ["当前", `${modeText} · ${monitorText}`],
     ["说明", processDetail],
     processStatus?.nextAction ? ["下一步", processStatus.nextAction] : null,
+  ].filter(Boolean);
+  const primaryLabels = new Set(["当前", "说明", "下一步"]);
+  const detailRows = [
     productionFocus.summary ? ["生产判断", productionFocus.summary] : null,
+    productionFocus.attention ? ["当前要留意", productionFocus.attention] : null,
+    productionFocus.nextAction ? ["生产建议", productionFocus.nextAction] : null,
     modelPipeline.headline ? ["模型链路", modelPipeline.headline] : null,
+    modelPipeline.detail ? ["模型说明", modelPipeline.detail] : null,
     productionTarget ? ["验证目标", productionTarget] : null,
     productionPreflight ? ["启动预检", `${preflightLabel} · ${preflightDetail}`] : null,
     productionStatus ? ["生产阶段", `${maturityLabel} · ${productionStageSummary}`] : null,
     productionStatus ? ["生产观测", `${productionLabel} · ${productionObservationSummary}`] : null,
-  ].filter(Boolean);
-  const primaryLabels = new Set(["当前", "说明", "下一步", "生产判断", "模型链路", "验证目标", "启动预检", "生产阶段", "生产观测"]);
-  const detailRows = [
-    productionFocus.attention ? ["当前要留意", productionFocus.attention] : null,
-    productionFocus.nextAction ? ["生产建议", productionFocus.nextAction] : null,
-    modelPipeline.detail ? ["模型说明", modelPipeline.detail] : null,
     controllerStatus?.label
       ? [
           "自动循环",
@@ -1985,7 +2006,7 @@ function StatusSummaryPanel({
       <details className="status-detail-fold">
         <summary>
           <span>更多状态</span>
-          <strong>线程、模型、停止条件、运行记录</strong>
+          <strong>生产判断、模型链路、线程和运行记录</strong>
         </summary>
         <LoopProgressPanel
           processStatus={processStatus}
@@ -2419,6 +2440,7 @@ function LoopCreationAssistantPane({
   onBack,
   onReset,
   creationMode = "task",
+  projectCreationDraft = null,
 }) {
   const currentQuestion = assistantState?.currentQuestion;
   const draft = assistantState?.draft || {};
@@ -2432,8 +2454,20 @@ function LoopCreationAssistantPane({
       <p className="sidebar-help">
         {projectMode
           ? "先确认项目路径和项目名，再把任务收纳到这个项目下。"
-          : "先确认项目、任务名和分支，再开始循环。"}
+          : projectCreationDraft?.projectName
+            ? `将直接在项目「${projectCreationDraft.projectName}」下创建任务；先确认任务名和分支。`
+            : "先确认项目、任务名和分支，再开始循环。"}
       </p>
+
+      {projectCreationDraft?.projectName ? (
+        <div className="assistant-prefill-hint">
+          <strong>已选项目</strong>
+          <p>
+            {projectCreationDraft.projectName}
+            {projectCreationDraft.workspaceRoot ? ` · ${projectCreationDraft.workspaceRoot}` : ""}
+          </p>
+        </div>
+      ) : null}
 
       {currentQuestion ? (
         <>
@@ -2603,6 +2637,10 @@ function ManagePane({
   withSubmit,
   activeManageSection,
   setActiveManageSection,
+  currentLoopName,
+  currentLoop,
+  visibleLoops,
+  onDeleteLoop,
 }) {
   const isDispatching = snapshot?.thread?.continuationStatus === "dispatching";
   const isReviewing = snapshot?.thread?.continuationStatus === "reviewing";
@@ -2639,6 +2677,20 @@ function ManagePane({
     : isDispatching || isReviewing || isRunning
       ? "is-active"
       : "is-idle";
+  const canDeleteCurrentLoop = Boolean(currentLoop?.id) && visibleLoops.some((loop) => loop.id !== currentLoop?.id);
+  const remoteStatusSummary =
+    remoteAccessStatus?.statusText ||
+    (remoteAccessStatus?.mobileReachable ? "手机查看入口已可用。" : "手机查看入口还需要再确认。");
+  const remoteNextStep =
+    remoteAccessStatus?.nextAction ||
+    (remoteAccessStatus?.mobileReachable ? "需要时再展开连接细节查看地址。" : "先展开连接细节，按提示处理地址或网络。");
+  const hasConnectionDetails = Boolean(
+    remoteAccessStatus?.url ||
+      launcherWebUrl ||
+      remoteTransport ||
+      remoteAccessStatus?.warning ||
+      remoteAccessStatus?.mobileUrlHint,
+  );
 
   return (
     <div className="sidebar-pane-stack">
@@ -2769,7 +2821,7 @@ function ManagePane({
           }
         }}
       >
-        <summary>全局设置</summary>
+        <summary>默认规则</summary>
         <form
           className="sidebar-form"
           onSubmit={(event) => {
@@ -2814,6 +2866,9 @@ function ManagePane({
             });
           }}
         >
+          <p className="sidebar-help">
+            这里是工作区默认规则。没有填写当前任务专用设置时，会先继承这里的语言、本地模型和默认监督偏好。
+          </p>
           <div className="settings-grid">
             <label>
               <span>默认对话语言</span>
@@ -2867,7 +2922,7 @@ function ManagePane({
                     }))
                   }
                 />
-                <span>开启 Ollama 后，默认用于所有任务</span>
+                <span>开启后作为默认能力提供给各个任务</span>
               </label>
               <label>
                 <span>模型名称</span>
@@ -2935,7 +2990,7 @@ function ManagePane({
           >
             <summary>NPC 角色</summary>
             <p className="sidebar-help">
-              定义 codex-loop 作为产品经理、测试人员和真实用户时的长期偏好；临时引导仍在首页补充。
+              定义 codex-loop 默认的产品经理、测试人员和真实用户偏好；当前任务如果有专用规则，会在这里的基础上覆盖。
             </p>
             <div className="settings-grid">
               <label>
@@ -3062,7 +3117,7 @@ function ManagePane({
           </div>
 
           <button type="submit" className="primary-button" disabled={submitting}>
-            保存全局设置
+            保存默认规则
           </button>
         </form>
       </details>
@@ -3151,13 +3206,14 @@ function ManagePane({
         <div className="sidebar-form">
           <div className="metric-grid compact-metric-grid">
             <Metric label="最近事件" value={latestEvent} />
-            <Metric label="远程访问" value={remoteTransport} />
-            <Metric label="控制台地址" value={launcherWebUrl} />
+            <Metric label="手机查看" value={remoteAccessStatus?.mobileReachable ? "已就绪" : "待确认"} />
             <Metric
               label="健康状态"
               value={healthIssues.length ? `${healthIssues.length} 个提示` : "当前正常"}
             />
           </div>
+          <p className="sidebar-help">{remoteStatusSummary}</p>
+          <p className="sidebar-help">{remoteNextStep}</p>
           {healthIssues.length ? (
             <div className="detail-stack">
               {healthIssues.map((issue, index) => (
@@ -3173,13 +3229,71 @@ function ManagePane({
           ) : (
             <p className="sidebar-help">当前没有明显异常，可以继续推进。</p>
           )}
-          {remoteAccessStatus?.url ? (
-            <DetailCard
-              meta="远程入口"
-              title={remoteAccessStatus.url}
-              body="如果你需要在别的设备上查看状态，可以使用这个地址。"
-              quiet
-            />
+          {hasConnectionDetails ? (
+            <details className="workspace-details">
+              <summary>连接细节</summary>
+              <div className="detail-stack">
+                <Metric label="连接方式" value={remoteTransport || "未识别"} />
+                <Metric label="控制台地址" value={launcherWebUrl || "未提供"} />
+                {remoteAccessStatus?.url ? (
+                  <DetailCard
+                    meta="远程入口"
+                    title={remoteAccessStatus.url}
+                    body="如果你需要在别的设备上查看状态，再使用这个地址。"
+                    quiet
+                  />
+                ) : null}
+                {remoteAccessStatus?.mobileUrlHint ? (
+                  <DetailCard
+                    meta="手机建议地址"
+                    title={remoteAccessStatus.mobileUrlHint}
+                    body="当默认地址在手机上打不开时，优先试这个地址。"
+                    quiet
+                  />
+                ) : null}
+                {remoteAccessStatus?.warning ? (
+                  <DetailCard
+                    meta="连接提醒"
+                    title="需要留意"
+                    body={remoteAccessStatus.warning}
+                    quiet
+                  />
+                ) : null}
+              </div>
+            </details>
+          ) : null}
+        </div>
+      </details>
+
+      <details
+        className="sidebar-disclosure"
+        open={activeManageSection === "task-actions"}
+        onToggle={(event) => {
+          if (event.currentTarget.open) setActiveManageSection("task-actions");
+        }}
+      >
+        <summary>当前任务操作</summary>
+        <div className="sidebar-form">
+          <p className="sidebar-help">
+            删除后不会保留这个任务的绑定和循环记录。若删除后项目为空，可在项目菜单里继续新建任务或删除空项目。
+          </p>
+          <button
+            type="button"
+            className="danger-button"
+            disabled={!canDeleteCurrentLoop || submitting}
+            title={
+              canDeleteCurrentLoop
+                ? `删除当前任务「${currentLoopName}」`
+                : "至少还需要保留一个任务；请先新建或切换到其他任务。"
+            }
+            onClick={() => void onDeleteLoop(currentLoop)}
+          >
+            删除当前任务
+          </button>
+          {!canDeleteCurrentLoop ? (
+            <p className="sidebar-help">
+              当前只剩这一个任务，暂时不能直接删除。请先新建一个任务，或切换到其他任务后再删除它。
+            </p>
           ) : null}
         </div>
       </details>
@@ -3198,6 +3312,7 @@ function CreateWorkspaceView({
   onBack,
   onReset,
   creationMode = "task",
+  projectCreationDraft = null,
 }) {
   const projectMode = creationMode === "project";
   return (
@@ -3208,7 +3323,9 @@ function CreateWorkspaceView({
         <p>
           {projectMode
             ? "项目用来收纳同一工作区下的多个任务。当前会先创建项目下的第一个任务。"
-            : "这里只显示新建流程，不会混入已经创建的任务。"}
+            : projectCreationDraft?.projectName
+              ? `当前会直接在项目「${projectCreationDraft.projectName}」下新建任务。`
+              : "这里只显示新建流程，不会混入已经创建的任务。"}
         </p>
       </div>
 
@@ -3229,6 +3346,7 @@ function CreateWorkspaceView({
           onBack={onBack}
           onReset={onReset}
           creationMode={creationMode}
+          projectCreationDraft={projectCreationDraft}
         />
       )}
     </section>
@@ -3281,15 +3399,19 @@ function ProjectCreationPanel({
 }
 
 function ManageWorkspaceView(props) {
+  const currentLoopName = formatValue(
+    props.snapshot?.config?.loopName || props.snapshot?.thread?.threadTitle,
+    "当前任务",
+  );
   return (
     <section className="workspace-focus">
       <div className="workspace-focus-head">
-        <span className="workspace-focus-eyebrow">全局设置</span>
-        <h1>调整 codex-loop 设置</h1>
-        <p>线程绑定、自动续跑、本地模型和关闭控制台都集中放在这里。</p>
+        <span className="workspace-focus-eyebrow">当前任务设置</span>
+        <h1>调整「{currentLoopName}」</h1>
+        <p>这里展示的是当前任务的绑定、运行方式和本任务专用规则，不再混成全局说明。</p>
       </div>
 
-      <ManagePane {...props} />
+      <ManagePane {...props} currentLoopName={currentLoopName} />
     </section>
   );
 }
@@ -3368,6 +3490,7 @@ function DashboardHome({
   settingsForm,
   healthIssues,
   uiError,
+  guidanceStatusMessage,
   pendingGuidanceText,
   setPendingGuidanceText,
   pendingGuidanceEditMode,
@@ -3417,7 +3540,9 @@ function DashboardHome({
         ? "监督复盘中"
         : isRunning
         ? "循环运行中"
-        : "已停止");
+        : snapshot?.thread?.threadId
+          ? "手动监控中"
+          : "等待启动");
   const runningDescription = processStatus?.detail || (isFinalizing
     ? "不会再发送新指令，等待当前轮结束后停止。"
     : isDispatching
@@ -3426,7 +3551,9 @@ function DashboardHome({
         ? "本地模型正在监督复盘，完成前不发送下一条。"
         : isRunning
         ? "系统会等待 Codex 完整完成一轮，再决定是否继续。"
-        : "需要继续时点击开始循环；如需本地模型参与，请先打开设置。");
+        : snapshot?.thread?.threadId
+          ? "当前不会自动续跑；你可以先查看记录，或手动发送一条补充引导。"
+          : "还没有绑定目标线程；先完成绑定，再决定是否开始循环。");
   const thinkingStateClass = isFinalizing
     ? "is-finalizing"
     : isDispatching || isReviewing || isRunning
@@ -3440,7 +3567,9 @@ function DashboardHome({
         ? "本地模型正在监督复盘，完成前不发送下一条"
         : isRunning
         ? "等待下一轮循环指令"
-        : "已停止";
+        : snapshot?.thread?.threadId
+          ? "当前仅手动监控，不会自动发送"
+          : "尚未绑定线程";
   const latestVisibleSummary = summarizeVisibleText(
     snapshot?.thread?.latestCodexSummary || latestSummary,
     "等待第一轮可见进展",
@@ -3448,6 +3577,7 @@ function DashboardHome({
   const statusLine = `${runningHeadline} · ${heroThreadLabel}`;
   const savedPendingGuidance = snapshot?.thread?.pendingUserGuidance || "";
   const runtimeEvents = snapshot?.runtimeEvents || [];
+  const canStartAutomaticLoop = Boolean(snapshot?.thread?.threadId) && !isRunning && !isDispatching && !isReviewing && !isFinalizing;
   async function handleEditPendingGuidance(text) {
     setPendingGuidanceText(formatValue(text, ""));
     setPendingGuidanceEditMode(true);
@@ -3479,10 +3609,11 @@ function DashboardHome({
               <button
                 type="button"
                 className="primary-button"
-                disabled={submitting}
+                disabled={submitting || !canStartAutomaticLoop}
+                title={canStartAutomaticLoop ? "开始自动循环" : "请先绑定线程，或等待当前状态结束后再启动自动循环"}
                 onClick={() => void handleDashboardAction("start-loop")}
               >
-                开始循环
+                {isRunning || isDispatching || isReviewing || isFinalizing ? "循环处理中" : "开始自动循环"}
               </button>
               <button
                 type="button"
@@ -3636,6 +3767,7 @@ function DesktopConsoleApp() {
   const [activeManageSection, setActiveManageSection] = useState("automation");
   const [selectedLoopId, setSelectedLoopId] = useState("");
   const [loopMenuOpenId, setLoopMenuOpenId] = useState("");
+  const [projectCreationDraft, setProjectCreationDraft] = useState(null);
   const activeSidebarPaneRef = useRef(activeSidebarPane);
   const creationModeRef = useRef(creationMode);
   const [threadForm, setThreadForm] = useState({
@@ -4103,16 +4235,109 @@ function DesktopConsoleApp() {
     setActiveSidebarPane("create");
     setLoopMenuOpenId("");
 
+    if (nextCreationMode === "project") {
+      setProjectCreationDraft(null);
+    }
+
     if (nextCreationMode === "task") {
       setAssistantState(null);
       void withSubmit(async () => {
         const nextAssistantState = await requestJson("/loop-creation-assistant/reset", {
           method: "POST",
+          body: JSON.stringify({}),
         });
         setAssistantState(nextAssistantState);
         setAssistantAnswer("");
       });
     }
+  }
+
+  async function openTaskCreationForProject(project = {}) {
+    const projectName = formatValue(project.name || project.projectName, "").trim();
+    const workspaceRoot = formatValue(project.workspaceRoot, "").trim();
+
+    setProjectCreationDraft({
+      projectName,
+      workspaceRoot,
+    });
+    setAssistantState(null);
+    setAssistantAnswer("");
+    setCreationMode("task");
+    setActiveSidebarPane("create");
+    setLoopMenuOpenId("");
+
+    await withSubmit(async () => {
+      const nextAssistantState = await requestJson("/loop-creation-assistant/reset", {
+        method: "POST",
+        body: JSON.stringify({
+          projectName,
+          workspaceRoot,
+        }),
+      });
+      setAssistantState(nextAssistantState);
+    });
+  }
+
+  async function deleteProjectFromSidebar(project = {}) {
+    const projectName = formatValue(project.name || project.projectName, "").trim();
+    if (!projectName) {
+      return;
+    }
+    const confirmed = window.confirm(`确认删除空项目「${projectName}」吗？删除后不会保留这个项目分组。`);
+    if (!confirmed) {
+      return;
+    }
+
+    await withSubmit(async () => {
+      await requestJson("/projects/delete", {
+        method: "POST",
+        body: JSON.stringify({ projectName }),
+      });
+      setLoopMenuOpenId("");
+    });
+  }
+
+  async function switchLoop(loopId) {
+    if (!loopId) {
+      return;
+    }
+    setSelectedLoopId(loopId);
+    setActiveSidebarPane("loops");
+    setLoopMenuOpenId("");
+    await requestJson("/loops/select", {
+      method: "POST",
+      body: JSON.stringify({ loopId }),
+    });
+  }
+
+  async function deleteLoopFromSidebar(loop = {}) {
+    const loopId = formatValue(loop.id, "").trim();
+    const loopName = formatValue(loop.name || loop.loopName, "当前任务");
+    if (!loopId) {
+      return;
+    }
+
+    const alternativeLoop = visibleLoops.find((item) => item.id !== loopId);
+    if (!alternativeLoop) {
+      throw new Error("当前只剩这一个任务，请先新建一个任务后再删除。");
+    }
+
+    const confirmed = window.confirm(`确认删除任务「${loopName}」吗？删除后不会保留这个任务的绑定和循环记录。`);
+    if (!confirmed) {
+      return;
+    }
+
+    await withSubmit(async () => {
+      if (loopId === (currentLoop?.id || loopRegistry.currentLoopId)) {
+        await switchLoop(alternativeLoop.id);
+      }
+      await requestJson("/loops/delete", {
+        method: "POST",
+        body: JSON.stringify({ loopId }),
+      });
+      setLoopMenuOpenId("");
+      setActiveSidebarPane("loops");
+    });
   }
 
   async function handleDashboardAction(actionId) {
@@ -4143,7 +4368,7 @@ function DesktopConsoleApp() {
         await requestJson("/stop", {
           method: "POST",
           body: JSON.stringify({
-            reason: "manual stop from dashboard",
+            reason: "用户在控制台点击停止",
           }),
         });
       });
@@ -4207,24 +4432,68 @@ function DesktopConsoleApp() {
                     const projectName = project.name;
                     const loops = project.loops || [];
                     const collapsed = collapsedProjects[projectName];
+                    const projectMenuId = buildProjectMenuId(projectName);
                     return (
                       <div key={projectName} className="sidebar-group">
-                        <button
-                          type="button"
-                          className="sidebar-group-toggle"
-                          aria-expanded={!collapsed}
-                          onClick={() =>
-                            setCollapsedProjects((current) => ({
-                              ...current,
-                              [projectName]: !current[projectName],
-                            }))
-                          }
+                        <div
+                          className="sidebar-project-row"
+                          onContextMenu={(event) => {
+                            event.preventDefault();
+                            setLoopMenuOpenId((current) => (current === projectMenuId ? "" : projectMenuId));
+                          }}
                         >
-                          <span className="sidebar-project-title">{projectName}</span>
-                          <span className="sidebar-project-chevron" aria-hidden="true">
-                            {collapsed ? "+" : "-"}
-                          </span>
-                        </button>
+                          <button
+                            type="button"
+                            className="sidebar-group-toggle"
+                            aria-expanded={!collapsed}
+                            onClick={() =>
+                              setCollapsedProjects((current) => ({
+                                ...current,
+                                [projectName]: !current[projectName],
+                              }))
+                            }
+                            onContextMenu={(event) => {
+                              event.preventDefault();
+                              setLoopMenuOpenId((current) => (current === projectMenuId ? "" : projectMenuId));
+                            }}
+                          >
+                            <span className="sidebar-project-title">{projectName}</span>
+                            <span className="sidebar-project-chevron" aria-hidden="true">
+                              {collapsed ? "+" : "-"}
+                            </span>
+                          </button>
+                          <div className="sidebar-project-tools">
+                            <button
+                              type="button"
+                              className="loop-tool-button"
+                              aria-label={`管理项目 ${projectName}`}
+                              title="更多"
+                              onClick={() =>
+                                setLoopMenuOpenId((current) => (current === projectMenuId ? "" : projectMenuId))
+                              }
+                            >
+                              <span aria-hidden="true">...</span>
+                            </button>
+                            {loopMenuOpenId === projectMenuId ? (
+                              <div className="loop-context-menu">
+                                <button
+                                  type="button"
+                                  onClick={() => void openTaskCreationForProject(project)}
+                                >
+                                  在这个项目下新建任务
+                                </button>
+                                {project.isEmpty ? (
+                                  <button
+                                    type="button"
+                                    onClick={() => void deleteProjectFromSidebar(project)}
+                                  >
+                                    删除这个项目
+                                  </button>
+                                ) : null}
+                              </div>
+                            ) : null}
+                          </div>
+                        </div>
 
                         {!collapsed ? (
                           <div className="sidebar-loop-list">
@@ -4238,17 +4507,9 @@ function DesktopConsoleApp() {
                                   <button
                                     type="button"
                                     className="sidebar-loop-main"
-                                    onClick={() =>
-                                      withSubmit(async () => {
-                                        setSelectedLoopId(loop.id);
-                                        setActiveSidebarPane("loops");
-                                        setLoopMenuOpenId("");
-                                        await requestJson("/loops/select", {
-                                          method: "POST",
-                                          body: JSON.stringify({ loopId: loop.id }),
-                                        });
-                                      })
-                                    }
+                                    onClick={() => withSubmit(async () => {
+                                      await switchLoop(loop.id);
+                                    })}
                                   >
                                     <span className="sidebar-loop-name">{loop.name}</span>
                                   </button>
@@ -4270,6 +4531,7 @@ function DesktopConsoleApp() {
                                         <button
                                           type="button"
                                           onClick={() => {
+                                            setActiveManageSection("thread");
                                             setActiveSidebarPane("manage");
                                             setLoopMenuOpenId("");
                                           }}
@@ -4293,21 +4555,21 @@ function DesktopConsoleApp() {
                                           重命名任务
                                         </button>
                                         {!loop.isCurrent ? (
+                                        <button
+                                          type="button"
+                                          onClick={() => void deleteLoopFromSidebar(loop)}
+                                        >
+                                          删除这个任务
+                                        </button>
+                                        ) : (
                                           <button
                                             type="button"
-                                            onClick={() =>
-                                              withSubmit(async () => {
-                                                await requestJson("/loops/delete", {
-                                                  method: "POST",
-                                                  body: JSON.stringify({ loopId: loop.id }),
-                                                });
-                                                setLoopMenuOpenId("");
-                                              })
-                                            }
+                                            disabled
+                                            title="当前正在查看的任务不能直接删除，请先切换到别的任务。"
                                           >
-                                            删除这个任务
+                                            当前任务暂不能删除
                                           </button>
-                                        ) : null}
+                                        )}
                                       </div>
                                     ) : null}
                                   </div>
@@ -4466,12 +4728,15 @@ function DesktopConsoleApp() {
               withSubmit(async () => {
                 const nextAssistantState = await requestJson("/loop-creation-assistant/reset", {
                   method: "POST",
+                  body: JSON.stringify({}),
                 });
                 setAssistantState(nextAssistantState);
                 setAssistantAnswer("");
+                setProjectCreationDraft(null);
               })
             }
             creationMode={creationMode}
+            projectCreationDraft={projectCreationDraft}
           />
         ) : null}
 
@@ -4500,6 +4765,9 @@ function DesktopConsoleApp() {
             withSubmit={withSubmit}
             activeManageSection={activeManageSection}
             setActiveManageSection={setActiveManageSection}
+            currentLoop={currentLoop}
+            visibleLoops={visibleLoops}
+            onDeleteLoop={deleteLoopFromSidebar}
           />
         ) : null}
 
@@ -4538,6 +4806,7 @@ function DesktopConsoleApp() {
             settingsForm={settingsForm}
             healthIssues={healthIssues}
             uiError={uiError}
+            guidanceStatusMessage={guidanceStatusMessage}
             pendingGuidanceText={pendingGuidanceText}
             setPendingGuidanceText={setPendingGuidanceText}
             pendingGuidanceEditMode={pendingGuidanceEditMode}

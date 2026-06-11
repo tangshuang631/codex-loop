@@ -219,6 +219,13 @@ select {
   border-bottom: 1px solid var(--line);
 }
 
+.sidebar-project-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 32px;
+  align-items: center;
+  gap: 4px;
+}
+
 .sidebar-group-toggle {
   width: 100%;
   display: flex;
@@ -255,6 +262,10 @@ select {
 .sidebar-project-chevron {
   width: 16px;
   text-align: center;
+}
+
+.sidebar-project-tools {
+  position: relative;
 }
 
 .sidebar-loop-list {
@@ -365,6 +376,27 @@ select {
   background: var(--panel);
 }
 
+.assistant-prefill-hint {
+  display: grid;
+  gap: 4px;
+  padding: 12px 14px;
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  background: var(--panel-soft);
+}
+
+.assistant-prefill-hint strong {
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.assistant-prefill-hint p {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
 .sidebar-pane-stack {
   display: grid;
   gap: 14px;
@@ -433,6 +465,21 @@ select {
 
 .sidebar-disclosure[open] summary {
   border-bottom: 1px solid var(--line);
+}
+
+.danger-button {
+  min-height: 44px;
+  border: 1px solid rgba(156, 34, 28, 0.18);
+  border-radius: 14px;
+  background: #fff3f0;
+  color: #8d1f18;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.danger-button:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
 }
 
 .assistant-pane {
