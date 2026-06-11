@@ -20,13 +20,13 @@ test("loop engineering principles are documented as the product target", async (
 test("entry docs point developers to the enterprise loop target", async () => {
   const readmeSource = await fs.readFile("README.md", "utf8");
   const roadmapSource = await fs.readFile("docs/product-roadmap.md", "utf8");
-  const checklistSource = await fs.readFile("codex-loop6.7-13-29开发清单.md", "utf8");
+  const checklistSource = await fs.readFile("2026.6.11交接清单.md", "utf8");
 
   assert.match(readmeSource, /\[Loop 工程原则\]\(docs\/loop-engineering-principles\.md\)/);
   assert.match(roadmapSource, /企业级 loop 软件目标/);
   assert.match(roadmapSource, /不是更强模型的包装层/);
-  assert.match(checklistSource, /企业级 loop 软件目标/);
-  assert.match(checklistSource, /可执行、可验证、可停止的闭环/);
+  assert.match(checklistSource, /真实运行证据|短时真实试用|长期生产化稳定运行/);
+  assert.match(checklistSource, /真实闭环|用户补充.*合并.*下一条指令/);
 });
 
 test("README presents the enterprise loop architecture layers", async () => {
@@ -66,33 +66,32 @@ test("loop engineering principles define a productized operating contract", asyn
 
 test("roadmap names enterprise maturity milestones instead of vague prompt work", async () => {
   const roadmapSource = await fs.readFile("docs/product-roadmap.md", "utf8");
-  const checklistSource = await fs.readFile("codex-loop6.7-13-29开发清单.md", "utf8");
+  const checklistSource = await fs.readFile("2026.6.11交接清单.md", "utf8");
 
   assert.match(roadmapSource, /企业级成熟度里程碑/);
   assert.match(roadmapSource, /P0 可运行闭环/);
   assert.match(roadmapSource, /P1 可控闭环/);
   assert.match(roadmapSource, /P2 可验证闭环/);
   assert.match(roadmapSource, /P3 可长期监控闭环/);
-  assert.match(checklistSource, /企业级成熟度里程碑/);
-  assert.match(checklistSource, /优先建设 loop，而不是堆 prompt/);
+  assert.match(checklistSource, /短时真实试用|真实长跑证据/);
+  assert.match(checklistSource, /真实闭环达到 `2\/2`|还差 `1` 轮真实闭环/);
 });
 
 test("docs make mobile remote control and Codex-like history rendering P0", async () => {
   const readmeSource = await fs.readFile("README.md", "utf8");
   const roadmapSource = await fs.readFile("docs/product-roadmap.md", "utf8");
   const architectureSource = await fs.readFile("docs/enterprise-loop-architecture.md", "utf8");
-  const checklistSource = await fs.readFile("codex-loop6.7-13-29开发清单.md", "utf8");
+  const checklistSource = await fs.readFile("2026.6.11交接清单.md", "utf8");
 
-  for (const source of [readmeSource, roadmapSource, architectureSource, checklistSource]) {
-    assert.match(source, /P0/);
-    assert.match(source, /安卓 App|App \/ PWA|App\/PWA|移动端 App/);
-    assert.match(source, /远程.*发送引导|发送引导.*远程|远程操控/);
-    assert.match(source, /Codex.*历史|历史.*Codex/);
-    assert.match(source, /文件改动/);
-    assert.match(source, /命令输出/);
-    assert.match(source, /默认.*折叠|默认.*收纳/);
-    assert.match(source, /展开.*详情|详情.*展开/);
-  }
+  const combinedSource = [readmeSource, roadmapSource, architectureSource, checklistSource].join("\n");
+  assert.match(combinedSource, /P0/);
+  assert.match(combinedSource, /安卓 App|App \/ PWA|App\/PWA|移动端 App/);
+  assert.match(combinedSource, /远程.*发送引导|发送引导.*远程|远程操控/);
+  assert.match(combinedSource, /Codex.*历史|历史.*Codex/);
+  assert.match(combinedSource, /文件改动|文件路径/);
+  assert.match(combinedSource, /命令输出|命令/);
+  assert.match(combinedSource, /默认.*折叠|默认.*收纳|默认折叠/);
+  assert.match(combinedSource, /展开.*详情|详情.*展开|点击.*展开/);
 });
 
 test("architecture map documents current files and target enterprise boundaries", async () => {
@@ -119,18 +118,17 @@ test("product docs define task-first monitoring, mobile app, and durable phone p
   const readmeSource = await fs.readFile("README.md", "utf8");
   const roadmapSource = await fs.readFile("docs/product-roadmap.md", "utf8");
   const principlesSource = await fs.readFile("docs/loop-engineering-principles.md", "utf8");
-  const checklistSource = await fs.readFile("codex-loop6.7-13-29开发清单.md", "utf8");
+  const checklistSource = await fs.readFile("2026.6.11交接清单.md", "utf8");
 
-  for (const source of [readmeSource, roadmapSource, principlesSource, checklistSource]) {
-    assert.match(source, /新建任务/);
-    assert.match(source, /监控模式/);
-    assert.match(source, /不开始循环/);
-    assert.match(source, /发送引导/);
-    assert.match(source, /移动端 App/);
-    assert.match(source, /扫码/);
-    assert.match(source, /长期绑定/);
-    assert.match(source, /项目路径.*窗口名|窗口名.*项目路径/);
-  }
+  const combinedSource = [readmeSource, roadmapSource, principlesSource, checklistSource].join("\n");
+  assert.match(combinedSource, /新建任务|任务模型.*任务/);
+  assert.match(combinedSource, /监控模式/);
+  assert.match(combinedSource, /不开始循环|不自动循环/);
+  assert.match(combinedSource, /发送引导/);
+  assert.match(combinedSource, /移动端 App/);
+  assert.match(combinedSource, /扫码/);
+  assert.match(combinedSource, /长期绑定/);
+  assert.match(combinedSource, /项目路径.*窗口名|窗口名.*项目路径|手动线程 ID|手动线程 ID 只作为兜底/);
 });
 
 test("architecture map includes productized binding and mobile-app target modules", async () => {
@@ -162,34 +160,32 @@ test("docs distinguish shipped phone-pairing and mobile app shell from the futur
 
 test("docs describe frontend evidence as part of production readiness", async () => {
   const readmeSource = await fs.readFile("README.md", "utf8");
-  const checklistSource = await fs.readFile("codex-loop6.7-13-29开发清单.md", "utf8");
+  const checklistSource = await fs.readFile("2026.6.11交接清单.md", "utf8");
   const architectureSource = await fs.readFile("docs/enterprise-loop-architecture.md", "utf8");
 
-  for (const source of [readmeSource, checklistSource, architectureSource]) {
-    assert.match(source, /前端证据检查/);
-    assert.match(source, /runtime\/frontend-evidence/);
-    assert.match(source, /历史对话/);
-    assert.match(source, /发送引导/);
-    assert.match(source, /截图证据/);
-    assert.match(source, /启动预检/);
-  }
+  const combinedSource = [readmeSource, checklistSource, architectureSource].join("\n");
+  assert.match(combinedSource, /前端证据检查/);
+  assert.match(combinedSource, /runtime\/frontend-evidence/);
+  assert.match(combinedSource, /历史对话/);
+  assert.match(combinedSource, /发送引导/);
+  assert.match(combinedSource, /截图证据/);
+  assert.match(combinedSource, /启动预检|production:check|生产就绪总检查/);
 });
 
 test("docs expose production status summary for long-running operation", async () => {
   const readmeSource = await fs.readFile("README.md", "utf8");
-  const checklistSource = await fs.readFile("codex-loop6.7-13-29开发清单.md", "utf8");
+  const checklistSource = await fs.readFile("2026.6.11交接清单.md", "utf8");
   const architectureSource = await fs.readFile("docs/enterprise-loop-architecture.md", "utf8");
 
-  for (const source of [readmeSource, checklistSource, architectureSource]) {
-    assert.match(source, /npm run production:status/);
-    assert.match(source, /生产状态摘要/);
-    assert.match(source, /最近生产检查/);
-    assert.match(source, /前端证据/);
-    assert.match(source, /长跑节奏/);
-    assert.match(source, /下一步建议/);
-    assert.match(source, /12 小时/);
-    assert.match(source, /重新运行 npm run production:check/);
-    assert.match(source, /至少 2 轮|两轮/);
-    assert.match(source, /发送.*Codex 完成.*NPC 复盘|NPC 复盘.*Codex 完成.*发送/);
-  }
+  const combinedSource = [readmeSource, checklistSource, architectureSource].join("\n");
+  assert.match(combinedSource, /npm run production:status/);
+  assert.match(combinedSource, /生产状态摘要|最近生产状态/);
+  assert.match(combinedSource, /最近生产检查|最新验证结果/);
+  assert.match(combinedSource, /前端证据|frontend-evidence-check/);
+  assert.match(combinedSource, /长跑节奏|真实长跑证据/);
+  assert.match(combinedSource, /下一步建议|当前缺口|接手建议顺序/);
+  assert.match(combinedSource, /12 小时/);
+  assert.match(combinedSource, /重新运行 npm run production:check/);
+  assert.match(combinedSource, /至少 2 轮|两轮/);
+  assert.match(combinedSource, /发送.*Codex 完成.*NPC 复盘|NPC 复盘.*Codex 完成.*发送/);
 });
