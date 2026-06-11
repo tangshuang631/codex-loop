@@ -2903,6 +2903,7 @@ function isUserFacingConversationRuntimeEvent(event = {}) {
     return false;
   }
   return (
+    type.includes("codex_conversation") ||
     type.includes("supervisor_review") ||
     type.includes("codex_reply") ||
     type.includes("codex_message") ||

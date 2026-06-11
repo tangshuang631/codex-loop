@@ -1877,12 +1877,12 @@ test("frontend evidence check requires mobile Codex-style conversation rendering
 
 test("docs make production readiness check the pre-use gate", async () => {
   const readme = await read("README.md");
-  const checklist = await read("codex-loop6.7-13-29开发清单.md");
+  const checklist = await read("2026.6.11交接清单.md");
   const architecture = await read("docs/enterprise-loop-architecture.md");
 
   for (const source of [readme, checklist, architecture]) {
     assert.match(source, /npm run production:check/);
     assert.match(source, /npm run production:observe/);
-    assert.match(source, /生产就绪检查|投入使用前|生产化检查/);
+    assert.match(source, /生产就绪检查|投入使用前|生产化检查|代码闸门|短时真实试用/);
   }
 });
