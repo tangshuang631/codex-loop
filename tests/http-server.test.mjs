@@ -487,6 +487,366 @@ test("handler rejects paired mobile view when device credentials are invalid", a
   assert.match(chunks.join(""), /device_not_paired/);
 });
 
+test("handler returns the latest mobile view across repeated paired requests", async () => {
+  let exportCount = 0;
+  const views = [
+    {
+      loop: { name: "按清单继续开发" },
+      processStatus: { state: "codex_working", headline: "Codex 正在处理" },
+      conversationItems: [
+        { role: "codex", at: "2026-06-11T10:00:00.000Z", text: "Codex 正在处理当前轮。", preview: "Codex 正在处理当前轮。" },
+      ],
+    },
+    {
+      loop: { name: "按清单继续开发" },
+      processStatus: { state: "supervisor_reviewing", headline: "监督复盘中" },
+      conversationItems: [
+        { role: "codex", at: "2026-06-11T10:00:00.000Z", text: "Codex 正在处理当前轮。", preview: "Codex 正在处理当前轮。" },
+        { role: "codex", at: "2026-06-11T10:02:00.000Z", text: "Codex 已完成当前轮，等待监督复盘。", preview: "Codex 已完成当前轮，等待监督复盘。" },
+      ],
+    },
+  ];
+
+  const handler = buildHandler({
+    operations: {
+      exportMobileView: async () => views[Math.min(exportCount++, views.length - 1)],
+      verifyPairedDevice: async (_cwd, body) => ({
+        valid: true,
+        device: {
+          id: body.deviceId,
+          name: "iPhone",
+          lastSeenAt: "2026-06-11T10:02:00.000Z",
+        },
+      }),
+    },
+  });
+
+  async function requestView() {
+    const chunks = [];
+    const response = {
+      writeHead(statusCode, headers) {
+        this.statusCode = statusCode;
+        this.headers = headers;
+      },
+      end(text) {
+        chunks.push(text);
+      },
+    };
+
+    await handler(
+      {
+        method: "POST",
+        url: "/api/mobile/view",
+        [Symbol.asyncIterator]: async function* iterator() {
+          yield Buffer.from(
+            JSON.stringify({
+              deviceId: "device-1",
+              deviceToken: "stored-token",
+            }),
+            "utf8",
+          );
+        },
+      },
+      response,
+    );
+
+    return { response, body: chunks.join("") };
+  }
+
+  const first = await requestView();
+  const second = await requestView();
+
+  assert.equal(first.response.statusCode, 200);
+  assert.equal(second.response.statusCode, 200);
+  assert.match(first.body, /Codex 正在处理当前轮/);
+  assert.match(first.body, /"state":"codex_working"/);
+  assert.match(second.body, /Codex 已完成当前轮，等待监督复盘/);
+  assert.match(second.body, /"state":"supervisor_reviewing"/);
+  assert.doesNotMatch(second.body, /"conversationItems":\[\{"role":"codex","at":"2026-06-11T10:00:00.000Z","text":"Codex 正在处理当前轮。","preview":"Codex 正在处理当前轮。"\}\]/);
+});
+
+test("handler streams mobile process status transitions across repeated paired view requests", async () => {
+  let exportCount = 0;
+  const views = [
+    {
+      loop: { name: "按清单继续开发" },
+      processStatus: {
+        state: "waiting_next_turn",
+        monitorLabel: "可继续",
+        headline: "等待下一轮",
+      },
+      pendingGuidance: {
+        text: "下一轮请持续观察手机端对进程状态切换的提示是否及时。",
+        preview: "下一轮请持续观察手机端对进程状态切换的提示是否及时。",
+        hasPending: true,
+        status: "ready_to_merge",
+      },
+      conversationItems: [
+        {
+          role: "guidance",
+          at: "2026-06-11T10:00:00.000Z",
+          text: "下一轮请持续观察手机端对进程状态切换的提示是否及时。",
+          preview: "下一轮请持续观察手机端对进程状态切换的提示是否及时。",
+        },
+      ],
+    },
+    {
+      loop: { name: "按清单继续开发" },
+      processStatus: {
+        state: "codex_working",
+        monitorLabel: "处理中",
+        headline: "Codex 正在处理",
+      },
+      pendingGuidance: {
+        text: "下一轮请持续观察手机端对进程状态切换的提示是否及时。",
+        preview: "下一轮请持续观察手机端对进程状态切换的提示是否及时。",
+        hasPending: true,
+        status: "waiting_codex",
+      },
+      conversationItems: [
+        {
+          role: "guidance",
+          at: "2026-06-11T10:00:00.000Z",
+          text: "下一轮请持续观察手机端对进程状态切换的提示是否及时。",
+          preview: "下一轮请持续观察手机端对进程状态切换的提示是否及时。",
+        },
+        {
+          role: "codex",
+          at: "2026-06-11T10:01:00.000Z",
+          text: "Codex 正在处理当前轮。",
+          preview: "Codex 正在处理当前轮。",
+        },
+      ],
+    },
+    {
+      loop: { name: "按清单继续开发" },
+      processStatus: {
+        state: "supervisor_reviewing",
+        monitorLabel: "复盘中",
+        headline: "监督复盘中",
+      },
+      pendingGuidance: {
+        text: "下一轮请持续观察手机端对进程状态切换的提示是否及时。",
+        preview: "下一轮请持续观察手机端对进程状态切换的提示是否及时。",
+        hasPending: true,
+        status: "waiting_npc",
+      },
+      conversationItems: [
+        {
+          role: "guidance",
+          at: "2026-06-11T10:00:00.000Z",
+          text: "下一轮请持续观察手机端对进程状态切换的提示是否及时。",
+          preview: "下一轮请持续观察手机端对进程状态切换的提示是否及时。",
+        },
+        {
+          role: "codex",
+          at: "2026-06-11T10:02:00.000Z",
+          text: "Codex 已完成当前轮，等待监督复盘。",
+          preview: "Codex 已完成当前轮，等待监督复盘。",
+        },
+      ],
+    },
+    {
+      loop: { name: "按清单继续开发" },
+      processStatus: {
+        state: "waiting_next_turn",
+        monitorLabel: "可继续",
+        headline: "等待下一轮",
+        latestEventType: "supervisor_review_completed",
+      },
+      pendingGuidance: {
+        text: "",
+        preview: "",
+        hasPending: false,
+        status: "ready_to_merge",
+      },
+      conversationItems: [
+        {
+          role: "codex",
+          at: "2026-06-11T10:03:00.000Z",
+          text: "监督复盘完成，可以继续下一轮。",
+          preview: "监督复盘完成，可以继续下一轮。",
+        },
+      ],
+    },
+  ];
+
+  const handler = buildHandler({
+    operations: {
+      exportMobileView: async () => views[Math.min(exportCount++, views.length - 1)],
+      verifyPairedDevice: async (_cwd, body) => ({
+        valid: true,
+        device: {
+          id: body.deviceId,
+          name: "iPhone",
+          lastSeenAt: "2026-06-11T10:03:00.000Z",
+        },
+      }),
+    },
+  });
+
+  async function requestView() {
+    const chunks = [];
+    const response = {
+      writeHead(statusCode, headers) {
+        this.statusCode = statusCode;
+        this.headers = headers;
+      },
+      end(text) {
+        chunks.push(text);
+      },
+    };
+
+    await handler(
+      {
+        method: "POST",
+        url: "/api/mobile/view",
+        [Symbol.asyncIterator]: async function* iterator() {
+          yield Buffer.from(
+            JSON.stringify({
+              deviceId: "device-1",
+              deviceToken: "stored-token",
+            }),
+            "utf8",
+          );
+        },
+      },
+      response,
+    );
+
+    return { response, body: chunks.join("") };
+  }
+
+  const ready = await requestView();
+  const working = await requestView();
+  const reviewing = await requestView();
+  const done = await requestView();
+
+  assert.equal(ready.response.statusCode, 200);
+  assert.equal(working.response.statusCode, 200);
+  assert.equal(reviewing.response.statusCode, 200);
+  assert.equal(done.response.statusCode, 200);
+
+  assert.match(ready.body, /"state":"waiting_next_turn"/);
+  assert.match(ready.body, /"monitorLabel":"可继续"/);
+  assert.match(ready.body, /"status":"ready_to_merge"/);
+
+  assert.match(working.body, /"state":"codex_working"/);
+  assert.match(working.body, /"monitorLabel":"处理中"/);
+  assert.match(working.body, /"status":"waiting_codex"/);
+  assert.match(working.body, /Codex 正在处理当前轮/);
+
+  assert.match(reviewing.body, /"state":"supervisor_reviewing"/);
+  assert.match(reviewing.body, /"monitorLabel":"复盘中"/);
+  assert.match(reviewing.body, /"status":"waiting_npc"/);
+  assert.match(reviewing.body, /等待监督复盘/);
+
+  assert.match(done.body, /"state":"waiting_next_turn"/);
+  assert.match(done.body, /"monitorLabel":"可继续"/);
+  assert.match(done.body, /"hasPending":false/);
+  assert.match(done.body, /"latestEventType":"supervisor_review_completed"/);
+});
+
+test("handler returns newly appended conversation items on the next paired mobile view", async () => {
+  let exportCount = 0;
+  const views = [
+    {
+      loop: { name: "按清单继续开发" },
+      processStatus: {
+        state: "codex_working",
+        monitorLabel: "处理中",
+        headline: "Codex 正在处理",
+      },
+      conversationItems: [
+        {
+          role: "codex",
+          at: "2026-06-11T10:10:00.000Z",
+          text: "Codex 正在补移动端实时监控。",
+          preview: "Codex 正在补移动端实时监控。",
+        },
+      ],
+    },
+    {
+      loop: { name: "按清单继续开发" },
+      processStatus: {
+        state: "codex_working",
+        monitorLabel: "处理中",
+        headline: "Codex 正在处理",
+      },
+      conversationItems: [
+        {
+          role: "codex",
+          at: "2026-06-11T10:10:00.000Z",
+          text: "Codex 正在补移动端实时监控。",
+          preview: "Codex 正在补移动端实时监控。",
+        },
+        {
+          role: "codex",
+          at: "2026-06-11T10:11:30.000Z",
+          text: "Codex 已追加最新进展：历史对话增量刷新已完成。",
+          preview: "Codex 已追加最新进展：历史对话增量刷新已完成。",
+        },
+      ],
+    },
+  ];
+
+  const handler = buildHandler({
+    operations: {
+      exportMobileView: async () => views[Math.min(exportCount++, views.length - 1)],
+      verifyPairedDevice: async (_cwd, body) => ({
+        valid: true,
+        device: {
+          id: body.deviceId,
+          name: "iPhone",
+          lastSeenAt: "2026-06-11T10:11:30.000Z",
+        },
+      }),
+    },
+  });
+
+  async function requestView() {
+    const chunks = [];
+    const response = {
+      writeHead(statusCode, headers) {
+        this.statusCode = statusCode;
+        this.headers = headers;
+      },
+      end(text) {
+        chunks.push(text);
+      },
+    };
+
+    await handler(
+      {
+        method: "POST",
+        url: "/api/mobile/view",
+        [Symbol.asyncIterator]: async function* iterator() {
+          yield Buffer.from(
+            JSON.stringify({
+              deviceId: "device-1",
+              deviceToken: "stored-token",
+            }),
+            "utf8",
+          );
+        },
+      },
+      response,
+    );
+
+    return { response, body: chunks.join("") };
+  }
+
+  const first = await requestView();
+  const second = await requestView();
+
+  assert.equal(first.response.statusCode, 200);
+  assert.equal(second.response.statusCode, 200);
+  assert.match(first.body, /Codex 正在补移动端实时监控/);
+  assert.doesNotMatch(first.body, /历史对话增量刷新已完成/);
+  assert.match(second.body, /Codex 正在补移动端实时监控/);
+  assert.match(second.body, /历史对话增量刷新已完成/);
+});
+
 test("handler lets paired mobile devices save next-turn guidance", async () => {
   let verificationPayload = null;
   let savedPayload = null;
@@ -570,6 +930,125 @@ test("handler lets paired mobile devices save next-turn guidance", async () => {
   assert.match(chunks.join(""), /"dispatch":"sent"/);
   assert.match(chunks.join(""), /"pendingGuidance"/);
   assert.match(chunks.join(""), /"status":"waiting_codex"/);
+});
+
+test("handler lets mobile guidance writes show up in the next paired mobile view", async () => {
+  let pendingText = "";
+  const handler = buildHandler({
+    operations: {
+      savePendingGuidance: async (_cwd, body) => {
+        pendingText = body.text;
+        return {
+          thread: { pendingUserGuidance: body.text },
+          pendingGuidance: {
+            text: body.text,
+            preview: body.text,
+            hasPending: true,
+            status: "ready_to_merge",
+            statusLabel: "等待本地模型 / NPC 合并",
+          },
+        };
+      },
+      readLoopSnapshot: async () => ({
+        state: {
+          mode: "running",
+          monitorOnly: false,
+        },
+        thread: {
+          continuationStatus: "idle",
+          pendingUserGuidance: pendingText,
+        },
+        pendingGuidance: pendingText
+          ? {
+              text: pendingText,
+              preview: pendingText,
+              hasPending: true,
+              status: "ready_to_merge",
+              statusLabel: "等待本地模型 / NPC 合并",
+            }
+          : null,
+      }),
+      exportMobileView: async () => ({
+        loop: { name: "按清单继续开发" },
+        processStatus: {
+          state: "monitoring",
+          pendingGuidancePreview: pendingText,
+        },
+        pendingGuidance: {
+          text: pendingText,
+          preview: pendingText,
+          hasPending: Boolean(pendingText),
+          status: "ready_to_merge",
+          statusLabel: "等待本地模型 / NPC 合并",
+        },
+        conversationItems: pendingText
+          ? [
+              {
+                role: "guidance",
+                at: "2026-06-11T10:03:00.000Z",
+                text: pendingText,
+                preview: pendingText,
+              },
+            ]
+          : [],
+      }),
+      sendPendingGuidanceOnce: async () => {
+        throw new Error("Codex 正在处理当前轮，请等完成后再发送引导。");
+      },
+      verifyPairedDevice: async (_cwd, body) => ({
+        valid: true,
+        device: {
+          id: body.deviceId,
+          name: "iPhone",
+          lastSeenAt: "2026-06-11T10:03:00.000Z",
+        },
+      }),
+    },
+  });
+
+  async function request(method, url, body) {
+    const chunks = [];
+    const response = {
+      writeHead(statusCode, headers) {
+        this.statusCode = statusCode;
+        this.headers = headers;
+      },
+      end(text) {
+        chunks.push(text);
+      },
+    };
+
+    await handler(
+      {
+        method,
+        url,
+        [Symbol.asyncIterator]: async function* iterator() {
+          yield Buffer.from(JSON.stringify(body), "utf8");
+        },
+      },
+      response,
+    );
+
+    return { response, body: chunks.join("") };
+  }
+
+  const saved = await request("POST", "/api/mobile/guidance", {
+    deviceId: "device-1",
+    deviceToken: "stored-token",
+    text: "下一轮请优先确认手机端聊天记录刷新是否及时。",
+  });
+  const viewed = await request("POST", "/api/mobile/view", {
+    deviceId: "device-1",
+    deviceToken: "stored-token",
+  });
+
+  assert.equal(saved.response.statusCode, 200);
+  assert.equal(viewed.response.statusCode, 200);
+  assert.match(saved.body, /聊天记录刷新是否及时/);
+  assert.match(viewed.body, /聊天记录刷新是否及时/);
+  assert.match(viewed.body, /"hasPending":true/);
+  assert.match(viewed.body, /"role":"guidance"/);
+  assert.match(viewed.body, /"pendingGuidancePreview":"下一轮请优先确认手机端聊天记录刷新是否及时。"/);
 });
 
 test("handler keeps mobile guidance saved but unsent when production preflight blocks dispatch", async () => {
@@ -713,6 +1192,76 @@ test("handler keeps mobile guidance queued when Codex is still working", async (
   assert.match(chunks.join(""), /"dispatch":"queued"/);
   assert.match(chunks.join(""), /"pendingGuidance"/);
   assert.match(chunks.join(""), /Codex 正在处理当前轮/);
+});
+
+test("handler keeps mobile guidance queued when local model dispatch is temporarily unavailable", async () => {
+  let savedPayload = null;
+  let sendAttempts = 0;
+  const handler = buildHandler({
+    operations: {
+      savePendingGuidance: async (_cwd, body) => {
+        savedPayload = body;
+        return {
+          thread: { pendingUserGuidance: body.text },
+          pendingGuidance: {
+            text: body.text,
+            preview: body.text,
+            hasPending: true,
+            status: "ready_to_merge",
+            statusLabel: "等待本地模型 / NPC 合并",
+          },
+        };
+      },
+      sendPendingGuidanceOnce: async () => {
+        sendAttempts += 1;
+        throw new Error("本地模型生成续跑指令失败，请检查 Ollama 和模型配置。");
+      },
+      verifyPairedDevice: async (_cwd, body) => ({
+        valid: true,
+        device: {
+          id: body.deviceId,
+          name: "iPhone",
+        },
+      }),
+    },
+  });
+
+  const chunks = [];
+  const response = {
+    writeHead(statusCode, headers) {
+      this.statusCode = statusCode;
+      this.headers = headers;
+    },
+    end(text) {
+      chunks.push(text);
+    },
+  };
+
+  await handler(
+    {
+      method: "POST",
+      url: "/api/mobile/guidance",
+      [Symbol.asyncIterator]: async function* iterator() {
+        yield Buffer.from(
+          JSON.stringify({
+            deviceId: "device-1",
+            deviceToken: "stored-token",
+            text: "下一轮请优先确认手机端聊天记录刷新和待合并提示是否同步。",
+          }),
+          "utf8",
+        );
+      },
+    },
+    response,
+  );
+
+  assert.equal(response.statusCode, 200);
+  assert.equal(sendAttempts, 1);
+  assert.equal(savedPayload.text, "下一轮请优先确认手机端聊天记录刷新和待合并提示是否同步。");
+  assert.match(chunks.join(""), /"dispatch":"queued"/);
+  assert.match(chunks.join(""), /"pendingGuidance"/);
+  assert.match(chunks.join(""), /"hasPending":true/);
+  assert.match(chunks.join(""), /本地模型暂时不可用/);
 });
 
 test("handler keeps mobile guidance queued during automatic loop runs", async () => {
@@ -936,6 +1485,171 @@ test("handler lets paired mobile devices clear queued guidance", async () => {
   assert.equal(verificationPayload.deviceToken, "stored-token");
   assert.equal(cleared, true);
   assert.match(chunks.join(""), /"cleared":true/);
+  assert.match(chunks.join(""), /"pendingGuidance"/);
+  assert.match(chunks.join(""), /"hasPending":false/);
+  assert.match(chunks.join(""), /"status":"cleared"/);
+  assert.match(chunks.join(""), /"actionLabel":"重新填写"/);
+});
+
+test("handler builds mobile guidance response from exported mobile view when saved snapshot lacks pendingGuidance", async () => {
+  const pendingText = "下一轮请先确认移动端进程状态和历史对话是否同步。";
+  let exportCount = 0;
+  const handler = buildHandler({
+    operations: {
+      readLoopSnapshot: async () => ({
+        state: {
+          mode: "running",
+          monitorOnly: false,
+        },
+        thread: {
+          continuationStatus: "idle",
+        },
+      }),
+      savePendingGuidance: async (_cwd, body) => ({
+        thread: {
+          pendingUserGuidance: body.text,
+          pendingUserGuidanceAt: "2026-06-11T10:10:00.000Z",
+        },
+      }),
+      exportMobileView: async () => {
+        exportCount += 1;
+        return {
+          processStatus: {
+            pendingGuidancePreview: pendingText,
+          },
+          pendingGuidance: {
+            text: pendingText,
+            preview: pendingText,
+            hasPending: true,
+            at: "2026-06-11T10:10:00.000Z",
+            status: "ready_to_merge",
+            statusLabel: "等待本地模型 / NPC 合并",
+            statusDetail: "Codex 当前空闲，下一次发送时会结合最新回复和这条补充生成指令。",
+            userMessage: "已保存补充引导，会等 Codex 完成后合并。",
+            actionLabel: "可发送",
+          },
+          conversationItems: [
+            {
+              id: "guidance-1",
+              role: "guidance",
+              text: pendingText,
+            },
+          ],
+        };
+      },
+      verifyPairedDevice: async (_cwd, body) => ({
+        valid: true,
+        device: {
+          id: body.deviceId,
+          name: "iPhone",
+        },
+      }),
+    },
+  });
+
+  const chunks = [];
+  const response = {
+    writeHead(statusCode, headers) {
+      this.statusCode = statusCode;
+      this.headers = headers;
+    },
+    end(text) {
+      chunks.push(text);
+    },
+  };
+
+  await handler(
+    {
+      method: "POST",
+      url: "/api/mobile/guidance",
+      [Symbol.asyncIterator]: async function* iterator() {
+        yield Buffer.from(
+          JSON.stringify({
+            deviceId: "device-1",
+            deviceToken: "stored-token",
+            text: pendingText,
+          }),
+          "utf8",
+        );
+      },
+    },
+    response,
+  );
+
+  assert.equal(response.statusCode, 200);
+  assert.equal(exportCount >= 1, true);
+  assert.match(chunks.join(""), /"pendingGuidance"/);
+  assert.match(chunks.join(""), /"hasPending":true/);
+  assert.match(chunks.join(""), /"at":"2026-06-11T10:10:00.000Z"/);
+  assert.match(chunks.join(""), /"status":"ready_to_merge"/);
+  assert.match(chunks.join(""), /移动端进程状态和历史对话是否同步/);
+});
+
+test("handler returns cleared mobile guidance from exported mobile view when clear snapshot lacks pendingGuidance", async () => {
+  let exportCount = 0;
+  const handler = buildHandler({
+    operations: {
+      clearPendingGuidance: async () => ({
+        thread: {
+          pendingUserGuidance: "",
+          pendingUserGuidanceAt: "",
+        },
+      }),
+      exportMobileView: async () => {
+        exportCount += 1;
+        return {
+          pendingGuidance: {
+            text: "",
+            preview: "",
+            hasPending: false,
+            at: "",
+          },
+        };
+      },
+      verifyPairedDevice: async (_cwd, body) => ({
+        valid: true,
+        device: {
+          id: body.deviceId,
+          name: "iPhone",
+        },
+      }),
+    },
+  });
+
+  const chunks = [];
+  const response = {
+    writeHead(statusCode, headers) {
+      this.statusCode = statusCode;
+      this.headers = headers;
+    },
+    end(text) {
+      chunks.push(text);
+    },
+  };
+
+  await handler(
+    {
+      method: "DELETE",
+      url: "/api/mobile/guidance",
+      [Symbol.asyncIterator]: async function* iterator() {
+        yield Buffer.from(
+          JSON.stringify({
+            deviceId: "device-1",
+            deviceToken: "stored-token",
+          }),
+          "utf8",
+        );
+      },
+    },
+    response,
+  );
+
+  assert.equal(response.statusCode, 200);
+  assert.equal(exportCount, 1);
+  assert.match(chunks.join(""), /"pendingGuidance"/);
+  assert.match(chunks.join(""), /"hasPending":false/);
+  assert.match(chunks.join(""), /"status":"cleared"/);
+  assert.match(chunks.join(""), /"userMessage":"已撤回待合并引导。"/);
 });
 
 test("handler rejects mobile guidance clearing when device credentials are invalid", async () => {
@@ -2233,6 +2947,7 @@ test("handler dispatches loop registry routes", async () => {
       listLoops: async () => ({ loops: [{ id: "a" }] }),
       createLoop: async () => ({ created: true }),
       createProject: async () => ({ createdProject: { id: "p", name: "新项目" } }),
+      deleteProject: async () => ({ deletedProjectName: "空项目" }),
       selectLoop: async () => ({ selected: true }),
       deleteLoop: async () => ({ deleted: true }),
     },
@@ -2267,6 +2982,7 @@ test("handler dispatches loop registry routes", async () => {
 
   const listResult = await request("GET", "/api/loops");
   const projectResult = await request("POST", "/api/projects", { projectName: "新项目" });
+  const deleteProjectResult = await request("POST", "/api/projects/delete", { projectName: "空项目" });
   const createResult = await request("POST", "/api/loops", { loopName: "x" });
   const selectResult = await request("POST", "/api/loops/select", { loopId: "a" });
   const deleteResult = await request("POST", "/api/loops/delete", { loopId: "a" });
@@ -2275,6 +2991,8 @@ test("handler dispatches loop registry routes", async () => {
   assert.match(listResult.text, /"id":"a"/);
   assert.equal(projectResult.statusCode, 200);
   assert.match(projectResult.text, /"name":"新项目"/);
+  assert.equal(deleteProjectResult.statusCode, 200);
+  assert.match(deleteProjectResult.text, /"deletedProjectName":"空项目"/);
   assert.equal(createResult.statusCode, 200);
   assert.match(createResult.text, /"created":true/);
   assert.equal(selectResult.statusCode, 200);
@@ -2286,6 +3004,7 @@ test("handler dispatches loop registry routes", async () => {
 test("handler dispatches loop creation assistant back and reset routes", async () => {
   let backCalls = 0;
   let resetCalls = 0;
+  let lastResetBody = null;
   const handler = buildHandler({
     operations: {
       readLoopSnapshot: async () => ({}),
@@ -2306,8 +3025,9 @@ test("handler dispatches loop creation assistant back and reset routes", async (
         backCalls += 1;
         return { step: "project_name" };
       },
-      restartLoopCreationAssistant: async () => {
+      restartLoopCreationAssistant: async (_cwd, body) => {
         resetCalls += 1;
+        lastResetBody = body || null;
         return { step: "workspace_root" };
       },
       selectLoop: async () => ({}),
@@ -2316,7 +3036,7 @@ test("handler dispatches loop creation assistant back and reset routes", async (
     },
   });
 
-  async function request(url) {
+  async function request(url, body) {
     const chunks = [];
     const response = {
       writeHead(statusCode) {
@@ -2331,7 +3051,11 @@ test("handler dispatches loop creation assistant back and reset routes", async (
       {
         method: "POST",
         url,
-        [Symbol.asyncIterator]: async function* iterator() {},
+        [Symbol.asyncIterator]: async function* iterator() {
+          if (body) {
+            yield Buffer.from(JSON.stringify(body), "utf8");
+          }
+        },
       },
       response,
     );
@@ -2340,7 +3064,10 @@ test("handler dispatches loop creation assistant back and reset routes", async (
   }
 
   const backResult = await request("/api/loop-creation-assistant/back");
-  const resetResult = await request("/api/loop-creation-assistant/reset");
+  const resetResult = await request("/api/loop-creation-assistant/reset", {
+    projectName: "指定项目",
+    workspaceRoot: "E:\\2026\\codex-loop",
+  });
 
   assert.equal(backResult.statusCode, 200);
   assert.equal(resetResult.statusCode, 200);
@@ -2348,6 +3075,8 @@ test("handler dispatches loop creation assistant back and reset routes", async (
   assert.equal(resetCalls, 1);
   assert.match(backResult.text, /"project_name"/);
   assert.match(resetResult.text, /"workspace_root"/);
+  assert.equal(lastResetBody.projectName, "指定项目");
+  assert.equal(lastResetBody.workspaceRoot, "E:\\2026\\codex-loop");
 });
 
 test("handler dispatches loop creation assistant routes", async () => {

@@ -5,6 +5,7 @@ import { fileURLToPath } from "node:url";
 import {
   createLoop,
   createProject,
+  deleteProject,
   deleteLoop,
   exportMobileView,
   exportLoopSummary,
@@ -186,6 +187,15 @@ function isMobileGuidanceWaitError(error) {
   );
 }
 
+function isMobileGuidanceRetriableDispatchError(error) {
+  const message = error?.message || "";
+  return (
+    message.includes("本地模型生成续跑指令失败") ||
+    message.includes("Ollama") ||
+    message.includes("模型配置")
+  );
+}
+
 function shouldDispatchMobileGuidanceOnce(snapshot) {
   if (!snapshot?.state) {
     return true;
@@ -227,6 +237,25 @@ function buildPendingGuidanceResponse(snapshot, overrides = {}) {
     ...pendingGuidance,
     ...overrides,
   };
+}
+
+async function resolvePendingGuidanceResponse(
+  operations,
+  snapshot,
+  overrides = {},
+  startDir = process.cwd(),
+) {
+  const directPendingGuidance = buildPendingGuidanceResponse(snapshot, overrides);
+  if (directPendingGuidance) {
+    return directPendingGuidance;
+  }
+
+  if (typeof operations.exportMobileView !== "function") {
+    return null;
+  }
+
+  const mobileView = await operations.exportMobileView(startDir);
+  return buildPendingGuidanceResponse(mobileView, overrides);
 }
 
 function blockedDispatchPayload({ preflight, detail, action = "发送下一轮" } = {}) {
@@ -315,6 +344,7 @@ export function buildHandler({
       listLoops,
       createLoop,
       createProject,
+      deleteProject,
       getLoopCreationAssistantState,
       goBackLoopCreationAssistant,
       restartLoopCreationAssistant,
@@ -434,7 +464,12 @@ export function buildHandler({
 
         let dispatch = "queued";
         let dispatchResult = null;
-        let pendingGuidance = buildPendingGuidanceResponse(result);
+        let pendingGuidance = await resolvePendingGuidanceResponse(
+          operations,
+          result,
+          {},
+          process.cwd(),
+        );
         let dispatchMessage = "已保存补充引导，会等 Codex 完成后合并。";
 
         const latestSnapshot =
@@ -454,10 +489,16 @@ export function buildHandler({
               dispatch,
               message: dispatchMessage,
               result,
-              pendingGuidance:
-                buildPendingGuidanceResponse(latestSnapshot, {
-                  userMessage: dispatchMessage,
-                }) || pendingGuidance,
+              pendingGuidance: (
+                await resolvePendingGuidanceResponse(
+                  operations,
+                  latestSnapshot,
+                  {
+                    userMessage: dispatchMessage,
+                  },
+                  process.cwd(),
+                )
+              ) || pendingGuidance,
               dispatchResult,
               preflight: preflight.preflight,
             });
@@ -469,12 +510,15 @@ export function buildHandler({
             dispatch = "sent";
             dispatchMessage = "已发送引导，正在等待 Codex 完成当前轮。";
           } catch (error) {
-            if (!isMobileGuidanceWaitError(error)) {
+            if (!isMobileGuidanceWaitError(error) && !isMobileGuidanceRetriableDispatchError(error)) {
               throw error;
             }
-            dispatchMessage =
-              error?.message ||
-              "已保存补充引导；当前不能发送，会等 Codex 可以接收下一轮时再处理。";
+            dispatchMessage = isMobileGuidanceRetriableDispatchError(error)
+              ? "已保存补充引导；当前本地模型暂时不可用，待恢复后再发送。"
+              : (
+                error?.message ||
+                "已保存补充引导；当前不能发送，会等 Codex 可以接收下一轮时再处理。"
+              );
           }
         } else {
           dispatchMessage =
@@ -487,10 +531,16 @@ export function buildHandler({
           dispatch,
           message: dispatchMessage,
           result,
-          pendingGuidance:
-            buildPendingGuidanceResponse(latestSnapshot, {
-              userMessage: dispatchMessage,
-            }) || pendingGuidance,
+          pendingGuidance: (
+            await resolvePendingGuidanceResponse(
+              operations,
+              latestSnapshot,
+              {
+                userMessage: dispatchMessage,
+              },
+              process.cwd(),
+            )
+          ) || pendingGuidance,
           dispatchResult,
         });
         return;
@@ -508,12 +558,53 @@ export function buildHandler({
           return;
         }
 
+        const result = await operations.clearPendingGuidance(process.cwd(), {
+          source: "mobile",
+          deviceId: body.deviceId,
+        });
+        const pendingGuidance =
+          (await resolvePendingGuidanceResponse(
+            operations,
+            result,
+            {
+              text: "",
+              preview: "",
+              hasPending: false,
+              status: "cleared",
+              statusLabel: "已撤回",
+              statusDetail: "这条补充已经撤回，不会再合并到下一条指令。",
+              mergeTiming: "codex_completed",
+              mergeTimingLabel: "等 Codex 完成后合并到下一条指令",
+              mergeProcessor: "ollama_npc",
+              mergeProcessorLabel: "本地模型 / NPC 合并",
+              userMessage: "已撤回待合并引导。",
+              actionLabel: "重新填写",
+              at: "",
+            },
+            process.cwd(),
+          )) || {
+            text: "",
+            preview: "",
+            hasPending: false,
+            status: "cleared",
+            statusLabel: "已撤回",
+            statusDetail: "这条补充已经撤回，不会再合并到下一条指令。",
+            mergeTiming: "codex_completed",
+            mergeTimingLabel: "等 Codex 完成后合并到下一条指令",
+            mergeProcessor: "ollama_npc",
+            mergeProcessorLabel: "本地模型 / NPC 合并",
+            userMessage: "已撤回待合并引导。",
+            actionLabel: "重新填写",
+            at: "",
+          };
+
         sendJson(response, 200, {
           valid: true,
           cleared: true,
           device: verification.device,
           message: "已撤回待合并引导。",
-          result: await operations.clearPendingGuidance(process.cwd()),
+          result,
+          pendingGuidance,
         });
         return;
       }
@@ -714,6 +805,16 @@ export function buildHandler({
         return;
       }
 
+      if (request.method === "POST" && request.url === "/api/projects/delete") {
+        const body = await readBody(request);
+        sendJson(
+          response,
+          200,
+          await operations.deleteProject(process.cwd(), body),
+        );
+        return;
+      }
+
       if (request.method === "POST" && request.url === "/api/loops/select") {
         const body = await readBody(request);
         sendJson(
@@ -750,10 +851,11 @@ export function buildHandler({
         request.method === "POST" &&
         request.url === "/api/loop-creation-assistant/reset"
       ) {
+        const body = await readBody(request);
         sendJson(
           response,
           200,
-          await operations.restartLoopCreationAssistant(process.cwd()),
+          await operations.restartLoopCreationAssistant(process.cwd(), body),
         );
         return;
       }
@@ -837,7 +939,12 @@ export function buildHandler({
           200,
           {
             ...result,
-            pendingGuidance: buildPendingGuidanceResponse(result),
+            pendingGuidance: await resolvePendingGuidanceResponse(
+              operations,
+              result,
+              {},
+              process.cwd(),
+            ),
           },
         );
         return;

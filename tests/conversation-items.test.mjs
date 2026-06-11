@@ -18,7 +18,7 @@ test("buildConversationItemsFromMobileView prefers server conversation items and
   );
 });
 
-test("buildConversationItemsFromMobileView falls back to prompt, transcript, and runtime events", () => {
+test("buildConversationItemsFromMobileView falls back to prompt, transcript, and user-facing runtime events", () => {
   const entries = buildConversationItemsFromMobileView(
     {
       latestPrompt: "继续检查移动端历史对话。",
@@ -29,6 +29,11 @@ test("buildConversationItemsFromMobileView falls back to prompt, transcript, and
           summary: "Codex 已完成移动端验证。",
           activeTask: "移动端任务",
         },
+        {
+          at: "2026-06-07T10:02:30.000Z",
+          summary: "已收到停止指令，当前循环进入收尾状态。",
+          note: "用户在控制台点击停止",
+        },
       ],
       runtimeEvents: [
         {
@@ -36,6 +41,12 @@ test("buildConversationItemsFromMobileView falls back to prompt, transcript, and
           type: "supervisor_review",
           title: "监督复盘",
           detail: "等待下一轮引导。",
+        },
+        {
+          at: "2026-06-07T10:04:00.000Z",
+          type: "graceful_stop_requested",
+          title: "停止请求",
+          detail: "用户在控制台点击停止",
         },
       ],
     },

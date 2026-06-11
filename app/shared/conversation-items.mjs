@@ -2,6 +2,37 @@ function normalizeText(value) {
   return String(value ?? "").trim();
 }
 
+function isUserFacingRuntimeEvent(event) {
+  const type = normalizeText(event?.type).toLowerCase();
+  if (!type) {
+    return false;
+  }
+  return (
+    type.includes("supervisor_review") ||
+    type.includes("codex_reply") ||
+    type.includes("codex_message") ||
+    type.includes("assistant_reply")
+  );
+}
+
+function isSystemTranscriptEntry(entry) {
+  const summary = normalizeText(entry?.summary || entry?.note);
+  const note = normalizeText(entry?.note);
+  if (!summary && !note) {
+    return false;
+  }
+  const text = `${summary}\n${note}`;
+  return (
+    text.includes("已收到停止指令") ||
+    text.includes("已清空未发送的补充引导") ||
+    text.includes("循环已启动") ||
+    text.includes("正在等待第一轮") ||
+    text.includes("正在向绑定的 Codex 线程发送") ||
+    text.includes("manual stop") ||
+    note === "pending_guidance_cleared"
+  );
+}
+
 function dedupeConversationItems(entries = []) {
   const seen = new Set();
   return entries.filter((entry) => {
@@ -58,6 +89,7 @@ export function buildConversationItemsFromMobileView(
   }
 
   for (const entry of mobileView?.transcriptEntries || []) {
+    if (isSystemTranscriptEntry(entry)) continue;
     const summary = normalizeText(entry?.summary || entry?.note);
     if (!summary) continue;
     entries.push({
@@ -72,10 +104,11 @@ export function buildConversationItemsFromMobileView(
   }
 
   for (const event of mobileView?.runtimeEvents || []) {
+    if (!isUserFacingRuntimeEvent(event)) continue;
     const detail = normalizeText(event?.detail || event?.title);
     if (!detail) continue;
     entries.push({
-      role: String(event?.type || "").includes("dispatch") ? "user" : "assistant",
+      role: "assistant",
       at: event?.at || "",
       text: detail,
       preview: detail,

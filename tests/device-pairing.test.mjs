@@ -41,6 +41,9 @@ test("device pairing creates a scan session without storing the raw code", async
   assert.match(session.qrPayload, /codex-loop:\/\/pair/);
   assert.match(session.qrPayload, /sessionId=/);
   assert.match(session.qrPayload, /code=/);
+  assert.match(session.browserPairingUrl, /^http:\/\/100\.64\.0\.10:3001\/?\?/);
+  assert.match(session.browserPairingUrl, new RegExp(`sessionId=${session.sessionId}`));
+  assert.match(session.browserPairingUrl, new RegExp(`code=${session.pairingCode}`));
   assert.match(session.nextAction, /手机|扫码|确认/);
 
   const stored = await fs.readFile(

@@ -39,6 +39,23 @@ function buildPairingCode(seed) {
   return `${padded.slice(0, 4)}-${padded.slice(4, 8)}`;
 }
 
+function buildBrowserPairingUrl(mobileBaseUrl, sessionId, pairingCode) {
+  const baseUrl = safeText(mobileBaseUrl, "");
+  if (!baseUrl || !sessionId || !pairingCode) {
+    return "";
+  }
+
+  try {
+    const url = new URL(baseUrl);
+    url.searchParams.set("sessionId", sessionId);
+    url.searchParams.set("code", pairingCode);
+    return url.toString();
+  } catch {
+    const joiner = baseUrl.includes("?") ? "&" : "?";
+    return `${baseUrl}${joiner}sessionId=${encodeURIComponent(sessionId)}&code=${encodeURIComponent(pairingCode)}`;
+  }
+}
+
 async function resolvePairingPath(startDir = process.cwd()) {
   const { codexLoopRoot } = await resolveProjectLayout(startDir);
   return path.join(codexLoopRoot, "settings", "local", "device-pairing.json");
@@ -147,6 +164,11 @@ export async function createDevicePairingSession(
   const pairingCode = buildPairingCode(seed);
   const expiresAt = new Date(at.getTime() + PAIRING_TTL_MS).toISOString();
   const mobileBaseUrl = safeText(payload.mobileBaseUrl, "");
+  const browserPairingUrl = buildBrowserPairingUrl(
+    mobileBaseUrl,
+    sessionId,
+    pairingCode,
+  );
   const qrPayload = [
     "codex-loop://pair",
     `?sessionId=${encodeURIComponent(sessionId)}`,
@@ -177,6 +199,7 @@ export async function createDevicePairingSession(
     pairingCode,
     qrPayload,
     mobileBaseUrl,
+    browserPairingUrl,
     expiresAt,
     nextAction: "用手机 App 扫码，确认后会生成长期绑定；codex-loop 重启后不用重复扫码。",
   };

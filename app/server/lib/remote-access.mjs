@@ -19,6 +19,23 @@ function normalizePort(value, fallback = 3001) {
   return Number.isFinite(port) && port > 0 ? port : fallback;
 }
 
+function normalizeBaseUrl(value) {
+  const text = safeText(value, "");
+  if (!text) {
+    return "";
+  }
+
+  try {
+    const url = new URL(text);
+    url.pathname = "";
+    url.search = "";
+    url.hash = "";
+    return url.toString().replace(/\/$/u, "");
+  } catch {
+    return text.replace(/\/+$/u, "");
+  }
+}
+
 function toMobileAppUrl(value) {
   const text = safeText(value, "");
   if (!text) {
@@ -56,7 +73,7 @@ function isLowValueAdapterName(name) {
   );
 }
 
-function buildCandidateUrls({ webPort, networkInterfaces = os.networkInterfaces } = {}) {
+function buildCandidateUrls({ mobilePort, networkInterfaces = os.networkInterfaces } = {}) {
   const interfaces = networkInterfaces() || {};
   const candidates = [];
   const seen = new Set();
@@ -83,7 +100,7 @@ function buildCandidateUrls({ webPort, networkInterfaces = os.networkInterfaces 
       }
 
       seen.add(address);
-      const baseUrl = `http://${address}:${webPort}`;
+      const baseUrl = `http://${address}:${mobilePort}`;
       candidates.push({
         url: baseUrl,
         appUrl: toMobileAppUrl(baseUrl),
@@ -132,16 +149,18 @@ export async function readRemoteAccessStatus({
   const cloudflaredInstalled = await existsCommand("cloudflared", ["--version"]);
   const devicePairing = await readPairingStatus();
   const publicBaseUrl = safeText(launcherStatus.webUrl, "");
-  const mobileAppUrl = toMobileAppUrl(publicBaseUrl);
+  const apiBaseUrl = normalizeBaseUrl(launcherStatus.apiBaseUrl);
+  const mobileBaseUrl = apiBaseUrl || publicBaseUrl;
+  const mobileAppUrl = toMobileAppUrl(mobileBaseUrl);
   const isLocalOnly = isLocalOnlyUrl(publicBaseUrl);
-  const mobileReachable = Boolean(publicBaseUrl && !isLocalOnly);
-  const webPort = normalizePort(launcherStatus.webPort, 3001);
-  const candidateUrls = buildCandidateUrls({ webPort, networkInterfaces });
+  const mobileReachable = Boolean(mobileBaseUrl && !isLocalOnlyUrl(mobileBaseUrl));
+  const mobilePort = normalizePort(launcherStatus.apiPort, 3000);
+  const candidateUrls = buildCandidateUrls({ mobilePort, networkInterfaces });
   const primaryMobileUrl = mobileReachable
     ? mobileAppUrl
     : candidateUrls[0]?.appUrl || "";
   const mobileUrlHint = isLocalOnly
-    ? primaryMobileUrl || `http://这台电脑的 Tailscale 地址或局域网 IP:${webPort}`
+    ? primaryMobileUrl || `http://这台电脑的 Tailscale 地址或局域网 IP:${mobilePort}`
     : mobileAppUrl;
 
   const recommendedTransport = tailscaleInstalled
