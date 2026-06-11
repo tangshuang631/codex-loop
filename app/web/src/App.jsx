@@ -2152,6 +2152,7 @@ function ConversationTimeline({
       text: savedPendingGuidanceText,
       preview: savedPendingGuidanceText,
       label: "你的补充",
+      statusLabel: "待下一轮合并",
     });
   }
 
@@ -2214,7 +2215,7 @@ function ConversationTimeline({
                     {getConversationRoleLabel(entry.role)}
                   </span>
                   <span className="conversation-meta">
-                    {formatTime(entry.at, "未知时间")}
+                    {entry.statusLabel || formatTime(entry.at, "未知时间")}
                   </span>
                 </span>
                 <strong>{summary}</strong>
