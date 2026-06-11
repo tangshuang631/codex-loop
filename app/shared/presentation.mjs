@@ -111,6 +111,12 @@ export function buildStatusHeroSummary({
 }
 
 function formatProductionDiagnosisCategory(category) {
+  if (category === "dispatch_in_progress") {
+    return "这一轮刚进入发送阶段，正在等待桌面端确认送达";
+  }
+  if (category === "dispatch_failed_before_delivery") {
+    return "这一轮卡在发送确认阶段，还没有看到已送达 Codex 的记录";
+  }
   if (category === "completion_missing_supervisor_review") {
     return "Codex 已完成当前轮，但本地复盘还没收齐";
   }
@@ -156,6 +162,32 @@ export function buildProductionFocusSummary({
   const diagnosisLabel = formatProductionDiagnosisCategory(diagnosis.category);
   const diagnosisMessage =
     String(diagnosis.userMessage || "").trim() || diagnosisLabel;
+
+  if (diagnosis.category === "dispatch_in_progress") {
+    return {
+      summary: "这一轮刚发出，正在等待桌面端确认送达",
+      attention:
+        diagnosisMessage ||
+        "已经进入发送阶段，先不要重复追发，等待桌面端确认这条指令已经送达 Codex。",
+      nextAction:
+        String(diagnosis.nextAction || "").trim() ||
+        String(productionStatus?.nextAction || "").trim() ||
+        "先等桌面端确认送达，再继续观察 Codex 是否开始处理。",
+    };
+  }
+
+  if (diagnosis.category === "dispatch_failed_before_delivery") {
+    return {
+      summary: "这一轮停在发送确认阶段，先检查是否真正送达",
+      attention:
+        diagnosisMessage ||
+        "已经看到发送开始，但还没有看到送达 Codex 的确认记录。",
+      nextAction:
+        String(diagnosis.nextAction || "").trim() ||
+        String(productionStatus?.nextAction || "").trim() ||
+        "优先检查线程绑定、桌面端原生发送入口和本机 Codex 连接状态。",
+    };
+  }
 
   if (productionStatus?.status === "waiting") {
     const waitingPrefix =

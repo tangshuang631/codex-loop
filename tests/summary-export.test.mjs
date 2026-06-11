@@ -10,6 +10,7 @@ import {
   exportMobileView,
   exportLoopSummary,
   markContinuationFailed,
+  readLoopSnapshot,
   recordHeartbeat,
   reviewCodexMilestone,
   runLoopTurn,
@@ -957,6 +958,7 @@ test("exportMobileView exposes customized npc rules and pending mobile guidance"
   assert.match(mobile.supervisor.testingRules, /移动端改动/);
   assert.match(mobile.supervisor.acceptanceCriteria, /10 秒/);
   assert.equal(mobile.pendingGuidance.text, "下一轮请重点检查移动端实时引导是否清楚。");
+  assert.match(mobile.pendingGuidance.at, /^20\d\d-/);
   assert.equal(mobile.pendingGuidance.mergeTiming, "codex_completed");
   assert.equal(mobile.pendingGuidance.mergeProcessor, "ollama_npc");
   assert.match(mobile.pendingGuidance.mergeProcessorLabel, /本地模型|NPC|Ollama/);
@@ -966,6 +968,13 @@ test("exportMobileView exposes customized npc rules and pending mobile guidance"
   assert.match(mobile.pendingGuidance.actionLabel, /可发送|等待发送/);
   assert.match(mobile.pendingGuidance.userMessage, /Codex.*完成/);
   assert.match(mobile.pendingGuidance.userMessage, /本地模型|NPC|Ollama/);
+  assert.ok(
+    mobile.conversationItems.some(
+      (item) =>
+        item.role === "guidance" &&
+        /下一轮请重点检查移动端实时引导是否清楚/.test(item.text || item.preview || ""),
+    ),
+  );
 });
 
 test("exportMobileView shows evidence after queued guidance is merged into the next Codex instruction", async () => {
@@ -1015,6 +1024,220 @@ test("exportMobileView shows evidence after queued guidance is merged into the n
     mobile.conversationItems.map((item) => item.preview || item.text).join("\n"),
     /用户补充|App 远程操控入口是否清楚/,
   );
+});
+
+test("exportMobileView keeps pending guidance stable after snapshot reload", async () => {
+  const configRoot = await createWorkspace();
+  await ensureLoopArtifacts(configRoot);
+  await saveThreadBinding(configRoot, {
+    workspaceName: "demo",
+    threadTitle: "移动端恢复监督线程",
+    threadId: "thread-mobile-pending-reload",
+    singleThreadMode: true,
+  });
+  await syncCodexThreadMirror(configRoot, {
+    latestCodexSummary: "Codex 已完成当前轮，等待下一轮补充。",
+  });
+  await savePendingGuidance(configRoot, {
+    text: "下一轮请继续检查移动端恢复后的历史和待合并引导是否一致。",
+  });
+
+  const firstMobile = await exportMobileView(configRoot);
+  const reloaded = await readLoopSnapshot(configRoot);
+  const secondMobile = await exportMobileView(configRoot);
+
+  assert.match(reloaded.thread.pendingUserGuidance, /恢复后的历史和待合并引导是否一致/);
+  assert.equal(firstMobile.pendingGuidance.hasPending, true);
+  assert.equal(
+    firstMobile.pendingGuidance.text,
+    "下一轮请继续检查移动端恢复后的历史和待合并引导是否一致。",
+  );
+  assert.equal(secondMobile.pendingGuidance.hasPending, true);
+  assert.equal(secondMobile.pendingGuidance.text, firstMobile.pendingGuidance.text);
+  assert.equal(secondMobile.pendingGuidance.at, firstMobile.pendingGuidance.at);
+  assert.equal(
+    secondMobile.processStatus.pendingGuidancePreview,
+    firstMobile.processStatus.pendingGuidancePreview,
+  );
+  assert.equal(
+    secondMobile.conversationItems.map((item) => item.preview || item.text).join("\n"),
+    firstMobile.conversationItems.map((item) => item.preview || item.text).join("\n"),
+  );
+});
+
+test("exportMobileView keeps guidance bubble readable when stored pending text has consecutive duplicates", async () => {
+  const configRoot = await createWorkspace();
+  const snapshot = await ensureLoopArtifacts(configRoot);
+  await saveThreadBinding(configRoot, {
+    workspaceName: "demo",
+    threadTitle: "移动端重复补充展示",
+    threadId: "thread-mobile-guidance-repeat-view",
+    singleThreadMode: true,
+  });
+  await syncCodexThreadMirror(configRoot, {
+    latestCodexSummary: "Codex 已完成当前轮，等待下一轮补充。",
+  });
+  const threadPath = snapshot.paths.threadPath;
+  const thread = JSON.parse(await fs.readFile(threadPath, "utf8"));
+  thread.pendingUserGuidance =
+    "下一轮请优先确认手机端撤回补充后历史区和待合并状态是否立即同步。\n下一轮请优先确认手机端撤回补充后历史区和待合并状态是否立即同步。";
+  thread.pendingUserGuidanceAt = "2026-06-11T14:11:00.000Z";
+  await fs.writeFile(threadPath, `${JSON.stringify(thread, null, 2)}\n`, "utf8");
+
+  const mobile = await exportMobileView(configRoot);
+  const guidanceItem = mobile.conversationItems.find((item) => item.role === "guidance");
+
+  assert.equal(
+    mobile.pendingGuidance.preview,
+    "下一轮请优先确认手机端撤回补充后历史区和待合并状态是否立即同步。",
+  );
+  assert.equal(
+    guidanceItem?.preview,
+    "下一轮请优先确认手机端撤回补充后历史区和待合并状态是否立即同步。",
+  );
+});
+
+test("exportMobileView keeps merged guidance evidence stable after snapshot reload", async () => {
+  const configRoot = await createWorkspace();
+  await ensureLoopArtifacts(configRoot);
+  await saveThreadBinding(configRoot, {
+    workspaceName: "demo",
+    threadTitle: "移动端合并恢复线程",
+    threadId: "thread-mobile-merged-reload",
+    singleThreadMode: true,
+  });
+  await syncCodexThreadMirror(configRoot, {
+    latestCodexSummary: "Codex 已完成移动端主链路整理，等待下一轮指示。",
+  });
+  await savePendingGuidance(configRoot, {
+    text: "下一轮请确认服务重启后手机端看到的已合并补充仍然正确。",
+  });
+
+  await runLoopTurn(configRoot, {
+    generateFollowupPrompt: async () => ({
+      prompt: "请继续收紧移动端恢复链路。",
+      source: "ollama",
+    }),
+    dispatchThreadMessage: async ({ prompt }) => {
+      assert.match(prompt, /服务重启后手机端看到的已合并补充仍然正确/);
+      return {
+        deliveryObserved: true,
+        transport: "native-app",
+      };
+    },
+  });
+
+  const firstMobile = await exportMobileView(configRoot);
+  const reloaded = await readLoopSnapshot(configRoot);
+  const secondMobile = await exportMobileView(configRoot);
+
+  assert.equal(reloaded.thread.pendingUserGuidance, "");
+  assert.match(reloaded.thread.lastMergedGuidance, /服务重启后手机端看到的已合并补充仍然正确/);
+  assert.equal(firstMobile.pendingGuidance.hasPending, false);
+  assert.equal(secondMobile.pendingGuidance.hasPending, false);
+  assert.equal(
+    secondMobile.processStatus.lastMergedGuidanceStatus,
+    firstMobile.processStatus.lastMergedGuidanceStatus,
+  );
+  assert.equal(
+    secondMobile.processStatus.lastMergedGuidancePreview,
+    firstMobile.processStatus.lastMergedGuidancePreview,
+  );
+  assert.equal(
+    secondMobile.processStatus.lastMergedGuidanceAt,
+    firstMobile.processStatus.lastMergedGuidanceAt,
+  );
+  assert.equal(
+    secondMobile.conversationItems.map((item) => item.preview || item.text).join("\n"),
+    firstMobile.conversationItems.map((item) => item.preview || item.text).join("\n"),
+  );
+});
+
+test("exportMobileView tracks process state transitions for live mobile monitoring", async () => {
+  const configRoot = await createWorkspace();
+  await ensureLoopArtifacts(configRoot);
+  await saveThreadBinding(configRoot, {
+    workspaceName: "demo",
+    threadTitle: "移动端状态流转线程",
+    threadId: "thread-mobile-process-flow",
+    singleThreadMode: true,
+  });
+  await startRun(configRoot);
+  await syncCodexThreadMirror(configRoot, {
+    latestCodexSummary: "Codex 已准备接收下一轮指令。",
+  });
+  await savePendingGuidance(configRoot, {
+    text: "下一轮请持续观察手机端对进程状态切换的提示是否及时。",
+  });
+
+  const readyMobile = await exportMobileView(configRoot);
+
+  assert.equal(readyMobile.processStatus.state, "waiting_next_turn");
+  assert.equal(readyMobile.processStatus.monitorLabel, "可继续");
+  assert.match(readyMobile.processStatus.headline, /等待下一轮/);
+  assert.equal(readyMobile.pendingGuidance.status, "ready_to_merge");
+
+  await runLoopTurn(configRoot, {
+    generateFollowupPrompt: async () => ({
+      prompt: "请继续完善移动端实时监控体验。",
+      source: "ollama",
+    }),
+    dispatchThreadMessage: async () => ({
+      deliveryObserved: true,
+      completionObserved: false,
+      lastMessage: "",
+    }),
+  });
+
+  const workingMobile = await exportMobileView(configRoot);
+
+  assert.equal(workingMobile.processStatus.state, "codex_working");
+  assert.equal(workingMobile.processStatus.monitorLabel, "处理中");
+  assert.match(workingMobile.processStatus.headline, /Codex 正在处理/);
+  assert.equal(workingMobile.pendingGuidance.status, "waiting_codex");
+
+  let releaseReview;
+  const releaseReviewPromise = new Promise((resolve) => {
+    releaseReview = resolve;
+  });
+  let reviewStarted;
+  const reviewStartedPromise = new Promise((resolve) => {
+    reviewStarted = resolve;
+  });
+
+  const reviewPromise = reviewCodexMilestone(configRoot, {
+    generateMilestoneReview: async () => {
+      reviewStarted();
+      await releaseReviewPromise;
+      return {
+        summary: "监督复盘：移动端状态切换清楚，可以继续下一轮。",
+        nextInstruction: "下一轮继续优化手机端监控实时性。",
+        shouldContinue: true,
+        needsIndependentVerification: false,
+        verificationCommands: [],
+        acceptanceFocus: ["状态切换及时", "聊天记录更新及时"],
+        risks: [],
+      };
+    },
+  });
+
+  await reviewStartedPromise;
+  const reviewingMobile = await exportMobileView(configRoot);
+
+  assert.equal(reviewingMobile.processStatus.state, "supervisor_reviewing");
+  assert.equal(reviewingMobile.processStatus.monitorLabel, "复盘中");
+  assert.match(reviewingMobile.processStatus.headline, /监督复盘中/);
+  assert.equal(reviewingMobile.pendingGuidance.status, "waiting_npc");
+
+  releaseReview();
+  await reviewPromise;
+
+  const monitoredMobile = await exportMobileView(configRoot);
+
+  assert.equal(monitoredMobile.processStatus.state, "waiting_next_turn");
+  assert.equal(monitoredMobile.processStatus.monitorLabel, "可继续");
+  assert.match(monitoredMobile.processStatus.nextAction, /开始循环|等待下一次调度|发送|继续/);
+  assert.equal(monitoredMobile.processStatus.latestEventType, "supervisor_review_completed");
 });
 
 test("exportMobileView suggests binding a visible thread before starting when thread is missing", async () => {

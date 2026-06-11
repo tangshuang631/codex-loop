@@ -141,6 +141,60 @@ test("buildProductionFocusSummary explains waiting state with human-check guidan
   );
 });
 
+test("buildProductionFocusSummary explains dispatching as an in-flight delivery wait instead of a failure", () => {
+  assert.deepEqual(
+    buildProductionFocusSummary({
+      productionStatus: {
+        status: "waiting",
+        nextAction: "先等桌面端确认送达，再继续观察 Codex 是否开始处理。",
+      },
+      productionObservation: {
+        diagnosis: {
+          category: "dispatch_in_progress",
+          userMessage: "正在通过 Codex 桌面端原生链路发送指令，等待确认送达。",
+          nextAction: "先等桌面端确认送达，再继续观察 Codex 是否开始处理。",
+        },
+      },
+      closedLoopCount: 1,
+      closedLoopTarget: 2,
+      guidanceEvidenceCount: 1,
+      guidanceEvidenceTarget: 1,
+    }),
+    {
+      summary: "这一轮刚发出，正在等待桌面端确认送达",
+      attention: "正在通过 Codex 桌面端原生链路发送指令，等待确认送达。",
+      nextAction: "先等桌面端确认送达，再继续观察 Codex 是否开始处理。",
+    },
+  );
+});
+
+test("buildProductionFocusSummary separates delivery-check failures from normal waiting", () => {
+  assert.deepEqual(
+    buildProductionFocusSummary({
+      productionStatus: {
+        status: "attention",
+        nextAction: "优先检查线程绑定、桌面端原生发送入口和本机 Codex 连接状态。",
+      },
+      productionObservation: {
+        diagnosis: {
+          category: "dispatch_failed_before_delivery",
+          userMessage: "指令进入发送阶段，但没有观察到已送达 Codex 的记录。",
+          nextAction: "优先检查线程绑定、桌面端原生发送入口和本机 Codex 连接状态。",
+        },
+      },
+      closedLoopCount: 1,
+      closedLoopTarget: 2,
+      guidanceEvidenceCount: 1,
+      guidanceEvidenceTarget: 1,
+    }),
+    {
+      summary: "这一轮停在发送确认阶段，先检查是否真正送达",
+      attention: "指令进入发送阶段，但没有观察到已送达 Codex 的记录。",
+      nextAction: "优先检查线程绑定、桌面端原生发送入口和本机 Codex 连接状态。",
+    },
+  );
+});
+
 test("buildProductionFocusSummary reports concrete production gaps before long-running use", () => {
   assert.deepEqual(
     buildProductionFocusSummary({

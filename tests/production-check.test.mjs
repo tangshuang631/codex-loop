@@ -1303,6 +1303,175 @@ test("production status summarizes merged guidance evidence from real observatio
   }
 });
 
+test("production status exposes mobile remote-control evidence separately from merged guidance evidence", async () => {
+  const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), "codex-loop-production-status-"));
+  const writeReport = async (dirLabel, fileName, report) => {
+    const dir = path.join(tempRoot, ...dirLabel.split("/"));
+    await fs.mkdir(dir, { recursive: true });
+    await fs.writeFile(path.join(dir, fileName), `${JSON.stringify(report, null, 2)}\n`, "utf8");
+  };
+  const now = "2026-06-11T14:30:00.000Z";
+  await writeReport("runtime/production-checks", "latest-production-check.json", {
+    status: "passed",
+    finishedAt: now,
+    checks: [{ status: "passed" }],
+  });
+  await writeReport("runtime/frontend-evidence", "latest-frontend-evidence.json", {
+    status: "passed",
+    finishedAt: now,
+    results: [{ status: "passed" }],
+  });
+  await writeReport("runtime/longrun-smoke", "latest-longrun-smoke.json", {
+    status: "passed",
+    finishedAt: now,
+    checks: [{ status: "passed" }],
+  });
+  await writeReport("runtime/production-observations", "mobile-control-production-observation.json", {
+    status: "attention",
+    finishedAt: now,
+    summary: "移动端已经完成一次真实保存和撤回补充，但还没有形成补充合并证据。",
+    counters: {
+      dispatches: 1,
+      completions: 1,
+      supervisorReviews: 1,
+      closedLoops: 1,
+      mergedGuidance: 0,
+      mobileGuidanceSaved: 1,
+      mobileGuidanceCleared: 1,
+    },
+    guidance: {
+      mergedCount: 0,
+      latestPreview: "",
+      merged: [],
+    },
+    mobileControl: {
+      savedCount: 1,
+      clearedCount: 1,
+      roundTrips: 1,
+      latestSavedPreview: "下一轮请优先确认手机端页面中的待合并补充气泡和顶部状态是否同步刷新。",
+      latestClearedPreview: "下一轮请优先确认手机端页面中的待合并补充气泡和顶部状态是否同步刷新。",
+    },
+  });
+
+  const previousCwd = process.cwd();
+  try {
+    process.chdir(tempRoot);
+    const status = await readProductionStatusSummary({
+      refreshObservation: false,
+      now: new Date(now),
+    });
+
+    assert.equal(status.mobileControlEvidence.current, 1);
+    assert.equal(status.mobileControlEvidence.target, 1);
+    assert.equal(status.mobileControlEvidence.canRemoteControl, true);
+    assert.match(status.mobileControlEvidence.label, /移动端远程操控闭环/);
+    assert.match(status.mobileControlEvidence.summary, /真实保存并撤回补充/);
+    assert.equal(status.guidanceEvidence.current, 0);
+    assert.match(status.guidanceEvidence.summary, /还没有观察到用户补充被 NPC|Ollama|本地模型合并/);
+  } finally {
+    process.chdir(previousCwd);
+  }
+});
+
+test("production status counts mobile remote-control evidence from live mobile guidance events", async () => {
+  const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), "codex-loop-production-live-"));
+  const writeReport = async (dirLabel, fileName, report) => {
+    const dir = path.join(tempRoot, ...dirLabel.split("/"));
+    await fs.mkdir(dir, { recursive: true });
+    await fs.writeFile(path.join(dir, fileName), `${JSON.stringify(report, null, 2)}\n`, "utf8");
+  };
+  const now = "2026-06-11T14:52:00.000Z";
+  await writeReport("runtime/production-checks", "latest-production-check.json", {
+    status: "passed",
+    finishedAt: now,
+    checks: [{ status: "passed" }],
+  });
+  await writeReport("runtime/frontend-evidence", "latest-frontend-evidence.json", {
+    status: "passed",
+    finishedAt: now,
+    results: [{ status: "passed" }],
+  });
+  await writeReport("runtime/longrun-smoke", "latest-longrun-smoke.json", {
+    status: "passed",
+    finishedAt: now,
+    checks: [{ status: "passed" }],
+  });
+
+  const runtimeDir = path.join(tempRoot, "runtime", "assistant-loop");
+  await fs.mkdir(path.join(runtimeDir, "logs"), { recursive: true });
+  await fs.writeFile(
+    path.join(runtimeDir, "logs", "events.jsonl"),
+    [
+      {
+        type: "pending_guidance_saved",
+        at: "2026-06-11T14:50:23.631Z",
+        source: "mobile",
+        deviceId: "device_172eadea769875a478",
+        preview: "下一轮请优先确认生产状态摘要里的移动端远程操控证据是否已被系统识别。",
+      },
+      {
+        type: "pending_guidance_cleared",
+        at: "2026-06-11T14:50:23.728Z",
+        source: "mobile",
+        deviceId: "device_172eadea769875a478",
+        preview: "下一轮请优先确认生产状态摘要里的移动端远程操控证据是否已被系统识别。",
+      },
+    ].map((event) => JSON.stringify(event)).join("\n") + "\n",
+    "utf8",
+  );
+  await fs.writeFile(
+    path.join(runtimeDir, "thread.json"),
+    `${JSON.stringify({
+      threadId: "thread-mobile-evidence",
+      threadTitle: "按清单继续开发",
+      workspaceRoot: "E:\\2026\\opencow",
+      workspaceName: "按清单继续开发",
+      continuationStatus: "error",
+    }, null, 2)}\n`,
+    "utf8",
+  );
+  await fs.mkdir(path.join(tempRoot, "settings"), { recursive: true });
+  await fs.writeFile(
+    path.join(tempRoot, "settings", "loops.json"),
+    `${JSON.stringify({
+      currentLoopId: "assistant-loop",
+      loops: [
+        {
+          id: "assistant-loop",
+          runId: "assistant-loop",
+          name: "按清单继续开发",
+          projectName: "按清单继续开发",
+          workspaceRoot: "E:\\2026\\opencow",
+          threadBinding: {
+            threadId: "thread-mobile-evidence",
+            threadTitle: "按清单继续开发",
+            workspaceRoot: "E:\\2026\\opencow",
+          },
+        },
+      ],
+    }, null, 2)}\n`,
+    "utf8",
+  );
+
+  const previousCwd = process.cwd();
+  try {
+    process.chdir(tempRoot);
+    const status = await readProductionStatusSummary({
+      refreshObservation: true,
+      now: new Date(now),
+    });
+    const observation = status.sections.find((section) => section.label === "真实运行观测");
+
+    assert.equal(observation.counters.mobileGuidanceSaved, 1);
+    assert.equal(observation.counters.mobileGuidanceCleared, 1);
+    assert.equal(status.mobileControlEvidence.current, 1);
+    assert.equal(status.mobileControlEvidence.canRemoteControl, true);
+    assert.match(status.mobileControlEvidence.summary, /真实保存并撤回补充/);
+  } finally {
+    process.chdir(previousCwd);
+  }
+});
+
 test("production status requires merged guidance evidence before long-running maturity", async () => {
   const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), "codex-loop-production-status-"));
   const writeReport = async (dirLabel, fileName, report) => {

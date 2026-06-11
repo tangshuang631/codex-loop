@@ -7,6 +7,7 @@ import os from "node:os";
 import {
   createProject,
   createLoop,
+  deleteProject,
   deleteLoop,
   exportLoopSummary,
   exportMobileView,
@@ -158,7 +159,7 @@ test("requestGracefulStop clears stop flags and enters stopped mode when no cont
 
   await ensureLoopArtifacts(configRoot);
   const nextSnapshot = await requestGracefulStop(configRoot, {
-    reason: "manual stop",
+    reason: "用户手动停止",
   });
 
   assert.equal(nextSnapshot.state.stopRequested, false);
@@ -171,11 +172,11 @@ test("requestGracefulStop appends a transcript entry for the stop request", asyn
   const initialSnapshot = await ensureLoopArtifacts(configRoot);
 
   await requestGracefulStop(configRoot, {
-    reason: "manual stop",
+    reason: "用户手动停止",
   });
 
   const transcriptText = await fs.readFile(initialSnapshot.paths.transcriptPath, "utf8");
-  assert.match(transcriptText, /manual stop/);
+  assert.match(transcriptText, /用户手动停止/);
 });
 
 test("saveThreadBinding persists project and title display metadata", async () => {
@@ -308,7 +309,7 @@ test("requestGracefulStop updates thread mirror mode", async () => {
   await ensureLoopArtifacts(configRoot);
 
   const snapshot = await requestGracefulStop(configRoot, {
-    reason: "manual stop",
+    reason: "用户手动停止",
   });
 
   assert.equal(snapshot.thread.latestMode, "stopped");
@@ -320,7 +321,7 @@ test("requestGracefulStop writes a visible finalizing summary for the UI", async
   await ensureLoopArtifacts(configRoot);
 
   const snapshot = await requestGracefulStop(configRoot, {
-    reason: "manual stop",
+    reason: "用户手动停止",
   });
 
   assert.match(snapshot.thread.latestSummary, /\u505c\u6b62/);
@@ -333,7 +334,7 @@ test("requestGracefulStop stops immediately when no continuation is in flight", 
   await startRun(configRoot);
 
   const snapshot = await requestGracefulStop(configRoot, {
-    reason: "manual stop",
+    reason: "用户手动停止",
   });
 
   assert.equal(snapshot.state.mode, "stopped");
@@ -1714,6 +1715,59 @@ test("sendPendingGuidanceOnce sends queued guidance from monitor mode without st
   assert.match(snapshot.runtimeEvents[0].detail, /监控模式|只发送这一条|不会开启自动循环/);
 });
 
+test("sendPendingGuidanceOnce falls back to template when ollama is unavailable in monitor mode", async () => {
+  const configRoot = await createWorkspace();
+  await ensureLoopArtifacts(configRoot);
+  await saveUserOverrides(configRoot, {
+    conversation: {
+      language: "zh-CN",
+      promptGenerator: {
+        enabled: true,
+        provider: "ollama",
+        model: "qwen2.5:7b",
+      },
+    },
+  });
+  await saveThreadBinding(configRoot, {
+    workspaceName: "demo",
+    threadTitle: "监控模式降级线程",
+    threadId: "thread-monitor-fallback",
+    singleThreadMode: true,
+  });
+  await syncCodexThreadMirror(configRoot, {
+    latestCodexSummary: "Codex 已完成当前批次，等待下一条指令。",
+  });
+  await requestGracefulStop(configRoot, {
+    reason: "enter monitor mode",
+  });
+  await savePendingGuidance(configRoot, {
+    text: "请优先确认移动端顶部状态和历史记录是否同步。",
+  });
+
+  let dispatchedPrompt = "";
+  const snapshot = await sendPendingGuidanceOnce(configRoot, {
+    generateFollowupPrompt: async () => {
+      throw new Error("fetch failed");
+    },
+    dispatchThreadMessage: async ({ prompt }) => {
+      dispatchedPrompt = prompt;
+      return {
+        deliveryObserved: true,
+        completionObserved: false,
+        lastMessage: "",
+      };
+    },
+  });
+
+  assert.match(dispatchedPrompt, /继续在同一个 Codex 线程中推进。/u);
+  assert.match(dispatchedPrompt, /用户临时补充：请优先确认移动端顶部状态和历史记录是否同步。/u);
+  assert.match(snapshot.thread.promptGenerationWarning, /Ollama 暂时不可用/);
+  assert.match(snapshot.thread.promptGenerationWarning, /不会中断监控模式/);
+  assert.equal(snapshot.thread.pendingUserGuidance, "");
+  assert.equal(snapshot.thread.continuationStatus, "dispatching");
+  assert.equal(snapshot.thread.latestEventType, "codex_followup_sent_waiting");
+});
+
 test("exportMobileView keeps monitor mode explicit after one-shot guidance completes", async () => {
   const configRoot = await createWorkspace();
   await ensureLoopArtifacts(configRoot);
@@ -1808,6 +1862,76 @@ test("savePendingGuidance can replace queued guidance when the user edits it", a
   assert.equal(snapshot.thread.pendingUserGuidance, "改成只检查创建任务入口是否清楚。");
   assert.equal(mobile.pendingGuidance.text, "改成只检查创建任务入口是否清楚。");
   assert.doesNotMatch(snapshot.thread.pendingUserGuidance, /先检查移动端/);
+});
+
+test("savePendingGuidance ignores repeating the same trailing note from the same pending state", async () => {
+  const configRoot = await createWorkspace();
+  await ensureLoopArtifacts(configRoot);
+  await saveThreadBinding(configRoot, {
+    workspaceName: "demo",
+    threadTitle: "移动端重复补充线程",
+    threadId: "thread-guidance-dedupe",
+    singleThreadMode: true,
+  });
+
+  await savePendingGuidance(configRoot, {
+    text: "下一轮请优先确认手机端聊天记录刷新和待合并提示是否同步。",
+  });
+  const snapshot = await savePendingGuidance(configRoot, {
+    text: "下一轮请优先确认手机端聊天记录刷新和待合并提示是否同步。",
+  });
+  const mobile = await exportMobileView(configRoot);
+  const conversationText = mobile.conversationItems
+    .filter((item) => item.role === "guidance")
+    .map((item) => item.text)
+    .join("\n");
+
+  assert.equal(
+    snapshot.thread.pendingUserGuidance,
+    "下一轮请优先确认手机端聊天记录刷新和待合并提示是否同步。",
+  );
+  assert.equal(
+    mobile.pendingGuidance.text,
+    "下一轮请优先确认手机端聊天记录刷新和待合并提示是否同步。",
+  );
+  assert.equal(
+    (snapshot.thread.pendingUserGuidance.match(/待合并提示是否同步/g) || []).length,
+    1,
+  );
+  assert.equal(
+    (conversationText.match(/待合并提示是否同步/g) || []).length,
+    1,
+  );
+});
+
+test("exportMobileView collapses repeated legacy pending guidance lines for mobile monitoring", async () => {
+  const configRoot = await createWorkspace();
+  const snapshot = await ensureLoopArtifacts(configRoot);
+  await saveThreadBinding(configRoot, {
+    workspaceName: "demo",
+    threadTitle: "移动端旧待合并恢复线程",
+    threadId: "thread-guidance-legacy-repeat",
+    singleThreadMode: true,
+  });
+  const threadPath = snapshot.paths.threadPath;
+  const thread = JSON.parse(await fs.readFile(threadPath, "utf8"));
+  thread.pendingUserGuidance =
+    "下一轮请优先确认手机端聊天记录刷新是否及时。\n下一轮请优先确认手机端聊天记录刷新是否及时。\n下一轮请优先确认手机端聊天记录刷新是否及时。";
+  thread.pendingUserGuidanceAt = "2026-06-11T14:10:00.000Z";
+  await fs.writeFile(threadPath, `${JSON.stringify(thread, null, 2)}\n`, "utf8");
+
+  const mobile = await exportMobileView(configRoot);
+  const guidanceItems = mobile.conversationItems.filter((item) => item.role === "guidance");
+
+  assert.equal(
+    mobile.pendingGuidance.text,
+    "下一轮请优先确认手机端聊天记录刷新是否及时。",
+  );
+  assert.equal(guidanceItems.length >= 1, true);
+  assert.equal(
+    guidanceItems.at(-1).text,
+    "下一轮请优先确认手机端聊天记录刷新是否及时。",
+  );
 });
 
 test("clearPendingGuidance removes unsent user guidance without losing thread state", async () => {
@@ -3584,6 +3708,43 @@ test("createProject persists an empty project for sidebar task grouping", async 
   assert.equal(registry.projects.some((item) => item.name === "移动端监控"), true);
 });
 
+test("deleteProject removes an empty project from the registry", async () => {
+  const configRoot = await createWorkspace();
+  const workspaceRoot = path.join(configRoot, "empty-project");
+  await fs.mkdir(workspaceRoot, { recursive: true });
+
+  await createProject(configRoot, {
+    projectName: "待删除项目",
+    workspaceRoot,
+  });
+
+  const result = await deleteProject(configRoot, {
+    projectName: "待删除项目",
+  });
+
+  assert.equal(result.deletedProjectName, "待删除项目");
+  assert.equal(result.projects.some((item) => item.name === "待删除项目"), false);
+});
+
+test("deleteProject rejects deleting a project that still contains tasks", async () => {
+  const configRoot = await createWorkspace();
+
+  await createLoop(configRoot, {
+    loopName: "项目内任务",
+    runId: "project-loop-a",
+    projectName: "保留项目",
+    threadTitle: "项目内任务",
+  });
+
+  await assert.rejects(
+    () =>
+      deleteProject(configRoot, {
+        projectName: "保留项目",
+      }),
+    /still contains tasks/,
+  );
+});
+
 test("createLoop persists a new loop and selectLoop switches active config", async () => {
   const configRoot = await createWorkspace();
   await fs.writeFile(
@@ -4340,6 +4501,22 @@ test("loop creation assistant supports going back and restarting", async () => {
   assert.equal(state.draft.workspaceRoot, "");
 });
 
+test("restartLoopCreationAssistant can start directly from a chosen project context", async () => {
+  const configRoot = await createWorkspace();
+  const projectRoot = path.join(configRoot, "chosen-project");
+  await fs.mkdir(projectRoot, { recursive: true });
+
+  const state = await restartLoopCreationAssistant(configRoot, {
+    projectName: "指定项目",
+    workspaceRoot: projectRoot,
+  });
+
+  assert.equal(state.step, "project_name");
+  assert.equal(state.draft.projectName, "指定项目");
+  assert.equal(state.draft.workspaceRoot, projectRoot);
+  assert.equal(state.currentQuestion.id, "project_name");
+});
+
 test("exportLoopSummary includes Codex linkage summaries", async () => {
   const configRoot = await createWorkspace();
   await ensureLoopArtifacts(configRoot);
@@ -4406,6 +4583,7 @@ test("readLoopSnapshot reports long-running Codex work without converting it to 
         continuationStatus: "dispatching",
         lastContinuationError: "",
         lastDispatchAt: new Date(Date.now() - 1000 * 60 * 12).toISOString(),
+        latestEventType: "codex_followup_dispatching",
       },
       null,
       2,
@@ -4440,6 +4618,7 @@ test("exportMobileView keeps stale dispatch visible as Codex working instead of 
         continuationStatus: "dispatching",
         lastContinuationError: "",
         lastDispatchAt: new Date(Date.now() - 1000 * 60 * 12).toISOString(),
+        latestEventType: "codex_followup_dispatching",
       },
       null,
       2,
@@ -4453,9 +4632,39 @@ test("exportMobileView keeps stale dispatch visible as Codex working instead of 
   assert.equal(mobile.processStatus.waitingForCodex, true);
   assert.equal(mobile.processStatus.canSendNextTurn, false);
   assert.match(mobile.processStatus.detail, /已经等待约 12 分钟/);
+  assert.equal(mobile.processStatus.realtimePhaseKey, "dispatch_delivery_stalled");
+  assert.equal(mobile.processStatus.realtimePhaseLabel, "发送确认停留过久");
+  assert.match(mobile.processStatus.realtimePhaseDetail, /已经等待约 12 分钟|送达 Codex/);
+  assert.equal(mobile.processStatus.realtimeRecentActionLabel, "发送确认卡住");
   assert.match(mobile.processStatus.nextAction, /不要重复发送|补充方向/);
   assert.match(mobile.suggestedAction, /已经等待约 12 分钟/);
   assert.doesNotMatch(mobile.processStatus.headline, /配置/);
+});
+
+test("exportMobileView keeps stalled delivery as the primary user-facing reason even when Ollama fallback warning exists", async () => {
+  const configRoot = await createWorkspace();
+  const snapshot = await ensureLoopArtifacts(configRoot);
+  await startRun(configRoot);
+  await saveThreadBinding(configRoot, {
+    workspaceName: "demo",
+    threadTitle: "stalled-delivery-priority",
+    threadId: "thread-stalled-delivery-priority",
+    singleThreadMode: true,
+  });
+  const thread = JSON.parse(await fs.readFile(snapshot.paths.threadPath, "utf8"));
+  thread.lastDispatchAt = new Date(Date.now() - 1000 * 60 * 18).toISOString();
+  thread.continuationStatus = "dispatching";
+  thread.latestEventType = "codex_followup_dispatching";
+  thread.lastDispatchPromptGenerator = "template";
+  thread.promptGenerationWarning =
+    "Ollama 暂时不可用，这次已自动降级为精简引导发送，不会中断监控模式。建议尽快恢复 Ollama 或检查模型配置。";
+  await fs.writeFile(snapshot.paths.threadPath, `${JSON.stringify(thread, null, 2)}\n`, "utf8");
+
+  const mobile = await exportMobileView(configRoot);
+
+  assert.equal(mobile.processStatus.realtimePhaseKey, "dispatch_delivery_stalled");
+  assert.match(mobile.processStatus.realtimePhaseDetail, /还没有看到已送达 Codex 的确认记录/);
+  assert.match(mobile.processStatus.realtimePhaseDetail, /Ollama 暂时不可用/);
 });
 
 test("readLoopSnapshot marks health issue when transcript is stale during an active run", async () => {

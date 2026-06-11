@@ -297,6 +297,85 @@ function countMergedGuidanceEvidence(item = {}) {
   );
 }
 
+function countMobileControlRoundTrips(item = {}) {
+  return Math.max(
+    0,
+    Number(item.mobileControl?.roundTrips || 0),
+    Math.min(
+      Number(item.counters?.mobileGuidanceSaved || 0),
+      Number(item.counters?.mobileGuidanceCleared || 0),
+    ),
+  );
+}
+
+function buildMobileControlEvidencePlan({
+  current = 0,
+  canRemoteControl = false,
+  target = {},
+} = {}) {
+  if (canRemoteControl) {
+    return {
+      status: "satisfied",
+      summary: "已观察到移动端真实保存并撤回补充的远程操控闭环。",
+      targetLabel: formatTargetLabel(target),
+      steps: [],
+    };
+  }
+
+  return {
+    status: "needs_mobile_control_evidence",
+    summary: "还需要 1 次移动端真实远程操控证据：手机端保存补充 -> 受保护读取看到待合并状态 -> 手机端撤回 -> 再次读取确认已清空。",
+    targetLabel: formatTargetLabel(target),
+    steps: [
+      {
+        label: "手机写入补充",
+        detail: "从移动端保存一条下一轮补充，引导不要打断 Codex 当前轮。",
+      },
+      {
+        label: "读取受保护视图",
+        detail: "确认手机端受保护视图能看到待合并状态和你的补充气泡。",
+      },
+      {
+        label: "手机撤回补充",
+        detail: "从移动端撤回这条待合并补充。",
+      },
+      {
+        label: "再次读取确认",
+        detail: "确认待合并状态和补充气泡已清空，没有旧内容回弹。",
+      },
+    ],
+    observed: current,
+  };
+}
+
+function deriveMobileControlEvidence(items, targetInfo = {}) {
+  const observation = items.find((item) => item.label === "真实运行观测") || {};
+  const current = countMobileControlRoundTrips(observation);
+  const required = 1;
+  const remaining = Math.max(0, required - current);
+  const canRemoteControl = current >= required;
+  const label = canRemoteControl
+    ? "已观察到移动端远程操控闭环"
+    : "还差 1 次移动端远程操控证据";
+  const summary = canRemoteControl
+    ? `已观察到 ${current} 次移动端真实保存并撤回补充的远程操控闭环。`
+    : "还没有观察到移动端真实保存并撤回补充的远程操控闭环。";
+
+  return {
+    current,
+    target: required,
+    remaining,
+    canRemoteControl,
+    label,
+    summary,
+    evidencePlan: buildMobileControlEvidencePlan({
+      current,
+      canRemoteControl,
+      target: targetInfo,
+    }),
+  };
+}
+
 function hasMergedGuidanceEvidence(item = {}) {
   return countMergedGuidanceEvidence(item) > 0;
 }
@@ -835,6 +914,7 @@ export async function readProductionStatusSummary({
     maturity,
     closedLoopEvidence: deriveClosedLoopEvidence(items, maturity, target),
     guidanceEvidence: deriveGuidanceEvidence(items, maturity, target),
+    mobileControlEvidence: deriveMobileControlEvidence(items, target),
     sections: items,
     nextActionLabel: "下一步建议",
     nextAction: deriveNextAction(items, target),

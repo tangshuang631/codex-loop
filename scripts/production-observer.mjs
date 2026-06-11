@@ -8,6 +8,9 @@ const DEFAULT_LIMIT = 80;
 const DEFAULT_WAIT_ATTENTION_MINUTES = Number(
   process.env.CODEX_LOOP_WAIT_ATTENTION_MINUTES || 15,
 );
+const DEFAULT_DISPATCH_ATTENTION_MINUTES = Number(
+  process.env.CODEX_LOOP_DISPATCH_ATTENTION_MINUTES || 2,
+);
 const reportRootLabel = "runtime/production-observations";
 
 function nowForFile() {
@@ -45,6 +48,9 @@ async function readJsonLines(filePath, limit = DEFAULT_LIMIT) {
 function eventLabel(type) {
   const labels = {
     run_started_from_console: "循环已启动",
+    pending_guidance_saved: "已记录下一轮补充",
+    pending_guidance_updated: "已更新下一轮补充",
+    pending_guidance_cleared: "已清空补充引导",
     codex_followup_dispatching: "正在发送指令",
     codex_followup_dispatched: "正在等待 Codex",
     codex_followup_sent_waiting: "指令已送达，等待 Codex",
@@ -87,6 +93,9 @@ function eventDetail(event = {}) {
 function isTimelineEvent(event = {}) {
   return [
     "run_started_from_console",
+    "pending_guidance_saved",
+    "pending_guidance_updated",
+    "pending_guidance_cleared",
     "codex_followup_dispatching",
     "codex_followup_dispatched",
     "codex_followup_sent_waiting",
@@ -129,11 +138,20 @@ function buildCounters(events) {
   const supervisorReviews = events.filter((event) => event.type === "supervisor_review_completed").length;
   const failures = events.filter((event) => /failed|stalled|runtime_error/u.test(event.type)).length;
   const closedLoopsAfterLatestFailure = countClosedLoopsAfterLatestFailure(events);
+  const mobileGuidanceSaved = events.filter((event) =>
+    safeText(event.source) === "mobile" &&
+    (event.type === "pending_guidance_saved" || event.type === "pending_guidance_updated"),
+  ).length;
+  const mobileGuidanceCleared = events.filter((event) =>
+    safeText(event.source) === "mobile" && event.type === "pending_guidance_cleared",
+  ).length;
   return {
     dispatches,
     completions,
     supervisorReviews,
     mergedGuidance: countMergedGuidance(events),
+    mobileGuidanceSaved,
+    mobileGuidanceCleared,
     closedLoops: countOrderedClosedLoops(events),
     closedLoopsAfterLatestFailure,
     verificationRuns: events.filter((event) => event.type === "supervisor_verification_completed").length,
@@ -175,6 +193,52 @@ function buildGuidanceSummary(events) {
     latestAt: latest.at || "",
     latestPreview: latest.preview || "",
     merged,
+  };
+}
+
+function buildMobileControlSummary(events) {
+  const saved = [];
+  const cleared = [];
+  const seenSaved = new Set();
+  const seenCleared = new Set();
+
+  for (const event of events) {
+    if (safeText(event.source) !== "mobile") continue;
+    if (event.type === "pending_guidance_saved" || event.type === "pending_guidance_updated") {
+      const preview = safeText(event.preview || event.detail, "");
+      const key = `${safeText(event.at)}|${preview}`;
+      if (!preview || seenSaved.has(key)) continue;
+      seenSaved.add(key);
+      saved.push({
+        at: safeText(event.at),
+        preview,
+      });
+      continue;
+    }
+    if (event.type === "pending_guidance_cleared") {
+      const preview = safeText(event.preview || event.detail, "");
+      const key = `${safeText(event.at)}|${preview}`;
+      if (seenCleared.has(key)) continue;
+      seenCleared.add(key);
+      cleared.push({
+        at: safeText(event.at),
+        preview,
+      });
+    }
+  }
+
+  const latestSaved = saved.at(-1) || {};
+  const latestCleared = cleared.at(-1) || {};
+  return {
+    savedCount: saved.length,
+    clearedCount: cleared.length,
+    roundTrips: Math.min(saved.length, cleared.length),
+    latestSavedAt: latestSaved.at || "",
+    latestSavedPreview: latestSaved.preview || "",
+    latestClearedAt: latestCleared.at || "",
+    latestClearedPreview: latestCleared.preview || "",
+    saved,
+    cleared,
   };
 }
 
@@ -312,7 +376,27 @@ function buildWaitingObservation(timeline, now = new Date()) {
   };
 }
 
-function deriveStatusAndAdvice(counters, timeline, { waiting = null } = {}) {
+function buildDispatchObservation(timeline, now = new Date()) {
+  const latestDispatching = timeline.findLast((event) => event.type === "codex_followup_dispatching");
+  const dispatchAt = Date.parse(latestDispatching?.at || "");
+  const nowMs = now instanceof Date ? now.getTime() : Date.parse(String(now || ""));
+  const dispatchMinutes =
+    Number.isFinite(dispatchAt) && Number.isFinite(nowMs)
+      ? Math.max(0, Math.round((nowMs - dispatchAt) / 60000))
+      : 0;
+  const dispatchAttentionMinutes = Number.isFinite(DEFAULT_DISPATCH_ATTENTION_MINUTES)
+    ? DEFAULT_DISPATCH_ATTENTION_MINUTES
+    : 2;
+
+  return {
+    dispatchSince: latestDispatching?.at || "",
+    dispatchMinutes,
+    dispatchAttentionMinutes,
+    needsDeliveryCheck: dispatchMinutes >= dispatchAttentionMinutes,
+  };
+}
+
+function deriveStatusAndAdvice(counters, timeline, { waiting = null, dispatch = null } = {}) {
   if (!timeline.length) {
     return {
       status: "attention",
@@ -330,6 +414,24 @@ function deriveStatusAndAdvice(counters, timeline, { waiting = null } = {}) {
   }
 
   const types = new Set(timeline.map((event) => event.type));
+  if (
+    types.has("codex_followup_dispatching") &&
+    !Array.from(types).some((type) => isDeliveredWaitingEventType(type)) &&
+    !types.has("codex_followup_completed")
+  ) {
+    const dispatchLabel = dispatch?.dispatchMinutes
+      ? `已发送约 ${dispatch.dispatchMinutes} 分钟，`
+      : "";
+    return {
+      status: dispatch?.needsDeliveryCheck ? "attention" : "waiting",
+      summary: dispatch?.needsDeliveryCheck
+        ? `指令仍停留在发送阶段，${dispatchLabel}还没有观察到已送达 Codex 的记录。`
+        : `指令刚进入发送阶段，${dispatchLabel}正在等待桌面端确认送达。`,
+      nextAction: dispatch?.needsDeliveryCheck
+        ? "先确认桌面端原生发送入口、目标线程窗口和 Codex 连接状态；不要连续重复发送。"
+        : "先等桌面端确认送达；如需补充方向，可以继续写入下一轮引导，但不要重复点击发送。",
+    };
+  }
   if (
     Array.from(types).some((type) => isDeliveredWaitingEventType(type)) &&
     !types.has("codex_followup_completed")
@@ -378,7 +480,7 @@ function deriveStatusAndAdvice(counters, timeline, { waiting = null } = {}) {
   };
 }
 
-function deriveDiagnosis(counters, timeline, { hasRecovery = false } = {}) {
+function deriveDiagnosis(counters, timeline, { hasRecovery = false, dispatch = null } = {}) {
   if (!timeline.length) {
     return {
       category: "no_runtime_events",
@@ -390,6 +492,24 @@ function deriveDiagnosis(counters, timeline, { hasRecovery = false } = {}) {
   const unresolvedFailures = counters.unresolvedFailures ?? counters.failures;
 
   if (unresolvedFailures <= 0) {
+    const types = new Set(timeline.map((event) => event.type));
+    if (
+      types.has("codex_followup_dispatching") &&
+      !Array.from(types).some((type) => isDeliveredWaitingEventType(type)) &&
+      !types.has("codex_followup_completed")
+    ) {
+      return {
+        category: dispatch?.needsDeliveryCheck
+          ? "dispatch_failed_before_delivery"
+          : "dispatch_in_progress",
+        userMessage: dispatch?.needsDeliveryCheck
+          ? "指令进入发送阶段，但没有观察到已送达 Codex 的记录。"
+          : "指令刚进入发送阶段，正在等待桌面端确认送达。",
+        nextAction: dispatch?.needsDeliveryCheck
+          ? "优先检查线程绑定、桌面端原生发送入口和本机 Codex 连接状态。"
+          : "先等待桌面端确认送达；如果长时间没有后续记录，再检查目标线程窗口和 Codex 连接状态。",
+      };
+    }
     if ((counters.closedLoops || 0) > 0) {
       const recoveredFailureNote = counters.failures > 0
         ? "早期失败已被后续稳定闭环覆盖。"
@@ -420,7 +540,6 @@ function deriveDiagnosis(counters, timeline, { hasRecovery = false } = {}) {
         nextAction: "先运行 npm run production:recover 补齐监督复盘；该命令不会发送下一轮指令。",
       };
     }
-    const types = new Set(timeline.map((event) => event.type));
     if (
       Array.from(types).some((type) => isDeliveredWaitingEventType(type)) &&
       !types.has("codex_followup_completed")
@@ -465,11 +584,20 @@ function deriveDiagnosis(counters, timeline, { hasRecovery = false } = {}) {
     };
   }
 
-  if (types.has("codex_followup_dispatching") && !types.has("codex_followup_sent_waiting")) {
+  if (
+    types.has("codex_followup_dispatching") &&
+    !Array.from(types).some((type) => isDeliveredWaitingEventType(type))
+  ) {
     return {
-      category: "dispatch_failed_before_delivery",
-      userMessage: "指令进入发送阶段，但没有观察到已送达 Codex 的记录。",
-      nextAction: "优先检查线程绑定、桌面端原生发送入口和本机 Codex 连接状态。",
+      category: dispatch?.needsDeliveryCheck
+        ? "dispatch_failed_before_delivery"
+        : "dispatch_in_progress",
+      userMessage: dispatch?.needsDeliveryCheck
+        ? "指令进入发送阶段，但没有观察到已送达 Codex 的记录。"
+        : "指令刚进入发送阶段，正在等待桌面端确认送达。",
+      nextAction: dispatch?.needsDeliveryCheck
+        ? "优先检查线程绑定、桌面端原生发送入口和本机 Codex 连接状态。"
+        : "先等待桌面端确认送达；如果长时间没有后续记录，再检查目标线程窗口和 Codex 连接状态。",
     };
   }
 
@@ -502,6 +630,8 @@ export async function buildProductionObservation({
     expandMergedGuidanceEvents(events).filter(isTimelineEvent).map((event) => ({
       at: safeText(event.at),
       type: safeText(event.type),
+      source: safeText(event.source),
+      deviceId: safeText(event.deviceId),
       label: eventLabel(event.type),
       detail: eventDetail(event).slice(0, 220),
       promptGenerator: safeText(event.promptGenerator),
@@ -515,10 +645,13 @@ export async function buildProductionObservation({
   const counters = buildCounters(cycles.current);
   const historyCounters = buildCounters(cycles.previous);
   const guidance = buildGuidanceSummary(cycles.current);
+  const mobileControl = buildMobileControlSummary(cycles.current);
   const waiting = buildWaitingObservation(cycles.current, now);
-  const advice = deriveStatusAndAdvice(counters, cycles.current, { waiting });
+  const dispatch = buildDispatchObservation(cycles.current, now);
+  const advice = deriveStatusAndAdvice(counters, cycles.current, { waiting, dispatch });
   const diagnosis = deriveDiagnosis(counters, cycles.current, {
     hasRecovery: recoveredCycle.hasRecovery,
+    dispatch,
   });
 
   return {
@@ -534,12 +667,14 @@ export async function buildProductionObservation({
     },
     counters,
     guidance,
+    mobileControl,
     history: {
       failureCount: historyCounters.failures,
       totalTimelineEvents: timeline.length,
       previousTimelineEvents: cycles.previous.length,
     },
     waiting,
+    dispatch,
     diagnosis,
     summary: advice.summary,
     nextAction: advice.nextAction,

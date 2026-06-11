@@ -1843,17 +1843,29 @@ async function loadLoopAssistantState(layout) {
   return { assistantPath, state: initial };
 }
 
-function createInitialLoopAssistantState() {
+function createInitialLoopAssistantState(payload = {}) {
+  const workspaceRoot = safeText(payload.workspaceRoot, "");
+  const projectName = safeText(payload.projectName || payload.name, "");
+  const hasProjectPreset = Boolean(workspaceRoot || projectName);
+  const draft = {
+    ...createLoopAssistantDraft(),
+    workspaceRoot,
+    projectName,
+  };
+  const step = hasProjectPreset ? "project_name" : "workspace_root";
+  const assistantText = hasProjectPreset
+    ? "已带入项目上下文。接下来确认这个项目在左侧如何显示，然后继续创建任务。"
+    : "先告诉我项目路径，我会先识别项目信息，再一起创建任务。";
   return {
     status: "collecting",
-    step: "workspace_root",
-    draft: createLoopAssistantDraft(),
-    currentQuestion: buildLoopAssistantQuestion("workspace_root"),
+    step,
+    draft,
+    currentQuestion: buildLoopAssistantQuestion(step, draft),
     createdLoop: null,
     messages: [
       {
         role: "assistant",
-        text: "先告诉我项目路径，我会先识别项目信息，再一起创建任务。",
+        text: assistantText,
         meta: "开始创建",
         at: nowIso(),
       },
@@ -2393,6 +2405,120 @@ function buildSupervisorPerspectiveRows({
   ];
 }
 
+function deriveProcessRealtimePhaseView({
+  state = "",
+  detail = "",
+  nextAction = "",
+  monitorTone = "soft",
+  latestEventType = "",
+  latestInstructionSourceDetail = "",
+  waitingDurationLabel = "",
+} = {}) {
+  const cleanDetail = safeText(detail, "");
+  const cleanNextAction = safeText(nextAction, "");
+  const cleanLatestEventType = safeText(latestEventType, "");
+  const cleanInstructionDetail = safeText(latestInstructionSourceDetail, "");
+  const cleanWaitingDurationLabel = safeText(waitingDurationLabel, "");
+  const waitingMinutesMatch = cleanWaitingDurationLabel.match(/(\d+)/u);
+  const waitingMinutes = waitingMinutesMatch ? Number(waitingMinutesMatch[1]) : 0;
+  const deliveryWaitLooksStale = Number.isFinite(waitingMinutes) && waitingMinutes >= 5;
+
+  if (state === "supervisor_reviewing") {
+    return {
+      realtimePhaseKey: "supervisor_reviewing",
+      realtimePhaseLabel: "NPC 复盘中",
+      realtimePhaseDetail:
+        cleanDetail || "本地模型 / NPC 正在结合最新回复决定下一步。",
+      realtimePhaseTone: monitorTone || "active",
+      realtimeRecentActionLabel: "监督复盘中",
+      realtimeRecentActionDetail: cleanNextAction || cleanDetail,
+    };
+  }
+
+  if (state === "codex_working") {
+    if (cleanLatestEventType === "codex_followup_dispatching") {
+      if (deliveryWaitLooksStale) {
+        const staleDeliveryLead = `${cleanWaitingDurationLabel ? `${cleanWaitingDurationLabel}。` : ""}还没有看到已送达 Codex 的确认记录，请优先检查桌面端原生发送入口和线程绑定。`;
+        return {
+          realtimePhaseKey: "dispatch_delivery_stalled",
+          realtimePhaseLabel: "发送确认停留过久",
+          realtimePhaseDetail:
+            cleanInstructionDetail
+              ? `${staleDeliveryLead} ${cleanInstructionDetail}`
+              : cleanDetail || staleDeliveryLead,
+          realtimePhaseTone: "warning",
+          realtimeRecentActionLabel: "发送确认卡住",
+          realtimeRecentActionDetail:
+            cleanNextAction ||
+            "先确认是否真正送达 Codex，再决定是否重试，不要连续重复发送。",
+        };
+      }
+
+      return {
+        realtimePhaseKey: "dispatch_waiting_delivery",
+        realtimePhaseLabel: "刚发出，待送达确认",
+        realtimePhaseDetail:
+          cleanInstructionDetail ||
+          cleanDetail ||
+          "这一条引导已经开始发送，正在等桌面端确认已送达 Codex。",
+        realtimePhaseTone: "queued",
+        realtimeRecentActionLabel: "正在发送下一轮指令",
+        realtimeRecentActionDetail:
+          cleanInstructionDetail ||
+          "先不要重复发送，等桌面端确认送达后再继续观察。",
+      };
+    }
+
+    if (
+      cleanLatestEventType === "codex_followup_sent_waiting" ||
+      cleanLatestEventType === "codex_followup_dispatched"
+    ) {
+      return {
+        realtimePhaseKey: "dispatch_delivered_waiting_codex",
+        realtimePhaseLabel: "已送达，等 Codex 完成",
+        realtimePhaseDetail:
+          cleanDetail ||
+          `${cleanWaitingDurationLabel ? `${cleanWaitingDurationLabel}。` : ""}上一条已经送达，正在等 Codex 完成当前轮。`,
+        realtimePhaseTone: monitorTone || "active",
+        realtimeRecentActionLabel: "正在等待 Codex 回复",
+        realtimeRecentActionDetail:
+          cleanNextAction || "这一轮已经送达，不会追加发送，避免打断 Codex。",
+      };
+    }
+
+    return {
+      realtimePhaseKey: "codex_working",
+      realtimePhaseLabel: "Codex 处理中",
+      realtimePhaseDetail:
+        cleanDetail || "Codex 正在处理当前轮，完成前不会追加发送。",
+      realtimePhaseTone: monitorTone || "active",
+      realtimeRecentActionLabel: "Codex 正在处理",
+      realtimeRecentActionDetail: cleanNextAction || cleanDetail,
+    };
+  }
+
+  if (state === "waiting_next_turn") {
+    return {
+      realtimePhaseKey: "waiting_next_turn",
+      realtimePhaseLabel: "可继续下一轮",
+      realtimePhaseDetail:
+        cleanDetail || "当前没有阻塞，可以继续观察或准备下一轮引导。",
+      realtimePhaseTone: monitorTone || "ready",
+      realtimeRecentActionLabel: "等待下一轮",
+      realtimeRecentActionDetail: cleanNextAction || cleanDetail,
+    };
+  }
+
+  return {
+    realtimePhaseKey: state || "syncing",
+    realtimePhaseLabel: "",
+    realtimePhaseDetail: cleanDetail || cleanNextAction,
+    realtimePhaseTone: monitorTone || "soft",
+    realtimeRecentActionLabel: "",
+    realtimeRecentActionDetail: cleanNextAction || cleanDetail || cleanLatestEventType,
+  };
+}
+
 function buildProcessStatus(snapshot) {
   const mode = snapshot.state.mode || "stopped";
   const continuationStatus = snapshot.thread.continuationStatus || "idle";
@@ -2561,6 +2687,16 @@ function buildProcessStatus(snapshot) {
   }
 
   const monitorStatus = deriveMonitorStatus(state);
+  const latestEventType = snapshot.thread.latestEventType || snapshot.state.events?.at(-1)?.type || "";
+  const realtimePhaseView = deriveProcessRealtimePhaseView({
+    state,
+    detail,
+    nextAction,
+    monitorTone: monitorStatus.monitorTone,
+    latestEventType,
+    latestInstructionSourceDetail: latestInstructionSourceView.latestInstructionSourceDetail,
+    waitingDurationLabel,
+  });
   return {
     state,
     ...monitorStatus,
@@ -2623,8 +2759,9 @@ function buildProcessStatus(snapshot) {
     stopLimit: formatLoopStopLimit(snapshot.state.budgets || snapshot.config.budgets || {}),
     lastDispatchAt: snapshot.thread.lastDispatchAt || "",
     waitingDurationLabel,
+    ...realtimePhaseView,
     lastCompletionAt: snapshot.thread.lastCompletionAt || "",
-    latestEventType: snapshot.thread.latestEventType || snapshot.state.events?.at(-1)?.type || "",
+    latestEventType,
   };
 }
 
@@ -2742,6 +2879,37 @@ function conversationItemRole(entry = {}) {
   return "codex";
 }
 
+function isSystemTranscriptConversationEntry(entry = {}) {
+  const summary = safeText(entry.summary || entry.note, "");
+  const note = safeText(entry.note, "");
+  if (!summary && !note) {
+    return false;
+  }
+  const text = `${summary}\n${note}`;
+  return (
+    text.includes("已收到停止指令") ||
+    text.includes("已清空未发送的补充引导") ||
+    text.includes("循环已启动") ||
+    text.includes("正在等待第一轮") ||
+    text.includes("正在向绑定的 Codex 线程发送") ||
+    text.includes("manual stop") ||
+    note === "pending_guidance_cleared"
+  );
+}
+
+function isUserFacingConversationRuntimeEvent(event = {}) {
+  const type = safeText(event.type, "").toLowerCase();
+  if (!type) {
+    return false;
+  }
+  return (
+    type.includes("supervisor_review") ||
+    type.includes("codex_reply") ||
+    type.includes("codex_message") ||
+    type.includes("assistant_reply")
+  );
+}
+
 function classifyConversationDetail(text) {
   const value = safeText(text, "");
   if (/截图|\.png|\.jpg|\.jpeg|\.webp|runtime[\\/]+screenshots/i.test(value)) {
@@ -2817,6 +2985,28 @@ function dedupeCopyTargets(targets = []) {
 
 function cleanCopyTargetValue(value) {
   return safeText(value, "").trim().replace(/[，。；、,.;&\s]+$/u, "");
+}
+
+function normalizePendingGuidanceText(text = "") {
+  const normalized = safeText(text, "");
+  if (!normalized) {
+    return "";
+  }
+  const segments = normalized
+    .split(/\r?\n+/u)
+    .map((item) => safeText(item, "").trim())
+    .filter(Boolean);
+  if (segments.length <= 1) {
+    return normalized.trim();
+  }
+  const deduped = [];
+  for (const segment of segments) {
+    if (deduped[deduped.length - 1] === segment) {
+      continue;
+    }
+    deduped.push(segment);
+  }
+  return deduped.join("\n");
 }
 
 function extractConversationCopyTargets(text) {
@@ -3022,7 +3212,7 @@ function buildConversationItems(snapshot, { transcriptEntries = [], runtimeEvent
 
   for (const entry of transcriptEntries || []) {
     const text = safeText(entry.summary || entry.note, "");
-    if (!text) continue;
+    if (!text || isSystemTranscriptConversationEntry(entry)) continue;
     items.push(normalizeConversationItem({
       role: "codex",
       label: entry.activeTask || "本地记录",
@@ -3035,14 +3225,27 @@ function buildConversationItems(snapshot, { transcriptEntries = [], runtimeEvent
   for (const event of runtimeEvents || []) {
     const text = safeText(event.fullDetail || event.detail || event.title, "");
     if (!text) continue;
-    const dispatchLike = /dispatch|sent|followup|guidance/i.test(event.type || "");
+    if (!isUserFacingConversationRuntimeEvent(event)) continue;
     items.push(normalizeConversationItem({
-      role: dispatchLike ? "loop" : "runtime",
+      role: "codex",
       label: event.title || "运行记录",
       at: event.at,
       text,
       preview: text,
-      forceDetail: !dispatchLike,
+      forceDetail: true,
+    }));
+  }
+
+  const pendingGuidanceText = normalizePendingGuidanceText(
+    snapshot?.thread?.pendingUserGuidance,
+  );
+  if (pendingGuidanceText) {
+    items.push(normalizeConversationItem({
+      role: "guidance",
+      label: "你的补充",
+      at: snapshot?.thread?.pendingUserGuidanceAt || snapshot?.thread?.lastUpdatedAt || "",
+      text: pendingGuidanceText,
+      preview: pendingGuidanceText,
     }));
   }
 
@@ -3068,7 +3271,9 @@ export async function exportMobileView(startDir = process.cwd()) {
   const processStatus = buildProcessStatus(snapshot);
   const pendingGuidanceStatus = derivePendingGuidanceStatus(processStatus);
   const supervisor = snapshot.profile?.resolved?.conversation?.supervisor || {};
-  const pendingGuidanceText = safeText(snapshot.thread.pendingUserGuidance, "");
+  const pendingGuidanceText = normalizePendingGuidanceText(
+    snapshot.thread.pendingUserGuidance,
+  );
   const boundThreadLabel = snapshot.thread.threadTitle || snapshot.thread.threadId;
   const bindingNote = safeText(
     snapshot.thread.note,
@@ -3081,7 +3286,7 @@ export async function exportMobileView(startDir = process.cwd()) {
     suggestedAction = "正在收尾，请等待当前轮结束后查看总结。";
   } else if (snapshot.state.mode === "stopped") {
     suggestedAction = snapshot.thread.threadId
-      ? "当前处于监控模式，可以查看记录或手动发送引导；不会自动循环。"
+      ? "当前没有自动循环，处于手动监控模式；可以查看记录或手动发送引导。"
       : "当前已停止，请先绑定线程。";
   } else if (snapshot.state.monitorOnly) {
     if (snapshot.thread.continuationStatus === "dispatching") {
@@ -3134,6 +3339,7 @@ export async function exportMobileView(startDir = process.cwd()) {
       text: pendingGuidanceText,
       preview: buildPromptPreview(pendingGuidanceText),
       hasPending: Boolean(pendingGuidanceText),
+      at: snapshot.thread.pendingUserGuidanceAt || "",
       mergeTiming: "codex_completed",
       mergeTimingLabel: "等 Codex 完成后合并到下一条指令",
       mergeProcessor: "ollama_npc",
@@ -4216,7 +4422,20 @@ export async function savePendingGuidance(startDir = process.cwd(), payload = {}
   const at = nowIso();
   const previousGuidance = safeText(snapshot.thread.pendingUserGuidance, "");
   const replacingGuidance = payload.replace === true;
-  const nextGuidance = replacingGuidance || !previousGuidance ? text : `${previousGuidance}\n${text}`;
+  const previousSegments = previousGuidance
+    .split(/\r?\n+/u)
+    .map((item) => safeText(item, "").trim())
+    .filter(Boolean);
+  const duplicateAppend =
+    !replacingGuidance &&
+    previousSegments.length > 0 &&
+    previousSegments[previousSegments.length - 1] === text;
+  const nextGuidance =
+    replacingGuidance || !previousGuidance || duplicateAppend
+      ? duplicateAppend
+        ? previousGuidance
+        : text
+      : `${previousGuidance}\n${text}`;
   const visibleAction = replacingGuidance ? "已更新补充引导" : "已记录补充引导";
   const guidanceStage = describePendingGuidanceStage(snapshot);
   const nextThread = await persistThreadMirror(
@@ -4241,9 +4460,12 @@ export async function savePendingGuidance(startDir = process.cwd(), payload = {}
     type: replacingGuidance ? "pending_guidance_updated" : "pending_guidance_saved",
     at,
     threadId: nextThread.threadId,
+    source: safeText(payload.source, ""),
+    deviceId: safeText(payload.deviceId, ""),
     preview: buildPromptPreview(text),
     mergedPreview: buildPromptPreview(nextGuidance),
     replacing: replacingGuidance,
+    deduplicated: duplicateAppend,
     guidanceStage: guidanceStage.status,
     statusLabel: guidanceStage.statusLabel,
     statusDetail: guidanceStage.statusDetail,
@@ -4260,7 +4482,7 @@ export async function savePendingGuidance(startDir = process.cwd(), payload = {}
   return readLoopSnapshot(startDir);
 }
 
-export async function clearPendingGuidance(startDir = process.cwd()) {
+export async function clearPendingGuidance(startDir = process.cwd(), payload = {}) {
   const snapshot = await ensureLoopArtifacts(startDir);
   const at = nowIso();
   const clearedGuidance = safeText(snapshot.thread.pendingUserGuidance, "");
@@ -4286,6 +4508,8 @@ export async function clearPendingGuidance(startDir = process.cwd()) {
     type: "pending_guidance_cleared",
     at,
     threadId: nextThread.threadId,
+    source: safeText(payload.source, ""),
+    deviceId: safeText(payload.deviceId, ""),
     preview: buildPromptPreview(clearedGuidance),
   });
   await appendTranscriptEntry(snapshot.paths.transcriptPath, {
@@ -4301,7 +4525,7 @@ export async function clearPendingGuidance(startDir = process.cwd()) {
 export async function requestGracefulStop(startDir = process.cwd(), payload = {}) {
   const snapshot = await ensureLoopArtifacts(startDir);
   const at = nowIso();
-  const reason = payload.reason || "manual stop requested";
+  const reason = payload.reason || "用户手动停止当前循环";
   const finalizingSummary =
     "已收到停止指令，当前循环进入收尾状态。请完成当前批次后输出总结、验证结果和下一步建议。";
   const canStopNow = snapshot.thread.continuationStatus !== "dispatching";
@@ -4673,6 +4897,8 @@ export async function runLoopTurn(
     (promptGenerator.enabled === true || promptGenerator.enabled === "auto") &&
     promptGenerator.provider === "ollama";
   const ollamaAutoMode = promptGenerator.enabled === "auto";
+  const allowTemplateFallback =
+    ollamaAutoMode || snapshot.state.monitorOnly === true;
   if (!useOllamaPrompt) {
     return runLoopTurnLegacy(startDir, { dispatchThreadMessage });
   }
@@ -4691,9 +4917,10 @@ export async function runLoopTurn(
       error?.message,
       "本地模型生成续跑指令失败，请检查 Ollama 和模型配置。",
     );
-    if (ollamaAutoMode) {
-      promptGenerationWarning =
-        "Ollama 暂时不可用，已降级为精简续跑指令。建议启动 Ollama 或在设置里选择可用模型。";
+    if (allowTemplateFallback) {
+      promptGenerationWarning = snapshot.state.monitorOnly
+        ? "Ollama 暂时不可用，这次已自动降级为精简引导发送，不会中断监控模式。建议尽快恢复 Ollama 或检查模型配置。"
+        : "Ollama 暂时不可用，已降级为精简续跑指令。建议启动 Ollama 或在设置里选择可用模型。";
       promptGenerationError = "";
       prompt = fallbackPrompt;
     } else {
@@ -4848,6 +5075,44 @@ export async function createProject(startDir = process.cwd(), payload = {}) {
       taskCount: 0,
       isEmpty: true,
     },
+  };
+}
+
+export async function deleteProject(startDir = process.cwd(), payload = {}) {
+  const layout = await resolveProjectLayout(startDir);
+  const config = await readConfig(layout);
+  const { registry, registryPath } = await loadLoopRegistry(layout, config);
+  const projectName = safeText(payload.projectName || payload.name, "");
+  if (!projectName) {
+    throw new Error("projectName is required");
+  }
+
+  const normalizedName = projectName.toLocaleLowerCase();
+  const targetProject = normalizeRegistryProjects(registry).find(
+    (project) => project.name.toLocaleLowerCase() === normalizedName,
+  );
+  if (!targetProject) {
+    throw new Error(`project not found: ${projectName}`);
+  }
+
+  const hasLoops = registry.loops.some(
+    (loop) => safeText(loop.projectName, "").toLocaleLowerCase() === normalizedName,
+  );
+  if (hasLoops) {
+    throw new Error("cannot delete a project that still contains tasks");
+  }
+
+  const nextRegistry = {
+    ...registry,
+    projects: normalizeRegistryProjects(registry).filter(
+      (project) => project.name.toLocaleLowerCase() !== normalizedName,
+    ),
+  };
+  await writeJson(registryPath, nextRegistry);
+
+  return {
+    ...summarizeLoopRegistry(nextRegistry),
+    deletedProjectName: targetProject.name,
   };
 }
 
@@ -5014,10 +5279,17 @@ export async function getLoopCreationAssistantState(startDir = process.cwd()) {
   return state;
 }
 
-export async function restartLoopCreationAssistant(startDir = process.cwd()) {
+export async function restartLoopCreationAssistant(startDir = process.cwd(), payload = {}) {
   const layout = await resolveProjectLayout(startDir);
   const { assistantPath } = await loadLoopAssistantState(layout);
-  return saveLoopAssistantState(assistantPath, createInitialLoopAssistantState());
+  return saveLoopAssistantState(
+    assistantPath,
+    createInitialLoopAssistantState({
+      workspaceRoot: payload.workspaceRoot,
+      projectName: payload.projectName,
+      name: payload.name,
+    }),
+  );
 }
 
 export async function goBackLoopCreationAssistant(startDir = process.cwd()) {

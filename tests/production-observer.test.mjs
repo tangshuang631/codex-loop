@@ -889,3 +889,64 @@ test("production observer treats dispatched waiting events as waiting instead of
   assert.equal(report.diagnosis.category, "codex_waiting_after_delivery");
   assert.match(report.summary, /正在等待 Codex/);
 });
+
+test("production observer treats fresh dispatching-only events as in-flight instead of failed", async () => {
+  const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), "codex-loop-observer-"));
+  const logDir = path.join(tempRoot, "runtime", "dispatching-inflight-loop", "logs");
+  await fs.mkdir(logDir, { recursive: true });
+  await fs.writeFile(
+    path.join(logDir, "events.jsonl"),
+    [
+      { type: "run_started_from_console", at: "2026-06-10T14:00:00.000Z" },
+      {
+        type: "codex_followup_dispatching",
+        at: "2026-06-10T14:01:00.000Z",
+        summary: "正在通过 Codex 桌面端原生链路发送指令，等待确认送达。",
+      },
+    ].map((event) => JSON.stringify(event)).join("\n") + "\n",
+    "utf8",
+  );
+
+  const report = await buildProductionObservation({
+    root: tempRoot,
+    runId: "dispatching-inflight-loop",
+    now: new Date("2026-06-10T14:01:30.000Z"),
+  });
+
+  assert.equal(report.status, "waiting");
+  assert.equal(report.diagnosis.category, "dispatch_in_progress");
+  assert.equal(report.dispatch.dispatchMinutes, 1);
+  assert.equal(report.dispatch.needsDeliveryCheck, false);
+  assert.match(report.summary, /刚进入发送阶段|等待桌面端确认送达/);
+  assert.match(report.nextAction, /先等桌面端确认送达/);
+});
+
+test("production observer escalates dispatching-only events after delivery wait threshold", async () => {
+  const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), "codex-loop-observer-"));
+  const logDir = path.join(tempRoot, "runtime", "dispatching-stuck-loop", "logs");
+  await fs.mkdir(logDir, { recursive: true });
+  await fs.writeFile(
+    path.join(logDir, "events.jsonl"),
+    [
+      { type: "run_started_from_console", at: "2026-06-10T14:00:00.000Z" },
+      {
+        type: "codex_followup_dispatching",
+        at: "2026-06-10T14:01:00.000Z",
+        summary: "正在通过 Codex 桌面端原生链路发送指令，等待确认送达。",
+      },
+    ].map((event) => JSON.stringify(event)).join("\n") + "\n",
+    "utf8",
+  );
+
+  const report = await buildProductionObservation({
+    root: tempRoot,
+    runId: "dispatching-stuck-loop",
+    now: new Date("2026-06-10T14:05:30.000Z"),
+  });
+
+  assert.equal(report.status, "attention");
+  assert.equal(report.diagnosis.category, "dispatch_failed_before_delivery");
+  assert.equal(report.dispatch.needsDeliveryCheck, true);
+  assert.match(report.summary, /仍停留在发送阶段|没有观察到已送达/);
+  assert.match(report.nextAction, /桌面端原生发送入口|不要连续重复发送/);
+});
