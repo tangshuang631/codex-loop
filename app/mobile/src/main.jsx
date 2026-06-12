@@ -865,6 +865,7 @@ function PairingView({ onPaired }) {
   const [scannerSupported] = useState(canUseBarcodeDetector());
   const [scannerState, setScannerState] = useState("idle");
   const autoConfirmAttemptedRef = useRef(false);
+  const fallbackDetailsRef = useRef(null);
   const videoRef = useRef(null);
   const scannerStreamRef = useRef(null);
   const scannerFrameRef = useRef(0);
@@ -882,7 +883,8 @@ function PairingView({ onPaired }) {
 
   async function confirmPairingWith(sessionValue, codeValue, { auto = false } = {}) {
     if (!sessionValue || !codeValue) {
-      setMessage("请粘贴桌面端显示的绑定内容，或手动输入配对会话和配对码。");
+      fallbackDetailsRef.current?.setAttribute("open", "true");
+      setMessage("请先扫描二维码；如果不能扫码，请展开备用方式并填写绑定信息。");
       return;
     }
 
@@ -954,7 +956,7 @@ function PairingView({ onPaired }) {
     async function startScanner() {
       if (!navigator.mediaDevices?.getUserMedia) {
         setScannerState("unsupported");
-        setMessage("当前浏览器不支持相机扫码，请改用备用绑定方式。");
+        setMessage("当前浏览器不支持相机扫码，请使用无法扫码时的备用方式。");
         return;
       }
 
@@ -1001,7 +1003,7 @@ function PairingView({ onPaired }) {
             }
           } catch {
             setScannerState("error");
-            setMessage("扫码暂时失败，请稍后重试或改用备用绑定方式。");
+            setMessage("扫码暂时失败，请稍后重试，或使用无法扫码时的备用方式。");
             setScannerOpen(false);
             return;
           }
@@ -1015,7 +1017,7 @@ function PairingView({ onPaired }) {
         });
       } catch {
         setScannerState("denied");
-        setMessage("无法打开相机，请允许相机权限或改用备用绑定方式。");
+        setMessage("无法打开相机，请允许相机权限，或使用无法扫码时的备用方式。");
         setScannerOpen(false);
       }
     }
@@ -1039,6 +1041,12 @@ function PairingView({ onPaired }) {
     await confirmPairingWith(finalSessionId, finalPairingCode);
   }
 
+  function openFallbackPairing() {
+    setScannerOpen(false);
+    fallbackDetailsRef.current?.setAttribute("open", "true");
+    fallbackDetailsRef.current?.scrollIntoView({ block: "nearest", behavior: "smooth" });
+  }
+
   return (
     <main className="mobile-shell pairing-shell">
       <section className="hero">
@@ -1059,14 +1067,14 @@ function PairingView({ onPaired }) {
           >
             扫描二维码绑定
           </button>
-          <button type="button" className="quiet" onClick={() => setScannerOpen(false)}>
-            备用绑定
+          <button type="button" className="quiet" onClick={openFallbackPairing}>
+            无法扫码
           </button>
         </div>
         <p className="pairing-primary-hint">
           {scannerSupported
             ? "推荐直接扫描桌面端“移动端使用”里生成的二维码。"
-            : "当前浏览器暂不支持相机扫码，请改用备用绑定方式或打开绑定链接。"}
+            : "当前浏览器暂不支持相机扫码，请使用桌面端显示的绑定链接。"}
         </p>
         {scannerOpen ? (
           <div className="pairing-scanner">
@@ -1083,24 +1091,25 @@ function PairingView({ onPaired }) {
             <video ref={videoRef} className="pairing-scanner-video" playsInline muted />
           </div>
         ) : null}
-        <details className="pairing-fallback">
-          <summary>备用绑定方式</summary>
+        <details className="pairing-fallback" ref={fallbackDetailsRef}>
+          <summary>无法扫码时使用</summary>
+          <p>只有在相机不可用或扫码失败时才需要填写这里。</p>
           <label>
-            <span>绑定内容</span>
+            <span>绑定链接或二维码内容</span>
             <textarea
               value={payload}
               rows={5}
-              placeholder="粘贴桌面端二维码里的绑定内容，或使用绑定链接自动带入。"
+              placeholder="粘贴桌面端“移动端使用”里显示的绑定链接或二维码内容。"
               onChange={(event) => setPayload(event.target.value)}
             />
           </label>
           <div className="pairing-grid">
             <label>
-              <span>配对会话</span>
+              <span>会话编号</span>
               <input value={sessionId} onChange={(event) => setSessionId(event.target.value)} />
             </label>
             <label>
-              <span>配对码</span>
+              <span>确认码</span>
               <input value={pairingCode} onChange={(event) => setPairingCode(event.target.value)} />
             </label>
           </div>

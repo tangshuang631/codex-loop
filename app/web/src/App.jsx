@@ -1345,7 +1345,7 @@ function MobileTaskApp() {
 
   async function confirmPairing() {
     if (!effectiveSessionId || !effectivePairingCode) {
-      setErrorText("请粘贴桌面端显示的绑定内容，或输入配对会话和配对码。");
+      setErrorText("请粘贴桌面端显示的绑定链接或二维码内容；如果无法自动识别，再填写会话编号和确认码。");
       return;
     }
 
@@ -1503,22 +1503,22 @@ function MobileTaskApp() {
       {!mobileDevice ? (
         <section className="mobile-task-pairing">
           <h2>绑定这台电脑</h2>
-          <p>在桌面控制台生成扫码绑定后，把绑定内容粘贴到这里；绑定后下次不用重复扫码。</p>
+          <p>优先用独立移动端 App 扫描桌面端二维码；当前页面可作为无法扫码时的备用绑定入口。</p>
           <textarea
             rows={4}
             value={pairingPayload}
-            placeholder="粘贴桌面端二维码里的绑定内容，或使用绑定链接自动带入。"
+            placeholder="粘贴桌面端“移动端使用”里显示的绑定链接或二维码内容。"
             onChange={(event) => setPairingPayload(event.target.value)}
           />
           <div className="mobile-task-pairing-grid">
             <input
               value={sessionId}
-              placeholder="配对会话"
+              placeholder="会话编号"
               onChange={(event) => setSessionId(event.target.value)}
             />
             <input
               value={pairingCode}
-              placeholder="配对码"
+              placeholder="确认码"
               onChange={(event) => setPairingCode(event.target.value)}
             />
           </div>

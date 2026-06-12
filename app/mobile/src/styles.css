@@ -225,6 +225,13 @@ label span,
   display: none;
 }
 
+.pairing-fallback p {
+  margin: 0;
+  color: #73756e;
+  font-size: 0.8rem;
+  line-height: 1.6;
+}
+
 .pairing-grid {
   display: grid;
   gap: 0.7rem;

@@ -875,6 +875,12 @@ test("mobile route renders a protected task app with durable pairing credentials
   assert.match(appSource, /手机已绑定/);
   assert.match(appSource, /补充你要说的话/);
   assert.match(appSource, /发送引导/);
+  assert.match(appSource, /备用绑定入口/);
+  assert.match(appSource, /绑定链接或二维码内容/);
+  assert.match(appSource, /会话编号/);
+  assert.match(appSource, /确认码/);
+  assert.doesNotMatch(appSource, /placeholder="配对会话"/);
+  assert.doesNotMatch(appSource, /placeholder="配对码"/);
   assert.match(appSource, /MobileConversationTimeline/);
   assert.match(stylesSource, /\.mobile-task-shell/);
   assert.match(stylesSource, /\.mobile-task-composer/);
