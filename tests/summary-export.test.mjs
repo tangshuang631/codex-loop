@@ -389,7 +389,7 @@ test("exportMobileView returns a direct process status for production monitoring
   assert.match(mobile.processStatus.pendingGuidancePreview, /\u79fb\u52a8\u7aef\u8fdb\u7a0b\u72b6\u6001/);
   assert.equal(mobile.processStatus.pendingGuidanceMergeTiming, "codex_completed");
   assert.equal(mobile.processStatus.pendingGuidanceMergeProcessor, "ollama_npc");
-  assert.match(mobile.processStatus.pendingGuidanceMergeLabel, /本地模型|NPC|Ollama/);
+  assert.match(mobile.processStatus.pendingGuidanceMergeLabel, /本地监督流程/);
   assert.match(mobile.processStatus.pendingGuidanceMergeDetail, /Codex.*完成|合并/);
   assert.match(mobile.processStatus.stopLimit, /\u6700\u957f.*\u5206\u949f/);
   assert.match(mobile.processStatus.stopLimit, /token/);
@@ -620,7 +620,7 @@ test("exportMobileView explains why the loop is waiting before sending again", a
   assert.match(mobile.processStatus.nextAction, /等待.*完成|不要.*发送|查看.*记录/);
   assert.equal(mobile.pendingGuidance.status, "waiting_codex");
   assert.match(mobile.pendingGuidance.statusLabel, /等待 Codex 完成/);
-  assert.match(mobile.pendingGuidance.statusDetail, /Codex.*当前轮|完成后.*本地模型|NPC/);
+  assert.match(mobile.pendingGuidance.statusDetail, /Codex.*当前轮|完成后.*本地监督流程/);
   assert.match(mobile.pendingGuidance.userMessage, /等待 Codex 完成|不会打断/);
   assert.match(
     mobile.runtimeEvents.map((event) => `${event.title} ${event.detail}`).join("\n"),
@@ -923,9 +923,9 @@ test("exportMobileView gives clear mobile guidance while supervisor review is in
   assert.equal(mobile.processStatus.state, "supervisor_reviewing");
   assert.match(mobile.suggestedAction, /监督复盘中|本地模型|等待.*下一步/);
   assert.equal(mobile.pendingGuidance.status, "waiting_npc");
-  assert.match(mobile.pendingGuidance.statusLabel, /等待 NPC 复盘/);
-  assert.match(mobile.pendingGuidance.statusDetail, /本地模型|NPC|复盘/);
-  assert.match(mobile.pendingGuidance.userMessage, /等待.*NPC|复盘后.*合并/);
+  assert.match(mobile.pendingGuidance.statusLabel, /等待监督复盘/);
+  assert.match(mobile.pendingGuidance.statusDetail, /本地监督流程|复盘/);
+  assert.match(mobile.pendingGuidance.userMessage, /等待.*监督复盘|复盘后.*合并/);
 
   releaseReview();
   await reviewPromise;
@@ -962,13 +962,13 @@ test("exportMobileView exposes customized npc rules and pending mobile guidance"
   assert.match(mobile.pendingGuidance.at, /^20\d\d-/);
   assert.equal(mobile.pendingGuidance.mergeTiming, "codex_completed");
   assert.equal(mobile.pendingGuidance.mergeProcessor, "ollama_npc");
-  assert.match(mobile.pendingGuidance.mergeProcessorLabel, /本地模型|NPC|Ollama/);
+  assert.match(mobile.pendingGuidance.mergeProcessorLabel, /本地监督流程/);
   assert.equal(mobile.pendingGuidance.status, "ready_to_merge");
-  assert.match(mobile.pendingGuidance.statusLabel, /等待本地模型|NPC|合并/);
-  assert.match(mobile.pendingGuidance.statusDetail, /Codex.*空闲|可以.*下一条|本地模型|NPC/);
+  assert.match(mobile.pendingGuidance.statusLabel, /等待本地监督流程合并/);
+  assert.match(mobile.pendingGuidance.statusDetail, /Codex.*空闲|可以.*下一条|本地监督流程/);
   assert.match(mobile.pendingGuidance.actionLabel, /可发送|等待发送/);
   assert.match(mobile.pendingGuidance.userMessage, /Codex.*完成/);
-  assert.match(mobile.pendingGuidance.userMessage, /本地模型|NPC|Ollama/);
+  assert.match(mobile.pendingGuidance.userMessage, /本地监督流程/);
   assert.ok(
     mobile.conversationItems.some(
       (item) =>

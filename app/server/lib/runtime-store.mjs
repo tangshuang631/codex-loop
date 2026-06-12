@@ -314,7 +314,7 @@ function readablePromptGeneratorDetail(event = {}) {
   const promptGenerator = safeText(event.promptGenerator, "");
   const warning = safeText(event.promptGenerationWarning, "");
   if (promptGenerator === "ollama") {
-    return "本次指令由本地模型 / NPC 生成。";
+    return "本次指令由本地监督流程生成。";
   }
   if (promptGenerator === "template" && warning) {
     return "模板降级：" + warning;
@@ -2449,9 +2449,9 @@ function deriveProcessRealtimePhaseView({
   if (state === "supervisor_reviewing") {
     return {
       realtimePhaseKey: "supervisor_reviewing",
-      realtimePhaseLabel: "NPC 复盘中",
+      realtimePhaseLabel: "监督复盘中",
       realtimePhaseDetail:
-        cleanDetail || "本地模型 / NPC 正在结合最新回复决定下一步。",
+        cleanDetail || "本地监督流程正在结合最新回复决定下一步。",
       realtimePhaseTone: monitorTone || "active",
       realtimeRecentActionLabel: "监督复盘中",
       realtimeRecentActionDetail: cleanNextAction || cleanDetail,
@@ -2734,7 +2734,7 @@ function buildProcessStatus(snapshot) {
     pendingGuidancePreview: buildPromptPreview(snapshot.thread.pendingUserGuidance || ""),
     pendingGuidanceMergeTiming: hasPendingGuidance ? "codex_completed" : "",
     pendingGuidanceMergeProcessor: hasPendingGuidance ? "ollama_npc" : "",
-    pendingGuidanceMergeLabel: hasPendingGuidance ? "等 Codex 完成后由本地模型 / NPC 合并" : "",
+    pendingGuidanceMergeLabel: hasPendingGuidance ? "等 Codex 完成后由本地监督流程合并" : "",
     pendingGuidanceMergeDetail: hasPendingGuidance
       ? "这条补充不会打断当前轮，会等 Codex 完成后结合最新回复合并进下一条指令。"
       : "",
@@ -3130,7 +3130,7 @@ function derivePendingGuidanceStatus(processStatus = {}) {
     return {
       status: "waiting_codex",
       statusLabel: "等待 Codex 完成",
-      statusDetail: "Codex 正在处理当前轮，补充会先保存，完成后再交给本地模型 / NPC 合并。",
+      statusDetail: "Codex 正在处理当前轮，补充会先保存，完成后再交给本地监督流程合并。",
       actionLabel: "等待完成",
       userMessage: "等待 Codex 完成当前轮；你的补充已保存，不会打断正在执行的任务。",
     };
@@ -3138,19 +3138,19 @@ function derivePendingGuidanceStatus(processStatus = {}) {
   if (state === "supervisor_reviewing") {
     return {
       status: "waiting_npc",
-      statusLabel: "等待 NPC 复盘",
-      statusDetail: "本地模型 / NPC 正在复盘 Codex 回复，补充会在复盘后合并进下一条指令。",
+      statusLabel: "等待监督复盘",
+      statusDetail: "本地监督流程正在复盘 Codex 回复，补充会在复盘后合并进下一条指令。",
       actionLabel: "等待复盘",
-      userMessage: "正在等待 NPC 复盘；复盘后会把你的补充合并进下一条指令。",
+      userMessage: "正在等待监督复盘；复盘后会把你的补充合并进下一条指令。",
     };
   }
   if (processStatus.canSendNextTurn) {
     return {
       status: "ready_to_merge",
-      statusLabel: "等待本地模型 / NPC 合并",
-      statusDetail: "Codex 当前空闲，可以由本地模型 / NPC 结合最新回复和你的补充生成下一条指令。",
+      statusLabel: "等待本地监督流程合并",
+      statusDetail: "Codex 当前空闲，可以由本地监督流程结合最新回复和你的补充生成下一条指令。",
       actionLabel: "可发送",
-      userMessage: "Codex 已完成当前任务，会交给本地模型 / NPC 结合 Codex 回复合并成下一条指令。",
+      userMessage: "Codex 已完成当前任务，会交给本地监督流程结合 Codex 回复合并成下一条指令。",
     };
   }
   const blockedDetail = processStatus.holdReason || processStatus.detail || "当前状态不适合发送下一条指令。";
@@ -3367,11 +3367,11 @@ export async function exportMobileView(startDir = process.cwd()) {
       mergeTiming: "codex_completed",
       mergeTimingLabel: "等 Codex 完成后合并到下一条指令",
       mergeProcessor: "ollama_npc",
-      mergeProcessorLabel: "本地模型 / NPC 合并",
+      mergeProcessorLabel: "本地监督流程合并",
       ...pendingGuidanceStatus,
       userMessage:
         pendingGuidanceStatus.userMessage ||
-        "会等 Codex 完成当前任务后，再交给本地模型 / NPC 结合 Codex 回复合并成下一条指令。",
+        "会等 Codex 完成当前任务后，再交给本地监督流程结合 Codex 回复合并成下一条指令。",
     },
     codexConversation: snapshot.codexConversation,
     bindingNote,
@@ -4419,19 +4419,19 @@ function describePendingGuidanceStage(snapshot = {}) {
     return {
       status: "waiting_codex",
       statusLabel: "等待 Codex 完成",
-      statusDetail: "补充已保存，不会打断当前轮；Codex 完成后再交给本地模型 / NPC 合并。",
+      statusDetail: "补充已保存，不会打断当前轮；Codex 完成后再交给本地监督流程合并。",
     };
   }
   if (continuationStatus === "reviewing") {
     return {
       status: "waiting_npc",
-      statusLabel: "等待 NPC 复盘",
-      statusDetail: "补充已保存，会在本地模型 / NPC 复盘后合并进下一条指令。",
+      statusLabel: "等待监督复盘",
+      statusDetail: "补充已保存，会在本地监督流程复盘后合并进下一条指令。",
     };
   }
   return {
     status: "ready_to_merge",
-    statusLabel: "等待本地模型 / NPC 合并",
+    statusLabel: "等待本地监督流程合并",
     statusDetail: "Codex 当前空闲，下一次发送时会结合最新回复和这条补充生成指令。",
   };
 }

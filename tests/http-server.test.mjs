@@ -862,7 +862,7 @@ test("handler lets paired mobile devices save next-turn guidance", async () => {
             preview: body.text,
             hasPending: true,
             status: "ready_to_merge",
-            statusLabel: "等待本地模型 / NPC 合并",
+            statusLabel: "等待本地监督流程合并",
           },
         };
       },
@@ -945,7 +945,7 @@ test("handler lets mobile guidance writes show up in the next paired mobile view
             preview: body.text,
             hasPending: true,
             status: "ready_to_merge",
-            statusLabel: "等待本地模型 / NPC 合并",
+            statusLabel: "等待本地监督流程合并",
           },
         };
       },
@@ -964,7 +964,7 @@ test("handler lets mobile guidance writes show up in the next paired mobile view
               preview: pendingText,
               hasPending: true,
               status: "ready_to_merge",
-              statusLabel: "等待本地模型 / NPC 合并",
+              statusLabel: "等待本地监督流程合并",
             }
           : null,
       }),
@@ -979,7 +979,7 @@ test("handler lets mobile guidance writes show up in the next paired mobile view
           preview: pendingText,
           hasPending: Boolean(pendingText),
           status: "ready_to_merge",
-          statusLabel: "等待本地模型 / NPC 合并",
+          statusLabel: "等待本地监督流程合并",
         },
         conversationItems: pendingText
           ? [
@@ -1069,7 +1069,7 @@ test("handler keeps mobile guidance saved but unsent when production preflight b
             preview: body.text,
             hasPending: true,
             status: "ready_to_merge",
-            statusLabel: "等待本地模型 / NPC 合并",
+            statusLabel: "等待本地监督流程合并",
           },
         };
       },
@@ -1139,7 +1139,7 @@ test("handler keeps mobile guidance queued when Codex is still working", async (
             preview: body.text,
             hasPending: true,
             status: "ready_to_merge",
-            statusLabel: "等待本地模型 / NPC 合并",
+            statusLabel: "等待本地监督流程合并",
           },
         };
       },
@@ -1208,7 +1208,7 @@ test("handler keeps mobile guidance queued when local model dispatch is temporar
             preview: body.text,
             hasPending: true,
             status: "ready_to_merge",
-            statusLabel: "等待本地模型 / NPC 合并",
+            statusLabel: "等待本地监督流程合并",
           },
         };
       },
@@ -1523,7 +1523,7 @@ test("handler builds mobile guidance response from exported mobile view when sav
             hasPending: true,
             at: "2026-06-11T10:10:00.000Z",
             status: "ready_to_merge",
-            statusLabel: "等待本地模型 / NPC 合并",
+            statusLabel: "等待本地监督流程合并",
             statusDetail: "Codex 当前空闲，下一次发送时会结合最新回复和这条补充生成指令。",
             userMessage: "已保存补充引导，会等 Codex 完成后合并。",
             actionLabel: "可发送",
@@ -2583,7 +2583,7 @@ test("handler dispatches pending guidance route", async () => {
             preview: body.text,
             hasPending: true,
             status: "ready_to_merge",
-            statusLabel: "等待本地模型 / NPC 合并",
+            statusLabel: "等待本地监督流程合并",
           },
         };
       },
