@@ -899,6 +899,28 @@ label {
   backdrop-filter: blur(18px);
 }
 
+.composer-status-line {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.75rem;
+  color: #75766f;
+  font-size: 0.74rem;
+  line-height: 1.45;
+}
+
+.composer-status-line span {
+  flex: none;
+  color: #53554f;
+  font-weight: 700;
+}
+
+.composer-status-line strong {
+  color: #7a7d74;
+  font-weight: 500;
+  text-align: right;
+}
+
 .composer-actions {
   display: flex;
   justify-content: flex-end;

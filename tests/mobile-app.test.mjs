@@ -125,13 +125,26 @@ test("mobile app caches the latest successful snapshot for refresh and short dis
 
 test("mobile app treats cached pending guidance as read-only until live sync returns", async () => {
   const source = await read("app/mobile/src/main.jsx");
+  const styleSource = await read("app/mobile/src/styles.css");
 
   assert.match(source, /const \[snapshotSource, setSnapshotSource\] = useState\("live"\)/);
   assert.match(source, /const showingCachedSnapshot = snapshotSource === "cached" && connectionState !== "ready"/);
   assert.match(source, /当前显示的是最近一次缓存结果，恢复连接后会以服务端状态为准/);
+  assert.match(source, /当前是离线近况，恢复实时连接后才能发送或修改引导。/);
   assert.match(source, /disabled=\{submitting \|\| showingCachedSnapshot\}/);
   assert.match(source, /disabled=\{showingCachedSnapshot\}/);
   assert.match(source, /textarea[\s\S]*disabled=\{disabled\}/);
+  assert.match(source, /aria-label=\{editing \? "修改待合并引导" : "填写下一步引导"\}/);
+  assert.match(styleSource, /\.composer-status-line/);
+});
+
+test("mobile app composer explains edit and next-guidance modes in product language", async () => {
+  const source = await read("app/mobile/src/main.jsx");
+
+  assert.match(source, /editing\s*\?\s*"正在修改待合并引导，保存后仍会等 Codex 完成再合并。"/);
+  assert.match(source, /"写下下一步补充；系统会等 Codex 完成后再合并，不会打断当前任务。"/);
+  assert.match(source, /<span>\{editing \? "修改引导" : "下一步引导"\}<\/span>/);
+  assert.match(source, /placeholder="补充你要说的话，等 Codex 完成后合并，不会打断当前任务"/);
 });
 
 test("mobile app shows a compact connection badge for live and cached monitoring states", async () => {

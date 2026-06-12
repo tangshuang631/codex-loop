@@ -1683,13 +1683,24 @@ function PendingGuidance({ pending, onEdit, onClear, disabled }) {
 }
 
 function GuidanceComposer({ value, setValue, editing, submitting, disabled, onCancel, onSubmit }) {
+  const helperText = disabled
+    ? "当前是离线近况，恢复实时连接后才能发送或修改引导。"
+    : editing
+      ? "正在修改待合并引导，保存后仍会等 Codex 完成再合并。"
+      : "写下下一步补充；系统会等 Codex 完成后再合并，不会打断当前任务。";
+
   return (
     <form className="composer" onSubmit={onSubmit}>
+      <div className="composer-status-line">
+        <span>{editing ? "修改引导" : "下一步引导"}</span>
+        <strong>{helperText}</strong>
+      </div>
       <textarea
         value={value}
         rows={3}
-        placeholder="补充你要说的话，等 Codex 完成后合并，会等 Codex 当前任务完成再发送"
+        placeholder="补充你要说的话，等 Codex 完成后合并，不会打断当前任务"
         disabled={disabled}
+        aria-label={editing ? "修改待合并引导" : "填写下一步引导"}
         onChange={(event) => setValue(event.target.value)}
       />
       <div className="composer-actions">
