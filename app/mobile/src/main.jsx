@@ -208,6 +208,15 @@ function asText(value, fallback = "") {
   return typeof value === "string" && value.trim() ? value.trim() : fallback;
 }
 
+function presentMonitorText(value, fallback = "") {
+  const text = asText(value, fallback);
+  if (!text) return "";
+  return text
+    .replace(/本地模型\s*\/\s*NPC/g, "本地模型监督流程")
+    .replace(/NPC\s*\/\s*Ollama/g, "本地模型监督流程")
+    .replace(/NPC/g, "监督流程");
+}
+
 function copyText(text) {
   const value = asText(text);
   if (!value) return;
@@ -423,7 +432,7 @@ function presentProcessStageLabel(state = "") {
   const labels = {
     waiting_next_turn: "等待下一轮",
     codex_working: "Codex 处理中",
-    supervisor_reviewing: "NPC 复盘中",
+    supervisor_reviewing: "监督复盘中",
     monitoring: "监控模式",
     budget_blocked: "已到限制",
     health_blocked: "需先处理问题",
@@ -472,11 +481,11 @@ function deriveRealtimeStageSnapshot(mobileView) {
 
   if (process.state === "supervisor_reviewing") {
     return {
-      label: "NPC 复盘中",
+      label: "监督复盘中",
       detail:
-        asText(process.detail) ||
-        latestEventDetail ||
-        "本地模型 / NPC 正在结合最新回复决定下一步。",
+        presentMonitorText(process.detail) ||
+        presentMonitorText(latestEventDetail) ||
+        "本地模型监督流程正在结合最新回复决定下一步。",
       tone: process.monitorTone || "active",
       eventLabel: latestEventTitle || "监督复盘中",
       eventDetail: latestEventDetail || asText(process.nextAction),
@@ -488,13 +497,13 @@ function deriveRealtimeStageSnapshot(mobileView) {
       return {
         label: "刚发出，待送达确认",
         detail:
-          latestEventDetail ||
-          promptGenerationWarning ||
+          presentMonitorText(latestEventDetail) ||
+          presentMonitorText(promptGenerationWarning) ||
           "这一条引导已经开始发送，正在等桌面端确认已送达 Codex。",
         tone: "queued",
         eventLabel: latestEventTitle || "正在发送下一轮指令",
         eventDetail:
-          latestEventDetail ||
+          presentMonitorText(latestEventDetail) ||
           "先不要重复发送，等桌面端确认送达后再继续观察。",
       };
     }
@@ -506,13 +515,13 @@ function deriveRealtimeStageSnapshot(mobileView) {
       return {
         label: "已送达，等 Codex 完成",
         detail:
-          latestEventDetail ||
-          asText(process.detail) ||
+          presentMonitorText(latestEventDetail) ||
+          presentMonitorText(process.detail) ||
           `${waitingDurationLabel ? `${waitingDurationLabel}。` : ""}上一条已经送达，正在等 Codex 完成当前轮。`,
         tone: process.monitorTone || "active",
         eventLabel: latestEventTitle || "正在等待 Codex 回复",
         eventDetail:
-          latestEventDetail ||
+          presentMonitorText(latestEventDetail) ||
           "这一轮已经送达，不会追加发送，避免打断 Codex。",
       };
     }
@@ -520,12 +529,12 @@ function deriveRealtimeStageSnapshot(mobileView) {
     return {
       label: "Codex 处理中",
       detail:
-        asText(process.detail) ||
-        latestEventDetail ||
+        presentMonitorText(process.detail) ||
+        presentMonitorText(latestEventDetail) ||
         "Codex 正在处理当前轮，完成前不会追加发送。",
       tone: process.monitorTone || "active",
       eventLabel: latestEventTitle || "Codex 正在处理",
-      eventDetail: latestEventDetail || asText(process.nextAction),
+      eventDetail: presentMonitorText(latestEventDetail) || presentMonitorText(process.nextAction),
     };
   }
 
@@ -533,14 +542,14 @@ function deriveRealtimeStageSnapshot(mobileView) {
     return {
       label: "可继续下一轮",
       detail:
-        asText(process.detail) ||
-        latestEventDetail ||
+        presentMonitorText(process.detail) ||
+        presentMonitorText(latestEventDetail) ||
         "当前没有阻塞，可以继续观察或准备下一轮引导。",
       tone: process.monitorTone || "ready",
       eventLabel: latestEventTitle || asText(process.headline) || "等待下一轮",
       eventDetail:
-        latestEventDetail ||
-        asText(process.nextAction) ||
+        presentMonitorText(latestEventDetail) ||
+        presentMonitorText(process.nextAction) ||
         "确认方向后再决定是否继续发送。",
     };
   }
@@ -551,17 +560,17 @@ function deriveRealtimeStageSnapshot(mobileView) {
     tone: process.monitorTone || "soft",
     eventLabel: latestEventTitle || asText(process.headline) || "已同步最近动作",
     eventDetail:
-      latestEventDetail ||
-      asText(process.latestEventType) ||
+      presentMonitorText(latestEventDetail) ||
+      presentMonitorText(process.latestEventType) ||
       `最近更新 ${formatTime(process.lastDispatchAt || mobileView?.thread?.lastDispatchAt)}`,
   };
 }
 
 function presentProcessStageDetail(process = {}) {
   return (
-    asText(process.detail) ||
-    asText(process.holdReason) ||
-    asText(process.nextAction) ||
+    presentMonitorText(process.detail) ||
+    presentMonitorText(process.holdReason) ||
+    presentMonitorText(process.nextAction) ||
     "正在同步这一轮的最新进展。"
   );
 }
@@ -573,8 +582,8 @@ function buildRealtimeStageRows(mobileView) {
   const rows = [
     {
       label: "当前阶段",
-      value: stageSnapshot.label,
-      detail: stageSnapshot.detail,
+      value: presentMonitorText(stageSnapshot.label),
+      detail: presentMonitorText(stageSnapshot.detail),
       tone: stageSnapshot.tone,
     },
   ];
@@ -582,8 +591,8 @@ function buildRealtimeStageRows(mobileView) {
   if (process.latestEventType || process.lastDispatchAt || mobileView?.thread?.lastDispatchAt) {
     rows.push({
       label: "最近动作",
-      value: stageSnapshot.eventLabel,
-      detail: stageSnapshot.eventDetail,
+      value: presentMonitorText(stageSnapshot.eventLabel),
+      detail: presentMonitorText(stageSnapshot.eventDetail),
       tone: stageSnapshot.tone,
     });
   }
@@ -593,9 +602,9 @@ function buildRealtimeStageRows(mobileView) {
       label: "补充引导",
       value: asText(pending.statusLabel, "待下一轮合并"),
       detail:
-        asText(pending.userMessage) ||
-        asText(pending.statusDetail) ||
-        "会等 Codex 当前轮完成后再交给本地模型 / NPC 合并。",
+        presentMonitorText(pending.userMessage) ||
+        presentMonitorText(pending.statusDetail) ||
+        "会等 Codex 当前轮完成后再交给本地模型监督流程合并。",
       tone: "queued",
     });
   } else if (process.lastMergedGuidanceStatus) {
@@ -617,10 +626,10 @@ function buildRealtimeEvents(mobileView) {
   const events = Array.isArray(mobileView?.runtimeEvents) ? mobileView.runtimeEvents.filter(Boolean) : [];
   return events.slice(0, 3).map((event, index) => ({
     id: `${event.at || index}-${event.type || "event"}`,
-    title: asText(event.title, "最近进展"),
+    title: presentMonitorText(event.title, "最近进展"),
     detail:
-      asText(event.detail) ||
-      asText(event.fullDetail) ||
+      presentMonitorText(event.detail) ||
+      presentMonitorText(event.fullDetail) ||
       "等待下一条进展。",
     at: event.at,
     tone: event.tone || "normal",
@@ -1174,7 +1183,7 @@ function StatusBlock({ mobileView, productionStatus, productionPreflight, status
     { label: "确认目标", detail: "确认当前任务、工作区和线程就是要继续验证的对象。" },
     { label: "发送一轮", detail: "只触发一次真实循环或手动发送一次引导，不连续追发。" },
     { label: "等待 Codex 完成", detail: "Codex 未完成前不要追加发送。" },
-    { label: "NPC 复盘", detail: "等待产品经理、测试人员、真实用户视角完成复盘。" },
+    { label: "监督复盘", detail: "等待产品经理、测试人员、真实用户视角完成复盘。" },
     { label: "重新检查", detail: "重新查看生产状态，确认真实闭环是否达到 2 轮。" },
   ];
   const evidencePlanSteps = Array.isArray(closedLoopEvidencePlan.steps) && closedLoopEvidencePlan.steps.length
@@ -1265,7 +1274,7 @@ function StatusBlock({ mobileView, productionStatus, productionPreflight, status
     productionStatus?.guidanceEvidence
       ? [
           "补充合并证据",
-          `${guidanceEvidenceCount}/${guidanceEvidenceTarget} · ${guidanceEvidenceText}。${guidanceEvidence.summary || "确认用户补充引导会等 Codex 完成后由本地模型 / NPC 合并。"}`,
+          `${guidanceEvidenceCount}/${guidanceEvidenceTarget} · ${presentMonitorText(guidanceEvidenceText)}。${presentMonitorText(guidanceEvidence.summary) || "确认用户补充引导会等 Codex 完成后由本地模型监督流程合并。"}`,
         ]
       : null,
     evidencePlanText
@@ -1315,9 +1324,9 @@ function StatusBlock({ mobileView, productionStatus, productionPreflight, status
       : null,
     process.supervisorPerspectiveRows?.length
       ? [
-          "NPC 视角",
+          "监督视角",
           process.supervisorPerspectiveRows
-            .map((row) => `${row.label}：${row.text}`)
+            .map((row) => `${presentMonitorText(row.label)}：${presentMonitorText(row.text)}`)
             .join("；"),
         ]
       : null,
@@ -1348,17 +1357,17 @@ function StatusBlock({ mobileView, productionStatus, productionPreflight, status
       <div className="status-hero">
         <div className="status-hero-block">
           <span>这一轮在做什么</span>
-          <strong>{statusHero.headline}</strong>
-          <p>{statusHero.detail}</p>
+          <strong>{presentMonitorText(statusHero.headline)}</strong>
+          <p>{presentMonitorText(statusHero.detail)}</p>
         </div>
         <div className="status-hero-block">
           <span>你下一步该做什么</span>
-          <strong>{statusHero.nextAction}</strong>
+          <strong>{presentMonitorText(statusHero.nextAction)}</strong>
         </div>
       </div>
       <div className="status-head">
         <span>{statusText}</span>
-        <strong>{process.headline || mobileView?.summary?.recentSummary || "正在同步任务状态"}</strong>
+        <strong>{presentMonitorText(process.headline || mobileView?.summary?.recentSummary, "正在同步任务状态")}</strong>
       </div>
       {realtimeStageRows.length ? (
         <div className="status-stage-strip" aria-label="当前进程节奏">
@@ -1374,7 +1383,7 @@ function StatusBlock({ mobileView, productionStatus, productionPreflight, status
       {rows.map(([label, value]) => (
         <div className="status-row" key={label}>
           <span>{presentSharedStatusRowLabel(label)}</span>
-          <strong>{value}</strong>
+          <strong>{presentMonitorText(value)}</strong>
         </div>
       ))}
       {realtimeEvents.length ? (
@@ -1412,14 +1421,14 @@ function StatusBlock({ mobileView, productionStatus, productionPreflight, status
                 </div>
                 <div className="status-detail-row">
                   <span>补充合并证据</span>
-                  <strong>{guidanceEvidenceCount}/{guidanceEvidenceTarget} · {guidanceEvidenceText}</strong>
+                  <strong>{guidanceEvidenceCount}/{guidanceEvidenceTarget} · {presentMonitorText(guidanceEvidenceText)}</strong>
                 </div>
               </>
             ) : null}
             {details.map(([label, value]) => (
               <div className="status-detail-row" key={label}>
                 <span>{label}</span>
-                <strong>{compactText(value, 150)}</strong>
+                <strong>{compactText(presentMonitorText(value), 150)}</strong>
               </div>
             ))}
           </div>
@@ -1655,9 +1664,9 @@ function PendingGuidance({ pending, onEdit, onClear, disabled }) {
         <p>
           {disabled
             ? "当前显示的是最近一次缓存结果，恢复连接后会以服务端状态为准。"
-            : pending.statusDetail ||
-              pending.userMessage ||
-              "会等 Codex 完成后交给本地模型 / NPC 合并，不会打断当前任务。"}
+            : presentMonitorText(pending.statusDetail) ||
+              presentMonitorText(pending.userMessage) ||
+              "会等 Codex 完成后交给本地模型监督流程合并，不会打断当前任务。"}
         </p>
       </div>
       <div className="mini-actions">

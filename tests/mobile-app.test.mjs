@@ -377,7 +377,8 @@ test("mobile app surfaces production monitoring signals in one compact status bl
   assert.match(source, /刚发出，待送达确认/);
   assert.match(source, /已送达，等 Codex 完成/);
   assert.match(source, /可继续下一轮/);
-  assert.match(source, /本地模型 \/ NPC 正在结合最新回复决定下一步/);
+  assert.match(source, /function presentMonitorText/);
+  assert.match(source, /本地模型监督流程正在结合最新回复决定下一步/);
   assert.match(source, /holdReason/);
   assert.match(source, /pendingGuidancePreview/);
   assert.match(source, /lastMergedGuidanceStatus/);
@@ -394,7 +395,7 @@ test("mobile app surfaces production monitoring signals in one compact status bl
   assert.match(source, /status-timeline/);
   assert.match(source, /最近进程/);
   assert.match(source, /只保留最近关键动作，方便远程判断是否需要介入/);
-  assert.match(source, /状态细节|等待原因|独立验收|模型来源|NPC 视角/);
+  assert.match(source, /状态细节|等待原因|独立验收|模型来源|监督视角/);
   assert.match(styleSource, /\.status-detail/);
   assert.match(styleSource, /\.status-detail-grid/);
   assert.match(styleSource, /\.status-stage-strip/);
@@ -467,7 +468,7 @@ test("mobile app folds the next real closed-loop evidence plan into status detai
   assert.match(source, /确认目标/);
   assert.match(source, /发送一轮/);
   assert.match(source, /等待 Codex 完成/);
-  assert.match(source, /NPC 复盘/);
+  assert.match(source, /监督复盘/);
   assert.match(source, /重新检查/);
   assert.match(source, /status-detail/);
   assert.doesNotMatch(source, /closed-loop-plan-card/);
