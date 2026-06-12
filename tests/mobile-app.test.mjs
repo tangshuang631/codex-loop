@@ -490,6 +490,18 @@ test("mobile app shows guidance merge evidence for remote supervision", async ()
   assert.match(source, /用户补充|补充引导/);
 });
 
+test("mobile app folds mobile remote-control evidence into status details", async () => {
+  const source = await read("app/mobile/src/main.jsx");
+
+  assert.match(source, /productionStatus\?\.mobileControlEvidence/);
+  assert.match(source, /mobileControlCount/);
+  assert.match(source, /mobileControlTarget/);
+  assert.match(source, /手机操控证据/);
+  assert.match(source, /手机远程操控闭环/);
+  assert.match(source, /确认手机端可以真实保存、修改或撤回待合并引导/);
+  assert.match(source, /status-detail-row/);
+});
+
 test("mobile app folds the next real closed-loop evidence plan into status details", async () => {
   const source = await read("app/mobile/src/main.jsx");
 

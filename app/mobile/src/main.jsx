@@ -1236,6 +1236,13 @@ function StatusBlock({
     (guidanceEvidenceCount >= guidanceEvidenceTarget
       ? "已观察到用户补充合并证据"
       : "还差 1 次用户补充合并证据");
+  const mobileControlEvidence = productionStatus?.mobileControlEvidence || {};
+  const mobileControlCount = Math.max(0, Number(mobileControlEvidence.current ?? 0));
+  const mobileControlTarget = Math.max(1, Number(mobileControlEvidence.target ?? 1));
+  const mobileControlText = mobileControlEvidence.label ||
+    (mobileControlCount >= mobileControlTarget
+      ? "已观察到手机远程操控闭环"
+      : "还差 1 次手机远程操控闭环");
   const closedLoopEvidencePlan = closedLoopEvidence.evidencePlan || {};
   const fallbackEvidencePlanSteps = [
     { label: "确认目标", detail: "确认当前任务、工作区和线程就是要继续验证的对象。" },
@@ -1333,6 +1340,12 @@ function StatusBlock({
       ? [
           "补充合并证据",
           `${guidanceEvidenceCount}/${guidanceEvidenceTarget} · ${presentMonitorText(guidanceEvidenceText)}。${presentMonitorText(guidanceEvidence.summary) || "确认用户补充引导会等 Codex 完成后由本地模型监督流程合并。"}`,
+        ]
+      : null,
+    productionStatus?.mobileControlEvidence
+      ? [
+          "手机操控证据",
+          `${mobileControlCount}/${mobileControlTarget} · ${presentMonitorText(mobileControlText)}。${presentMonitorText(mobileControlEvidence.summary) || "确认手机端可以真实保存、修改或撤回待合并引导。"}`,
         ]
       : null,
     evidencePlanText
@@ -1481,6 +1494,12 @@ function StatusBlock({
                   <span>补充合并证据</span>
                   <strong>{guidanceEvidenceCount}/{guidanceEvidenceTarget} · {presentMonitorText(guidanceEvidenceText)}</strong>
                 </div>
+                {productionStatus.mobileControlEvidence ? (
+                  <div className="status-detail-row">
+                    <span>手机操控证据</span>
+                    <strong>{mobileControlCount}/{mobileControlTarget} · {presentMonitorText(mobileControlText)}</strong>
+                  </div>
+                ) : null}
               </>
             ) : null}
             {details.map(([label, value]) => (
