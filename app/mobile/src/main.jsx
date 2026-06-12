@@ -423,6 +423,53 @@ function resolvePollInterval(connectionState, mobileView) {
   return POLL_MS;
 }
 
+function buildMobileSyncCadenceRow({ connectionState, showingCachedSnapshot, mobileView }) {
+  if (showingCachedSnapshot || connectionState === "degraded") {
+    return {
+      label: "同步节奏",
+      value: "离线近况",
+      detail: "先显示最近一次成功同步，恢复连接后会自动对齐历史对话和待合并引导。",
+      tone: "warning",
+    };
+  }
+
+  if (connectionState === "connecting" || connectionState === "syncing") {
+    return {
+      label: "同步节奏",
+      value: "正在连接",
+      detail: "正在连接桌面端 codex-loop，连上后会自动刷新当前任务。",
+      tone: "soft",
+    };
+  }
+
+  const processState = asText(mobileView?.processStatus?.state);
+  const hasPendingGuidance = mobileView?.pendingGuidance?.hasPending === true;
+  if (hasPendingGuidance) {
+    return {
+      label: "同步节奏",
+      value: "高频跟进",
+      detail: "存在待合并引导，手机会更频繁刷新，直到它被合并、修改或撤回。",
+      tone: "queued",
+    };
+  }
+
+  if (["codex_working", "supervisor_reviewing", "monitoring"].includes(processState)) {
+    return {
+      label: "同步节奏",
+      value: "实时跟进",
+      detail: "当前任务正在推进，手机会主动刷新最新阶段和历史对话。",
+      tone: "active",
+    };
+  }
+
+  return {
+    label: "同步节奏",
+    value: "定时观察",
+    detail: "任务暂时平稳，手机会定时刷新；回到前台或网络恢复时会立即同步。",
+    tone: "soft",
+  };
+}
+
 function shortThreadId(threadId = "") {
   const value = asText(threadId);
   if (value.length <= 18) return value;
@@ -1133,9 +1180,19 @@ function PairingView({ onPaired }) {
   );
 }
 
-function StatusBlock({ mobileView, productionStatus, productionPreflight, statusText }) {
+function StatusBlock({
+  mobileView,
+  productionStatus,
+  productionPreflight,
+  statusText,
+  connectionState,
+  showingCachedSnapshot,
+}) {
   const process = mobileView?.processStatus || {};
-  const realtimeStageRows = buildRealtimeStageRows(mobileView);
+  const realtimeStageRows = [
+    ...buildRealtimeStageRows(mobileView),
+    buildMobileSyncCadenceRow({ connectionState, showingCachedSnapshot, mobileView }),
+  ];
   const realtimeEvents = buildRealtimeEvents(mobileView);
   const statusHero = buildStatusHeroSummary({
     headline: process.headline || mobileView?.summary?.recentSummary,
@@ -2115,6 +2172,8 @@ function TaskMonitorApp() {
         productionStatus={productionStatus}
         productionPreflight={productionPreflight}
         statusText={statusText}
+        connectionState={connectionState}
+        showingCachedSnapshot={showingCachedSnapshot}
       />
       <Conversation mobileView={mobileView} refreshNotice={conversationRefreshNotice} />
       <PendingGuidance

@@ -92,6 +92,24 @@ test("mobile app slows polling and exposes a retry action after connection degra
   assert.match(styleSource, /\.notice\.warning/);
 });
 
+test("mobile app explains realtime sync cadence without exposing polling internals", async () => {
+  const source = await read("app/mobile/src/main.jsx");
+
+  assert.match(source, /function buildMobileSyncCadenceRow/);
+  assert.match(source, /label: "同步节奏"/);
+  assert.match(source, /value: "实时跟进"/);
+  assert.match(source, /value: "高频跟进"/);
+  assert.match(source, /value: "定时观察"/);
+  assert.match(source, /value: "离线近况"/);
+  assert.match(source, /手机会主动刷新最新阶段和历史对话/);
+  assert.match(source, /存在待合并引导，手机会更频繁刷新/);
+  assert.match(source, /恢复连接后会自动对齐历史对话和待合并引导/);
+  assert.match(source, /connectionState=\{connectionState\}/);
+  assert.match(source, /showingCachedSnapshot=\{showingCachedSnapshot\}/);
+  assert.match(source, /buildMobileSyncCadenceRow\(\{ connectionState, showingCachedSnapshot, mobileView \}\)/);
+  assert.doesNotMatch(source, /同步节奏[\s\S]{0,240}(3000|8000|20000)/);
+});
+
 test("mobile app refreshes immediately when the app returns to the foreground or network", async () => {
   const source = await read("app/mobile/src/main.jsx");
 
