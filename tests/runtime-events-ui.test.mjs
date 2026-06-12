@@ -4,11 +4,11 @@ import fs from "node:fs/promises";
 
 import { dedupeRuntimeEventsForDisplay } from "../app/web/src/runtime-events.mjs";
 
-test("dashboard renders readable runtime events from snapshot", async () => {
+test("dashboard renders readable progress events from snapshot", async () => {
   const appSource = await fs.readFile("app/web/src/App.jsx", "utf8");
 
   assert.match(appSource, /snapshot\?\.runtimeEvents/);
-  assert.match(appSource, /运行记录/);
+  assert.match(appSource, /最近进展/);
   assert.match(appSource, /runtime-event-list/);
   assert.match(appSource, /runtime-event-title/);
 });
@@ -139,7 +139,7 @@ test("dashboard folds low-frequency status details (legacy assertion kept for re
   assert.match(appSource, /detailRows/);
   assert.match(appSource, /status-detail-fold/);
   assert.match(appSource, /鏇村鐘舵€?|更多状态/);
-  assert.match(appSource, /杩愯璁板綍|运行记录/);
+  assert.match(appSource, /进展细节|最近进展/);
   assert.match(stylesSource, /\.status-detail-fold/);
   assert.match(stylesSource, /\.status-detail-fold summary/);
   return;
@@ -150,7 +150,7 @@ test("dashboard folds low-frequency status details (legacy assertion kept for re
   assert.match(appSource, /detailRows/);
   assert.match(appSource, /status-detail-fold/);
   assert.match(appSource, /更多状态/);
-  assert.match(appSource, /运行记录/);
+  assert.match(appSource, /进展细节|最近进展/);
   assert.match(stylesSource, /\.status-detail-fold/);
   assert.match(stylesSource, /\.status-detail-fold summary/);
 });

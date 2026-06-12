@@ -466,7 +466,7 @@ function deriveRealtimeStageSnapshot(mobileView) {
         serverActionDetail ||
         latestEventDetail ||
         asText(process.nextAction) ||
-        "等待下一条运行记录。",
+        "等待下一条进展。",
     };
   }
 
@@ -617,11 +617,11 @@ function buildRealtimeEvents(mobileView) {
   const events = Array.isArray(mobileView?.runtimeEvents) ? mobileView.runtimeEvents.filter(Boolean) : [];
   return events.slice(0, 3).map((event, index) => ({
     id: `${event.at || index}-${event.type || "event"}`,
-    title: asText(event.title, "运行记录"),
+    title: asText(event.title, "最近进展"),
     detail:
       asText(event.detail) ||
       asText(event.fullDetail) ||
-      "等待下一条运行记录。",
+      "等待下一条进展。",
     at: event.at,
     tone: event.tone || "normal",
   }));
@@ -1195,7 +1195,7 @@ function StatusBlock({ mobileView, productionStatus, productionPreflight, status
   const productionDetail =
     productionObservation?.status === "stale"
       ? productionStatus?.nextAction ||
-        "真实运行观测已过期，请重新运行 npm run production:observe，或重新启动一次真实任务生成新的运行记录。"
+        "真实运行观测已过期，请重新运行生产观测，或重新启动一次真实任务生成新的进展证据。"
       : productionStatus?.nextAction || productionObservation?.summary || "";
   const readinessDetail = readiness.summary || readiness.nextAction || productionDetail;
   const productionStageSummary = compactText(maturity?.summary || readinessDetail, 110) || "等待更多真实闭环证据。";

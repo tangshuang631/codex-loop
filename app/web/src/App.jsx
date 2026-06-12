@@ -765,7 +765,7 @@ function LoopProgressPanel({ processStatus, runtimeEvents, healthSummary }) {
           </div>
         ))}
       </div>
-      <div className="loop-progress-source">来源：当前轮状态 · 最近运行记录</div>
+      <div className="loop-progress-source">根据当前轮进展和最近动作整理</div>
     </details>
   );
 }
@@ -969,7 +969,7 @@ function MobileAccessFold({
                 ) : null}
                 {pairingSession?.qrPayload ? (
                   <div className="mobile-pairing-code">
-                    <span>扫码内容</span>
+                    <span>绑定内容</span>
                     <code>{pairingSession.qrPayload}</code>
                     <button type="button" onClick={() => copyTextToClipboard(pairingSession.qrPayload)}>
                       复制内容
@@ -1130,7 +1130,7 @@ function buildMobileConversationEntries(mobileView) {
   return buildConversationItemsFromMobileView(mobileView, {
     latestPromptLabel: "codex-loop 指令",
     assistantFallbackLabel: "Codex 回复",
-    runtimeFallbackLabel: "运行记录",
+    runtimeFallbackLabel: "最近进展",
   });
 
   if (mobileView?.conversationItems?.length) {
@@ -1174,7 +1174,7 @@ function buildMobileConversationEntries(mobileView) {
       role: event.type?.includes("dispatch") ? "user" : "assistant",
       text: detail,
       preview: detail,
-      label: event.title || "运行记录",
+      label: event.title || "最近进展",
     });
   }
 
@@ -1751,7 +1751,7 @@ function StatusSummaryPanel({
   const productionDetail =
     productionObservation?.status === "stale"
       ? productionStatus?.nextAction ||
-        "真实运行观测已过期，需要重新生成运行记录后再判断长期稳定性。"
+        "真实运行观测已过期，需要重新生成进展证据后再判断长期稳定性。"
       : productionObservation?.summary ||
         productionStatus?.nextAction ||
         "等待形成 2 轮真实闭环后，再作为长期运行基本证据。";
@@ -2019,7 +2019,7 @@ function StatusSummaryPanel({
       <details className="status-detail-fold">
         <summary>
           <span>更多状态</span>
-          <strong>生产判断、模型链路、线程和运行记录</strong>
+          <strong>生产判断、模型链路、线程和进展细节</strong>
         </summary>
         <LoopProgressPanel
           processStatus={processStatus}
@@ -2116,14 +2116,14 @@ function RuntimeEventList({ events = [] }) {
 
   return (
     <div className="runtime-event-list">
-      <div className="runtime-event-heading">运行记录</div>
+      <div className="runtime-event-heading">最近进展</div>
       {visibleEvents.map((event, index) => (
         <article
           className={`runtime-event-item ${event.tone === "danger" ? "is-danger" : ""}`}
           key={`${event.at || index}-${event.type || "event"}`}
         >
           <span>{formatTime(event.at, "刚刚")}</span>
-          <strong className="runtime-event-title">{formatValue(event.title, "运行记录")}</strong>
+          <strong className="runtime-event-title">{formatValue(event.title, "最近进展")}</strong>
           {event.detail ? <p>{event.detail}</p> : null}
         </article>
       ))}
