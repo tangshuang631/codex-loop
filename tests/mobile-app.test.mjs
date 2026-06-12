@@ -263,12 +263,15 @@ test("mobile app makes scan-to-pair the primary flow and keeps paste/manual as f
   assert.match(source, /const \[scannerOpen, setScannerOpen\] = useState\(false\)/);
   assert.match(source, /const \[scannerSupported\] = useState\(canUseBarcodeDetector\(\)\)/);
   assert.match(source, /扫描二维码绑定/);
-  assert.match(source, /改用粘贴绑定/);
+  assert.match(source, /备用绑定/);
   assert.match(source, /推荐直接扫描桌面端“移动端使用”里生成的二维码/);
   assert.match(source, /请把二维码放进取景框/);
   assert.match(source, /已识别二维码，确认后即可完成绑定/);
-  assert.match(source, /无法打开相机，请允许相机权限或改用粘贴扫码内容/);
-  assert.match(source, /当前浏览器暂不支持相机扫码，请改用粘贴扫码内容或打开绑定链接/);
+  assert.match(source, /无法打开相机，请允许相机权限或改用备用绑定方式/);
+  assert.match(source, /当前浏览器暂不支持相机扫码，请改用备用绑定方式或打开绑定链接/);
+  assert.match(source, /备用绑定方式/);
+  assert.match(source, /绑定内容/);
+  assert.doesNotMatch(source, /codex-loop:\/\/pair\?sessionId=/);
   assert.match(source, /<details className="pairing-fallback">/);
   assert.match(source, /<video ref=\{videoRef\} className="pairing-scanner-video" playsInline muted \/>/);
   assert.match(styleSource, /\.pairing-primary-actions/);

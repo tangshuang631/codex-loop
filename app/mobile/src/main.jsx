@@ -882,7 +882,7 @@ function PairingView({ onPaired }) {
 
   async function confirmPairingWith(sessionValue, codeValue, { auto = false } = {}) {
     if (!sessionValue || !codeValue) {
-      setMessage("请粘贴桌面端扫码内容，或手动输入配对会话和配对码。");
+      setMessage("请粘贴桌面端显示的绑定内容，或手动输入配对会话和配对码。");
       return;
     }
 
@@ -954,7 +954,7 @@ function PairingView({ onPaired }) {
     async function startScanner() {
       if (!navigator.mediaDevices?.getUserMedia) {
         setScannerState("unsupported");
-        setMessage("当前浏览器不支持相机扫码，请改用粘贴扫码内容。");
+        setMessage("当前浏览器不支持相机扫码，请改用备用绑定方式。");
         return;
       }
 
@@ -1001,7 +1001,7 @@ function PairingView({ onPaired }) {
             }
           } catch {
             setScannerState("error");
-            setMessage("扫码暂时失败，请稍后重试或改用粘贴扫码内容。");
+            setMessage("扫码暂时失败，请稍后重试或改用备用绑定方式。");
             setScannerOpen(false);
             return;
           }
@@ -1015,7 +1015,7 @@ function PairingView({ onPaired }) {
         });
       } catch {
         setScannerState("denied");
-        setMessage("无法打开相机，请允许相机权限或改用粘贴扫码内容。");
+        setMessage("无法打开相机，请允许相机权限或改用备用绑定方式。");
         setScannerOpen(false);
       }
     }
@@ -1060,13 +1060,13 @@ function PairingView({ onPaired }) {
             扫描二维码绑定
           </button>
           <button type="button" className="quiet" onClick={() => setScannerOpen(false)}>
-            改用粘贴绑定
+            备用绑定
           </button>
         </div>
         <p className="pairing-primary-hint">
           {scannerSupported
             ? "推荐直接扫描桌面端“移动端使用”里生成的二维码。"
-            : "当前浏览器暂不支持相机扫码，请改用粘贴扫码内容或打开绑定链接。"}
+            : "当前浏览器暂不支持相机扫码，请改用备用绑定方式或打开绑定链接。"}
         </p>
         {scannerOpen ? (
           <div className="pairing-scanner">
@@ -1084,13 +1084,13 @@ function PairingView({ onPaired }) {
           </div>
         ) : null}
         <details className="pairing-fallback">
-          <summary>粘贴扫码内容或手动输入</summary>
+          <summary>备用绑定方式</summary>
           <label>
-            <span>扫码内容</span>
+            <span>绑定内容</span>
             <textarea
               value={payload}
               rows={5}
-              placeholder="粘贴桌面端二维码内容，例如 codex-loop://pair?sessionId=...&code=..."
+              placeholder="粘贴桌面端二维码里的绑定内容，或使用绑定链接自动带入。"
               onChange={(event) => setPayload(event.target.value)}
             />
           </label>
