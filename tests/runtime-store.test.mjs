@@ -1617,7 +1617,7 @@ test("runLoopTurn degrades to compact template when default ollama is unavailabl
   });
 
   assert.match(dispatchedPrompt, /继续在同一个 Codex 线程中推进。/u);
-  assert.match(dispatchedPrompt, /范围收紧|产品经理|测试人员|真实用户/);
+  assert.match(dispatchedPrompt, /范围收紧|产品经理|测试人员|挑剔用户|监工/);
   assert.match(dispatchedPrompt, /一小批可验证任务/);
   assert.match(snapshot.thread.promptGenerationWarning, /Ollama/);
   assert.equal(snapshot.thread.continuationStatus, "idle");

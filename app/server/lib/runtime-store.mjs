@@ -2384,32 +2384,44 @@ function buildSupervisorPerspectiveRows({
     {
       label: "监工",
       text: summarizeForFollowup(
-        firstNonEmpty(
-          instructionText,
-          riskText,
-          "盯住是否偏离用户目标、是否适合继续自动推进，以及下一轮是否足够小。",
-        ),
+        [
+          "盯住目标、节奏和安全边界。",
+          firstNonEmpty(
+            instructionText,
+            riskText,
+            "确认是否适合继续自动推进，以及下一轮是否足够小。",
+          ),
+        ].join(" "),
         160,
       ),
     },
     {
       label: "产品经理",
       text: summarizeForFollowup(
-        firstNonEmpty(riskText, reviewText, instructionText, "控制范围，确认下一步仍贴合用户目标。"),
+        [
+          "控制范围和优先级，不让任务偏离用户目标。",
+          firstNonEmpty(riskText, reviewText, instructionText, "确认下一步仍贴合当前任务目标。"),
+        ].join(" "),
         160,
       ),
     },
     {
       label: "测试人员",
       text: summarizeForFollowup(
-        firstNonEmpty(verificationText, focusText, "确认本轮有可复查的验证证据。"),
+        [
+          "要求可复查的验证证据。",
+          firstNonEmpty(verificationText, focusText, "确认本轮有可复查的验证证据。"),
+        ].join(" "),
         160,
       ),
     },
     {
-      label: "真实用户",
+      label: "挑剔用户",
       text: summarizeForFollowup(
-        firstNonEmpty(focusText, reviewText, "确认用户能看懂状态、历史记录和下一步。"),
+        [
+          "从真实使用体验挑毛病。",
+          firstNonEmpty(focusText, reviewText, "确认用户能看懂状态、历史记录和下一步。"),
+        ].join(" "),
         160,
       ),
     },
@@ -2670,7 +2682,7 @@ function buildProcessStatus(snapshot) {
   } else if (reviewingSupervisor) {
     state = "supervisor_reviewing";
     headline = "监督复盘中";
-    detail = "本地模型 NPC 正在以产品经理、测试人员和真实用户视角复盘 Codex 回复，完成前不会发送下一条指令。";
+    detail = "本地模型监督流程正在以产品经理、测试人员、挑剔用户和监工视角复盘 Codex 回复，完成前不会发送下一条指令。";
     canSendNextTurn = false;
     holdReason = "Codex 已完成当前轮，本地模型 NPC 正在复盘并决定下一步。";
     nextAction = "等待复盘结束；如有新要求，可以先写入补充引导。";
@@ -3608,7 +3620,7 @@ function buildFollowupPrompt(snapshot) {
   return [
     "继续推进「" + loopName + "」，分支「" + branch + "」。",
     "下一步：" + focus,
-    "先按产品经理、测试人员和真实用户视角收紧范围，完成一小批可验证任务，再回复进展、验证结果和下一步。",
+    "先按产品经理、测试人员、挑剔用户和监工视角收紧范围，完成一小批可验证任务，再回复进展、验证结果和下一步。",
   ].join("\n");
 }
 
@@ -5756,7 +5768,7 @@ function buildFallbackMilestoneReview(snapshot) {
       ? "Codex 已完成上一轮，可进入监督复盘后的下一步推进。"
       : "Codex 已返回完成信号，可继续下一轮小步推进。",
     nextInstruction:
-      "请先按产品经理、测试人员和真实用户视角收紧范围，再继续推进：" +
+      "请先按产品经理、测试人员、挑剔用户和监工视角收紧范围，再继续推进：" +
       summarizeForFollowup(focus, 260) +
       "。优先只做一小批最关键、可验证的改动；完成后回复改动摘要、验证结果和下一步建议。",
     shouldContinue: true,

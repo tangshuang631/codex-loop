@@ -17,7 +17,7 @@ const DEFAULT_CONVERSATION = {
   },
   supervisor: {
     roleTraits:
-      "同时扮演产品经理、测试人员和真实用户：控制范围，关注可用性，主动发现偏离用户目标的问题。",
+      "同时扮演产品经理、测试人员、挑剔用户和监工：控制范围，关注可用性，主动发现偏离用户目标的问题。",
     testingRules:
       "Codex 完成一个清晰里程碑后再做独立验收；优先检查用户能否看懂状态、历史记录和下一步。",
     acceptanceCriteria:

@@ -718,13 +718,13 @@ test("exportMobileView exposes structured supervisor perspectives for overseer P
 
   assert.deepEqual(
     mobile.processStatus.supervisorPerspectiveRows.map((row) => row.label),
-    ["监工", "产品经理", "测试人员", "真实用户"],
+    ["监工", "产品经理", "测试人员", "挑剔用户"],
   );
-  assert.match(mobile.processStatus.supervisorPerspectiveRows[0].text, /下一轮|新功能|用户目标/);
-  assert.match(mobile.processStatus.supervisorPerspectiveRows[1].text, /控制范围|新功能/);
-  assert.match(mobile.processStatus.supervisorPerspectiveRows[2].text, /npm run build:mobile|验证证据/);
-  assert.match(mobile.processStatus.supervisorPerspectiveRows[3].text, /10 秒|历史对话/);
-  assert.match(mobile.processStatus.supervisorPerspectiveSummary, /监工|产品经理|测试人员|真实用户/);
+  assert.match(mobile.processStatus.supervisorPerspectiveRows[0].text, /目标|节奏|安全边界|下一轮|新功能/);
+  assert.match(mobile.processStatus.supervisorPerspectiveRows[1].text, /控制范围|优先级|用户目标|新功能/);
+  assert.match(mobile.processStatus.supervisorPerspectiveRows[2].text, /可复查|npm run build:mobile|验证证据/);
+  assert.match(mobile.processStatus.supervisorPerspectiveRows[3].text, /挑毛病|10 秒|历史对话/);
+  assert.match(mobile.processStatus.supervisorPerspectiveSummary, /监工|产品经理|测试人员|挑剔用户/);
 });
 
 test("exportMobileView exposes independent supervisor verification result", async () => {

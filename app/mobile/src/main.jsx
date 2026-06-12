@@ -1184,7 +1184,7 @@ function StatusBlock({ mobileView, productionStatus, productionPreflight, status
     { label: "确认目标", detail: "确认当前任务、工作区和线程就是要继续验证的对象。" },
     { label: "发送一轮", detail: "只触发一次真实循环或手动发送一次引导，不连续追发。" },
     { label: "等待 Codex 完成", detail: "Codex 未完成前不要追加发送。" },
-    { label: "监督复盘", detail: "等待产品经理、测试人员、真实用户视角完成复盘。" },
+    { label: "监督复盘", detail: "等待产品经理、测试人员、挑剔用户和监工视角完成复盘。" },
     { label: "重新检查", detail: "重新查看生产状态，确认真实闭环是否达到 2 轮。" },
   ];
   const evidencePlanSteps = Array.isArray(closedLoopEvidencePlan.steps) && closedLoopEvidencePlan.steps.length
