@@ -305,6 +305,11 @@ function sanitizeCachedMobileView(mobileView) {
   };
 }
 
+function hasMeaningfulPendingGuidance(mobileView) {
+  const pending = mobileView?.pendingGuidance || {};
+  return pending.hasPending === true && Boolean(asText(pending.text || pending.preview));
+}
+
 function presentPendingGuidanceStatus(result, fallback = "已记录下一轮补充。") {
   const pending = result?.pendingGuidance;
   const primary = asText(result?.message);
@@ -1141,7 +1146,6 @@ function StatusBlock({ mobileView, productionStatus, productionPreflight, status
     Number(closedLoopEvidence.current ?? productionObservation?.counters?.closedLoops ?? 0),
   );
   const closedLoopTarget = Math.max(1, Number(closedLoopEvidence.target ?? 2));
-  const closedLoopProgress = Math.min(100, Math.round((closedLoopCount / closedLoopTarget) * 100));
   const closedLoopText = closedLoopEvidence.label ||
     (closedLoopCount >= closedLoopTarget
       ? "已达到长期运行基本证据"
@@ -1218,21 +1222,23 @@ function StatusBlock({ mobileView, productionStatus, productionPreflight, status
   });
   const modelPipeline = buildModelPipelineSummary(process);
   const rows = [
-    productionStatus ? ["longrun", longRunDecision] : null,
     ["当前状态", process.monitorLabel || mobileView?.loop?.modeLabel || "监控中"],
     ["下一步", process.nextAction || mobileView?.suggestedAction || "等待下一轮更新"],
-    productionFocus.summary ? ["生产判断", productionFocus.summary] : null,
-    modelPipeline.headline ? ["模型链路", modelPipeline.headline] : null,
-    productionTarget ? ["验证目标", productionTarget] : null,
-    productionPreflight ? ["启动预检", `${preflightLabel} · ${preflightDetail}`] : null,
-    productionStatus ? ["生产阶段", `${maturityLabel} · ${productionStageSummary}`] : null,
-    productionStatus ? ["生产观测", `${productionLabel} · ${productionObservationSummary}`] : null,
-    ["最近指令", process.latestInstructionSourceLabel || "等待生成"],
+    process.supervisorPerspectiveSummary ? ["监督结论", process.supervisorPerspectiveSummary] : null,
+    process.supervisorVerificationLabel || process.supervisorVerificationStatus
+      ? ["当前验收", process.supervisorVerificationLabel || process.supervisorVerificationStatus]
+      : null,
+    hasMeaningfulPendingGuidance(mobileView)
+      ? ["待合并引导", process.pendingGuidancePreview || mobileView?.pendingGuidance?.preview]
+      : null,
   ].filter(Boolean);
   const details = [
     productionFocus.attention ? ["当前要留意", productionFocus.attention] : null,
     productionFocus.nextAction ? ["生产建议", productionFocus.nextAction] : null,
-    modelPipeline.detail ? ["模型说明", modelPipeline.detail] : null,
+    productionFocus.summary ? ["生产判断", productionFocus.summary] : null,
+    modelPipeline.detail ? ["模型链路", modelPipeline.detail] : null,
+    productionTarget ? ["验证目标", productionTarget] : null,
+    productionStatus ? ["生产阶段", `${maturityLabel} · ${productionStageSummary}`] : null,
     productionStatus
       ? [
           "生产成熟度",
@@ -1269,7 +1275,7 @@ function StatusBlock({ mobileView, productionStatus, productionPreflight, status
       : null,
     productionPreflight
       ? [
-          "真实循环前预检",
+          "启动预检",
           [
             preflightLabel,
             productionPreflight.summary,
@@ -1362,32 +1368,11 @@ function StatusBlock({ mobileView, productionStatus, productionPreflight, status
           <strong>{value}</strong>
         </div>
       ))}
-      {productionStatus ? (
-        <div className="closed-loop-evidence">
-          <div>
-            <span>闭环证据</span>
-            <strong>{closedLoopCount}/{closedLoopTarget} · {closedLoopText}</strong>
-          </div>
-          <div className="closed-loop-evidence-metrics">
-            <div className="closed-loop-evidence-metric">
-              <span>已完成闭环</span>
-              <strong>{closedLoopCount}/{closedLoopTarget}</strong>
-            </div>
-            <div className="closed-loop-evidence-metric">
-              <span>补充合并证据</span>
-              <strong>{guidanceEvidenceCount}/{guidanceEvidenceTarget}</strong>
-            </div>
-          </div>
-          <div className="closed-loop-evidence-bar" aria-hidden="true">
-            <span style={{ width: `${closedLoopProgress}%` }} />
-          </div>
-        </div>
-      ) : null}
       {realtimeEvents.length ? (
         <div className="status-timeline">
           <div className="status-timeline-head">
             <span>最近进程</span>
-            <strong>按时间倒序显示最近 3 条关键动作</strong>
+            <strong>只保留最近关键动作，方便远程判断是否需要介入</strong>
           </div>
           <div className="status-timeline-list">
             {realtimeEvents.map((event) => (
@@ -1406,6 +1391,22 @@ function StatusBlock({ mobileView, productionStatus, productionPreflight, status
         <details className="status-detail">
           <summary>状态细节</summary>
           <div className="status-detail-grid">
+            {productionStatus ? (
+              <>
+                <div className="status-detail-row">
+                  <span>长跑判断</span>
+                  <strong>{longRunDecision}</strong>
+                </div>
+                <div className="status-detail-row">
+                  <span>闭环证据</span>
+                  <strong>{closedLoopCount}/{closedLoopTarget} · {closedLoopText}</strong>
+                </div>
+                <div className="status-detail-row">
+                  <span>补充合并证据</span>
+                  <strong>{guidanceEvidenceCount}/{guidanceEvidenceTarget} · {guidanceEvidenceText}</strong>
+                </div>
+              </>
+            ) : null}
             {details.map(([label, value]) => (
               <div className="status-detail-row" key={label}>
                 <span>{label}</span>

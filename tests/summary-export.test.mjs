@@ -693,7 +693,7 @@ test("exportMobileView exposes supervisor review and next instruction for monito
   assert.match(mobile.processStatus.acceptanceFocusPreview, /\u9996\u9875\u72b6\u6001/);
 });
 
-test("exportMobileView exposes structured supervisor perspectives for PM QA and user review", async () => {
+test("exportMobileView exposes structured supervisor perspectives for overseer PM QA and picky user review", async () => {
   const configRoot = await createWorkspace();
   await ensureLoopArtifacts(configRoot);
   await saveThreadBinding(configRoot, {
@@ -718,12 +718,13 @@ test("exportMobileView exposes structured supervisor perspectives for PM QA and 
 
   assert.deepEqual(
     mobile.processStatus.supervisorPerspectiveRows.map((row) => row.label),
-    ["产品经理", "测试人员", "真实用户"],
+    ["监工", "产品经理", "测试人员", "真实用户"],
   );
-  assert.match(mobile.processStatus.supervisorPerspectiveRows[0].text, /控制范围|新功能/);
-  assert.match(mobile.processStatus.supervisorPerspectiveRows[1].text, /npm run build:mobile|验证证据/);
-  assert.match(mobile.processStatus.supervisorPerspectiveRows[2].text, /10 秒|历史对话/);
-  assert.match(mobile.processStatus.supervisorPerspectiveSummary, /产品经理|测试人员|真实用户/);
+  assert.match(mobile.processStatus.supervisorPerspectiveRows[0].text, /下一轮|新功能|用户目标/);
+  assert.match(mobile.processStatus.supervisorPerspectiveRows[1].text, /控制范围|新功能/);
+  assert.match(mobile.processStatus.supervisorPerspectiveRows[2].text, /npm run build:mobile|验证证据/);
+  assert.match(mobile.processStatus.supervisorPerspectiveRows[3].text, /10 秒|历史对话/);
+  assert.match(mobile.processStatus.supervisorPerspectiveSummary, /监工|产品经理|测试人员|真实用户/);
 });
 
 test("exportMobileView exposes independent supervisor verification result", async () => {

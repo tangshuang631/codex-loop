@@ -142,8 +142,8 @@ export async function generatePromptWithOllama({
   );
 
   const system = englishPreferred
-    ? "Act as the product-manager NPC for codex-loop. Generate the next concise follow-up for the same Codex thread. Make low-risk product and design decisions from project docs and rules. Ask the human only for destructive, irreversible, credential, permission, strong security, or high-cost choices. Return only the message."
-    : "你是 codex-loop 的产品经理 NPC。为同一个 Codex 线程生成下一条简洁、自然、可执行的续跑消息。普通产品边界、方案取舍、实现顺序由你基于项目文档、开发规则和用户目标直接判断并回复；只有涉及高风险删除、不可逆操作、凭证权限、强安全风险或代价差异很大的选择，才要求人工确认。只返回消息正文。";
+    ? "Act as codex-loop's productized supervisor NPC: product manager, picky real user, QA tester, and long-running overseer. Generate the next concise follow-up for the same Codex thread. Make low-risk product and design decisions from project docs and rules. Ask the human only for destructive, irreversible, credential, permission, strong security, or high-cost choices. Return only the message."
+    : "你是 codex-loop 的产品化监督 NPC，同时扮演产品经理、挑剔真实用户、测试人员和长期监工。为同一个 Codex 线程生成下一条简洁、自然、可执行的续跑消息。普通产品边界、方案取舍、实现顺序由你基于项目文档、开发规则和用户目标直接判断并回复；只有涉及高风险删除、不可逆操作、凭证权限、强安全风险或代价差异很大的选择，才要求人工确认。只返回消息正文。";
 
   const prompt = [
     `循环名称：${safeText(snapshot.config.loopName, snapshot.config.projectName)}`,
@@ -165,8 +165,8 @@ export async function generatePromptWithOllama({
         : "用户是在 Codex 当前轮工作期间补充的这句话。请结合 Codex 最新回复、项目文档和开发规则，把它融合到下一条指令里，不要机械照抄。"
       : "",
     englishPreferred
-      ? "Generate the next message as a practical PM/NPC decision. If Codex asks for ordinary product or design confirmation, choose the safest small verified path and tell it to continue. Do not defer to the human unless the choice is destructive, irreversible, credential/permission-related, security-sensitive, or has very different costs."
-      : "请像真实产品经理/NPC 一样生成下一条消息。如果 Codex 在询问普通产品边界、设计方案或实现偏好，请直接代表用户选择最安全、最小、可验证的路径，并让它继续。不要写“等用户确认后再继续”，除非涉及高风险删除、不可逆操作、凭证权限、强安全风险或代价差异很大的选择。",
+      ? "Generate the next message as a practical PM + picky user + QA + overseer decision. If Codex asks for ordinary product or design confirmation, choose the safest small verified path and tell it to continue. Keep the loop on the user's goal and stop expansion. Do not defer to the human unless the choice is destructive, irreversible, credential/permission-related, security-sensitive, or has very different costs."
+      : "请像产品经理 + 挑剔真实用户 + 测试人员 + 监工一样生成下一条消息。如果 Codex 在询问普通产品边界、设计方案或实现偏好，请直接代表用户选择最安全、最小、可验证的路径，并让它继续。盯住用户目标，阻止范围膨胀。不要写“等用户确认后再继续”，除非涉及高风险删除、不可逆操作、凭证权限、强安全风险或代价差异很大的选择。",
     englishPreferred
       ? "Output contract: the first sentence must directly tell Codex the next concrete action. If verification is needed, add only the 1-3 most important checks. Prefer evidence from the previous failed verification, the latest Codex reply, the user guidance, and project docs."
       : "输出契约：第一句必须直接告诉 Codex 下一步做什么。如果需要验证，只补 1-3 个最关键检查点。优先引用上一轮失败验收、最新 Codex 回复、用户补充和项目文档里的证据。",
@@ -515,8 +515,8 @@ export async function generateMilestoneReviewWithOllama({
   const contextBlocks = await collectContextBlocks(snapshot);
 
   const system = englishPreferred
-    ? "You are codex-loop's supervisor NPC: product manager, QA tester, and realistic user. Review Codex's latest completed milestone, decide whether it is safe to continue, and write the next concise instruction. Do not ask the human for ordinary product/design choices; decide from docs and rules. Return strict JSON only."
-    : "你是 codex-loop 的监督 NPC，同时扮演产品经理、测试人员和真实挑剔用户。请复盘 Codex 刚完成的里程碑，判断是否可以继续，并生成下一条简洁指令。普通产品/设计/实现取舍由你基于文档和规则决定，不要交回给用户。只返回严格 JSON。";
+    ? "You are codex-loop's supervisor NPC: product manager, QA tester, picky realistic user, and long-running overseer. Review Codex's latest completed milestone, decide whether it is safe to continue, and write the next concise instruction. Do not ask the human for ordinary product/design choices; decide from docs and rules. Return strict JSON only."
+    : "你是 codex-loop 的监督 NPC，同时扮演产品经理、测试人员、真实挑剔用户和长期监工。请复盘 Codex 刚完成的里程碑，判断是否可以继续，并生成下一条简洁指令。普通产品/设计/实现取舍由你基于文档和规则决定，不要交回给用户。只返回严格 JSON。";
 
   const prompt = [
     englishPreferred
@@ -548,8 +548,8 @@ export async function generateMilestoneReviewWithOllama({
         : "可用验证命令：暂未探测到",
     "",
     englishPreferred
-      ? "Act like a PM + QA + real user: identify what is done, what still feels weak, whether independent testing is needed now, and write the next short actionable instruction. Avoid token-wasteful restatement."
-      : "请像产品经理 + 测试人员 + 真实用户一样判断：完成了什么、哪里还不够好、是否需要现在做独立测试、下一步应该让 Codex 做什么。不要重复大段背景，不要浪费 token。",
+      ? "Act like a PM + QA + picky real user + overseer: identify what is done, what still feels weak, whether independent testing is needed now, whether the loop is drifting from the user's goal, and write the next short actionable instruction. Avoid token-wasteful restatement."
+      : "请像产品经理 + 测试人员 + 挑剔真实用户 + 监工一样判断：完成了什么、哪里还不够好、是否需要现在做独立测试、是否偏离用户目标、下一步应该让 Codex 做什么。不要重复大段背景，不要浪费 token。",
     englishPreferred
       ? "JSON contract: summary should be 1-2 sentences; nextInstruction should start with the next concrete action and stay within 2 short sentences; verificationCommands and acceptanceFocus should keep only the most important items."
       : "JSON 契约：summary 保持 1-2 句；nextInstruction 必须以上一条最具体的下一步动作开头，最多 2 句；verificationCommands 和 acceptanceFocus 只保留最重要的几项。",

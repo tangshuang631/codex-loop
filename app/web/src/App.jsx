@@ -49,7 +49,7 @@ const CODEX_LOOP_MOBILE_DEVICE = "codex-loop-mobile-device";
 const MOBILE_DEVICE_STORAGE_KEY = CODEX_LOOP_MOBILE_DEVICE;
 const DEFAULT_SUPERVISOR_FORM = {
   roleTraits:
-    "同时扮演产品经理、测试人员和真实用户：控制范围，关注可用性，主动发现偏离用户目标的问题。",
+    "同时扮演产品经理、测试人员、挑剔真实用户和长期监工：控制范围，关注可用性，主动发现偏离用户目标的问题。",
   testingRules:
     "Codex 完成一个清晰里程碑后再做独立验收；优先检查用户能否看懂状态、历史记录和下一步。",
   acceptanceCriteria:
@@ -2631,7 +2631,7 @@ function ManagePane({
   promptGeneratorStatus,
   conversationLanguage,
   healthIssues,
-  latestEvent,
+  latestProgress,
   snapshot,
   submitting,
   withSubmit,
@@ -3205,7 +3205,7 @@ function ManagePane({
         <summary>运行与安全</summary>
         <div className="sidebar-form">
           <div className="metric-grid compact-metric-grid">
-            <Metric label="最近事件" value={latestEvent} />
+            <Metric label="最近进展" value={latestProgress} />
             <Metric label="手机查看" value={remoteAccessStatus?.mobileReachable ? "已就绪" : "待确认"} />
             <Metric
               label="健康状态"
@@ -4199,7 +4199,13 @@ function DesktopConsoleApp() {
       : "已关闭本地模型";
   const remoteTransport = remoteAccessStatus?.recommendedTransport || "tailscale";
   const launcherWebUrl = launcherStatus?.webUrl || launcherStatus?.webBaseUrl || "未提供";
-  const latestEvent = formatValue(snapshot?.thread?.latestEventType || snapshot?.state?.events?.at(-1)?.type, "暂无");
+  const latestProgress = formatValue(
+    processStatus?.realtimeRecentActionLabel ||
+      processStatus?.realtimePhaseLabel ||
+      processStatus?.headline ||
+      mobileView?.summary?.recentSummary,
+    "暂无",
+  );
   const pollStatus = pollState.syncing
     ? "同步中"
     : pollState.failedCount > 0
@@ -4759,7 +4765,7 @@ function DesktopConsoleApp() {
             promptGeneratorStatus={promptGeneratorStatus}
             conversationLanguage={conversationLanguage}
             healthIssues={healthIssues}
-            latestEvent={latestEvent}
+            latestProgress={latestProgress}
             snapshot={snapshot}
             submitting={submitting}
             withSubmit={withSubmit}

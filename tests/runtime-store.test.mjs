@@ -2303,7 +2303,9 @@ test("ollama requests disable thinking output for dashboard summaries and prompt
 
   assert.equal(requestBodies.length, 2);
   assert.equal(requestBodies[0].think, false);
-  assert.match(requestBodies[0].system, /产品经理 NPC|product-manager NPC/i);
+  assert.match(requestBodies[0].system, /产品化监督 NPC|productized supervisor NPC/i);
+  assert.match(requestBodies[0].system, /挑剔真实用户|picky real user/i);
+  assert.match(requestBodies[0].system, /长期监工|overseer/i);
   assert.match(requestBodies[0].prompt, /直接代表用户选择|Do not defer to the human/i);
   assert.match(requestBodies[0].prompt, /高风险删除|destructive/i);
   assert.equal(requestBodies[1].think, false);
@@ -2782,7 +2784,10 @@ test("fallback milestone review keeps PM QA user framing and tight verifiable sc
     fetchImpl,
   });
 
-  assert.match(requestBody.prompt, /产品经理 \+ 测试人员 \+ 真实用户|产品经理 \+ QA \+ real user/);
+  assert.match(
+    requestBody.prompt,
+    /产品经理 \+ 测试人员 \+ 挑剔真实用户 \+ 监工|PM \+ QA \+ picky real user \+ overseer/,
+  );
   assert.match(requestBody.prompt, /JSON 契约/);
   assert.match(requestBody.prompt, /最重要的几项|most important items/);
 });

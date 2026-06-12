@@ -2382,6 +2382,17 @@ function buildSupervisorPerspectiveRows({
 
   return [
     {
+      label: "监工",
+      text: summarizeForFollowup(
+        firstNonEmpty(
+          instructionText,
+          riskText,
+          "盯住是否偏离用户目标、是否适合继续自动推进，以及下一轮是否足够小。",
+        ),
+        160,
+      ),
+    },
+    {
       label: "产品经理",
       text: summarizeForFollowup(
         firstNonEmpty(riskText, reviewText, instructionText, "控制范围，确认下一步仍贴合用户目标。"),

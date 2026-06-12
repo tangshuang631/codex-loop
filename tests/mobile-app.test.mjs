@@ -387,7 +387,7 @@ test("mobile app surfaces production monitoring signals in one compact status bl
   assert.match(source, /当前进程节奏/);
   assert.match(source, /status-timeline/);
   assert.match(source, /最近进程/);
-  assert.match(source, /最近 3 条关键动作/);
+  assert.match(source, /只保留最近关键动作，方便远程判断是否需要介入/);
   assert.match(source, /状态细节|等待原因|独立验收|模型来源|NPC 视角/);
   assert.match(styleSource, /\.status-detail/);
   assert.match(styleSource, /\.status-detail-grid/);
@@ -435,10 +435,11 @@ test("mobile app shows closed-loop evidence progress for remote supervision", as
   assert.match(source, /closedLoopTarget/);
   assert.match(source, /productionStatus\?\.closedLoopEvidence/);
   assert.match(source, /闭环证据/);
-  assert.match(source, /closed-loop-evidence/);
+  assert.match(source, /长跑判断/);
+  assert.match(source, /状态细节/);
   assert.match(source, /还差.*轮|已达到长期运行基本证据/);
-  assert.match(styleSource, /\.closed-loop-evidence/);
-  assert.match(styleSource, /\.closed-loop-evidence-bar/);
+  assert.match(styleSource, /\.status-detail/);
+  assert.match(styleSource, /\.status-detail-grid/);
 });
 
 test("mobile app shows guidance merge evidence for remote supervision", async () => {
