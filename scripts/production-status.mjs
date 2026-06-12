@@ -272,7 +272,7 @@ function summarizeReport(kind, report) {
       ? `，已合并补充 ${mergedGuidance} 次${guidancePreview ? `：${guidancePreview}` : ""}`
       : "";
     return report.status === "passed"
-      ? `真实运行已形成 ${closedLoops} 轮真实闭环，达到长期运行基本证据：发送 ${counters.dispatches || 0} 次，完成 ${counters.completions || 0} 次，NPC 复盘 ${counters.supervisorReviews || 0} 次${guidanceLabel}`
+      ? `真实运行已形成 ${closedLoops} 轮真实闭环，达到长期运行基本证据：发送 ${counters.dispatches || 0} 次，完成 ${counters.completions || 0} 次，监督复盘 ${counters.supervisorReviews || 0} 次${guidanceLabel}`
       : `${waitingLabel}${userMessage || report.summary || "真实运行观测需要留意"}`;
   }
 
@@ -399,7 +399,7 @@ function needsSupervisorRecovery(item = {}) {
     item.diagnosis?.userMessage,
     item.diagnosis?.nextAction,
   ].filter(Boolean).join("\n");
-  return /缺少\s*NPC\s*监督复盘|补齐监督复盘|production:recover/u.test(textBlock);
+  return /缺少\s*(NPC\s*)?监督复盘|补齐监督复盘|production:recover/u.test(textBlock);
 }
 
 function supervisorRecoveryAction() {
@@ -454,8 +454,8 @@ function deriveNextAction(items, target = {}) {
     }
     if (failed.label === "真实运行观测" && hasPartialClosedLoopEvidence(failed)) {
       const action = hasMergedGuidanceEvidence(failed)
-        ? failed.nextAction || "再跑至少 1 轮真实任务，确认发送、Codex 完成和 NPC 复盘能连续出现。"
-        : "再跑至少 1 轮真实任务，确认发送、Codex 完成和 NPC 复盘能连续出现；同时从桌面端或移动端补充一次引导，确认它会被本地模型 / NPC 合并进下一条指令。";
+        ? failed.nextAction || "再跑至少 1 轮真实任务，确认发送、Codex 完成和监督复盘能连续出现。"
+        : "再跑至少 1 轮真实任务，确认发送、Codex 完成和监督复盘能连续出现；同时从桌面端或移动端补充一次引导，确认它会被本地监督流程合并进下一条指令。";
       return appendTargetConfirmation(action, target);
     }
     return `先处理${failed.label}：${failed.nextAction || failed.summary}`;
@@ -467,7 +467,7 @@ function deriveNextAction(items, target = {}) {
     !hasMergedGuidanceEvidence(observation)
   ) {
     return appendTargetConfirmation(
-      "真实闭环已经达标，但还缺少用户补充引导被本地模型 / NPC 合并进下一条指令的证据。请从桌面端或移动端写入一次补充引导，等 Codex 完成后确认它被合并发送。",
+      "真实闭环已经达标，但还缺少用户补充引导被本地监督流程合并进下一条指令的证据。请从桌面端或移动端写入一次补充引导，等 Codex 完成后确认它被合并发送。",
       target,
     );
   }
@@ -513,7 +513,7 @@ function deriveReadiness(items, target = {}) {
   if (codeGatesPassed && supervisorRecoveryNeeded) {
     return {
       stage: "blocked",
-      summary: "Codex 已完成但还缺少 NPC 监督复盘，暂时不能继续发送下一轮。",
+      summary: "Codex 已完成但还缺少监督复盘，暂时不能继续发送下一轮。",
       nextAction: supervisorRecoveryAction(),
     };
   }
@@ -522,9 +522,9 @@ function deriveReadiness(items, target = {}) {
     if (!hasMergedGuidanceEvidence(observation)) {
       return {
         stage: "trial",
-        summary: "代码闸门和真实 2 轮闭环证据已通过，但还缺少用户补充经本地模型 / NPC 合并进下一条指令的真实证据。",
+        summary: "代码闸门和真实 2 轮闭环证据已通过，但还缺少用户补充经本地监督流程合并进下一条指令的真实证据。",
         nextAction: appendTargetConfirmation(
-          "在真实任务中从桌面端或移动端写入一次补充引导，等 Codex 完成后确认补充被本地模型 / NPC 合并进下一条指令。",
+          "在真实任务中从桌面端或移动端写入一次补充引导，等 Codex 完成后确认补充被本地监督流程合并进下一条指令。",
           target,
         ),
       };
@@ -540,7 +540,7 @@ function deriveReadiness(items, target = {}) {
     return {
       stage: "observing",
       summary: "代码闸门已通过，真实任务正在等待 Codex 完成这一轮，还不能判断长期稳定性。",
-      nextAction: observation.nextAction || "等待 Codex 完成后，让 NPC 复盘并继续观察是否形成 2 轮闭环。",
+      nextAction: observation.nextAction || "等待 Codex 完成后，让监督复盘继续观察是否形成 2 轮闭环。",
     };
   }
 
@@ -558,7 +558,7 @@ function deriveReadiness(items, target = {}) {
         stage: "trial",
         summary: "代码闸门已通过，并已观察到 1 轮真实闭环；适合短时试用，但还缺少第 2 轮连续闭环证据。",
         nextAction: appendTargetConfirmation(
-          observation.nextAction || "再跑至少 1 轮真实任务，确认发送、Codex 完成和 NPC 复盘能连续出现。",
+          observation.nextAction || "再跑至少 1 轮真实任务，确认发送、Codex 完成和监督复盘能连续出现。",
           target,
         ),
       };
@@ -578,7 +578,7 @@ function deriveReadiness(items, target = {}) {
       stage: "trial",
       summary: "代码闸门已通过，适合短时真实试用；但还缺少真实 2 轮闭环证据，暂不适合提高自动化时长。",
       nextAction: appendTargetConfirmation(
-        "启动真实任务，观察至少 2 次发送、Codex 完成、NPC 复盘的连续闭环，再判断是否提高自动化时长。",
+        "启动真实任务，观察至少 2 次发送、Codex 完成、监督复盘的连续闭环，再判断是否提高自动化时长。",
         target,
       ),
     };
@@ -626,7 +626,7 @@ function deriveMaturity(items, readiness = {}) {
 
   if (stage === "observing") {
     evidence.push("真实任务正在运行观测中。");
-    gaps.push("等待 Codex 完成当前轮并形成 NPC 复盘。");
+    gaps.push("等待 Codex 完成当前轮并形成监督复盘。");
     gaps.push("还缺少第 2 轮真实闭环证据。");
     return {
       label: "观察中",
@@ -648,7 +648,7 @@ function deriveMaturity(items, readiness = {}) {
       percent: codeGatesPassed ? 68 : 40,
       canTrial: false,
       canLongRun: false,
-      summary: "Codex 已完成但还缺少 NPC 监督复盘，暂时不能继续发送下一轮。",
+      summary: "Codex 已完成但还缺少监督复盘，暂时不能继续发送下一轮。",
       gaps,
       evidence,
     };
@@ -658,14 +658,14 @@ function deriveMaturity(items, readiness = {}) {
     const closedLoops = Number(observation.counters?.closedLoops || 0);
     if (closedLoops >= 2 && !hasMergedGuidanceEvidence(observation)) {
       evidence.push("已观察到至少 2 轮真实闭环。");
-      gaps.push("还缺少用户补充经本地模型 / NPC 合并进下一条指令的真实证据。");
+      gaps.push("还缺少用户补充经本地监督流程合并进下一条指令的真实证据。");
       gaps.push("长时间运行前需要确认移动端或桌面端补充引导能被合并到下一轮。");
       return {
         label: "短时试用",
         percent: 82,
         canTrial: true,
         canLongRun: false,
-        summary: "真实闭环已达标，但还没有观察到用户补充引导被本地模型 / NPC 合并进下一条指令，暂不进入长期运行。",
+        summary: "真实闭环已达标，但还没有观察到用户补充引导被本地监督流程合并进下一条指令，暂不进入长期运行。",
         gaps,
         evidence,
       };
@@ -674,9 +674,9 @@ function deriveMaturity(items, readiness = {}) {
       evidence.push("已观察到 1 轮真实闭环。");
       gaps.push("还缺少第 2 轮真实闭环证据。");
       if (!hasMergedGuidanceEvidence(observation)) {
-        gaps.push("还缺少用户补充引导经本地模型 / NPC 合并进下一条指令的真实证据。");
+        gaps.push("还缺少用户补充引导经本地监督流程合并进下一条指令的真实证据。");
       }
-      gaps.push("长时间运行前仍需要连续发送、Codex 完成和 NPC 复盘证据。");
+      gaps.push("长时间运行前仍需要连续发送、Codex 完成和监督复盘证据。");
       return {
         label: "短时试用",
         percent: 75,
@@ -689,7 +689,7 @@ function deriveMaturity(items, readiness = {}) {
     }
 
     gaps.push("还缺少真实 2 轮闭环证据。");
-    gaps.push("需要先观察发送、Codex 完成和 NPC 复盘是否连续出现。");
+    gaps.push("需要先观察发送、Codex 完成和监督复盘是否连续出现。");
     return {
       label: "短时试用",
       percent: codeGatesPassed ? 65 : 40,
@@ -721,7 +721,7 @@ function buildGuidanceEvidencePlan({
   if (canLongRun) {
     return {
       status: "satisfied",
-      summary: "已观察到用户补充经本地模型 / NPC 合并进下一条指令。",
+      summary: "已观察到用户补充经本地监督流程合并进下一条指令。",
       targetLabel: formatTargetLabel(target),
       steps: [],
     };
@@ -729,7 +729,7 @@ function buildGuidanceEvidencePlan({
 
   return {
     status: "needs_guidance_merge_evidence",
-    summary: "还需要 1 次真实用户补充合并证据：写入补充引导 -> 等 Codex 完成 -> 本地模型 / NPC 合并 -> 下一条指令发出。",
+    summary: "还需要 1 次真实用户补充合并证据：写入补充引导 -> 等 Codex 完成 -> 本地监督流程合并 -> 下一条指令发出。",
     targetLabel: formatTargetLabel(target),
     steps: [
       {
@@ -742,7 +742,7 @@ function buildGuidanceEvidencePlan({
       },
       {
         label: "模型合并",
-        detail: "确认补充引导被本地模型 / NPC 结合 Codex 回复合并进下一条指令。",
+        detail: "确认补充引导被本地监督流程结合 Codex 回复合并进下一条指令。",
       },
       {
         label: "重新检查",
@@ -763,8 +763,8 @@ function deriveGuidanceEvidence(items, maturity = {}, targetInfo = {}) {
     ? "已观察到用户补充合并证据"
     : "还差 1 次用户补充合并证据";
   const summary = canLongRun
-    ? `已观察到 ${current} 次用户补充被本地模型 / NPC 合并进下一条指令。`
-    : "还没有观察到用户补充被 NPC / Ollama / 本地模型合并进下一条指令。";
+    ? `已观察到 ${current} 次用户补充被本地监督流程合并进下一条指令。`
+    : "还没有观察到用户补充被本地监督流程合并进下一条指令。";
 
   return {
     current,
@@ -800,12 +800,12 @@ function buildClosedLoopEvidencePlan({
   if (maturity.label === "需恢复") {
     return {
       status: "needs_supervisor_recovery",
-      summary: "Codex 已有完成回复但还缺少 NPC 复盘，先补齐复盘再决定是否发送下一轮。",
+      summary: "Codex 已有完成回复但还缺少监督复盘，先补齐复盘再决定是否发送下一轮。",
       targetLabel: formatTargetLabel(target),
       steps: [
         {
           label: "补齐复盘",
-          detail: "先运行安全恢复入口，只补 NPC 复盘，不发送新指令。",
+          detail: "先运行安全恢复入口，只补监督复盘，不发送新指令。",
         },
         {
           label: "重新检查",
@@ -817,7 +817,7 @@ function buildClosedLoopEvidencePlan({
 
   return {
     status: "needs_more_real_loop_evidence",
-    summary: `还需要 ${remaining} 轮真实闭环：发送下一轮指令 -> Codex 完成 -> NPC 复盘。`,
+    summary: `还需要 ${remaining} 轮真实闭环：发送下一轮指令 -> Codex 完成 -> 监督复盘。`,
     targetLabel: formatTargetLabel(target),
     steps: [
       {
@@ -833,7 +833,7 @@ function buildClosedLoopEvidencePlan({
         detail: "Codex 未完成前不要追加发送，等待它进入可接收下一条指令的状态。",
       },
       {
-        label: "NPC 复盘",
+        label: "监督复盘",
         detail: "Codex 完成后等待产品经理、测试人员、真实用户视角完成复盘。",
       },
       {

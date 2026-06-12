@@ -55,9 +55,9 @@ function eventLabel(type) {
     codex_followup_dispatched: "正在等待 Codex",
     codex_followup_sent_waiting: "指令已送达，等待 Codex",
     codex_followup_completed: "Codex 已完成一轮",
-    supervisor_review_started: "NPC 复盘中",
-    supervisor_review_completed: "NPC 复盘完成",
-    supervisor_review_skipped: "NPC 复盘跳过",
+    supervisor_review_started: "监督复盘中",
+    supervisor_review_completed: "监督复盘完成",
+    supervisor_review_skipped: "监督复盘跳过",
     supervisor_verification_completed: "独立验收完成",
     codex_conversation_mirror_synced: "已同步 Codex 回复",
     codex_followup_failed: "续跑失败",
@@ -452,7 +452,7 @@ function deriveStatusAndAdvice(counters, timeline, { waiting = null, dispatch = 
   if (counters.closedLoops >= 2) {
     return {
       status: "passed",
-      summary: `最近一次运行周期已观察到 ${counters.closedLoops} 轮发送、Codex 完成和 NPC 复盘，具备继续真实长跑的基本证据。`,
+      summary: `最近一次运行周期已观察到 ${counters.closedLoops} 轮发送、Codex 完成和监督复盘，具备继续真实长跑的基本证据。`,
       nextAction: "可以继续真实任务；建议继续保留人工观察，并在多轮完成后再提高自动化时长。",
     };
   }
@@ -461,22 +461,22 @@ function deriveStatusAndAdvice(counters, timeline, { waiting = null, dispatch = 
     return {
       status: "attention",
       summary: "只观察到 1 轮完整闭环，说明链路可试用，但还不足以证明长期稳定运行。",
-      nextAction: "再跑至少 1 轮真实任务，确认发送、Codex 完成和 NPC 复盘能连续出现后，再提高自动化时长。",
+      nextAction: "再跑至少 1 轮真实任务，确认发送、Codex 完成和监督复盘能连续出现后，再提高自动化时长。",
     };
   }
 
   if ((counters.completions || 0) > (counters.supervisorReviews || 0)) {
     return {
       status: "attention",
-      summary: "Codex 已有完成回复，但还缺少 NPC 监督复盘，暂时不能算完整闭环。",
+      summary: "Codex 已有完成回复，但还缺少监督复盘，暂时不能算完整闭环。",
       nextAction: "先运行 npm run production:recover 补齐监督复盘；该命令不会发送下一轮指令。恢复后再运行 npm run production:status。",
     };
   }
 
   return {
     status: "attention",
-    summary: "已有运行记录，但还没有形成发送、完成、NPC 复盘的完整闭环证据。",
-    nextAction: "继续观察到至少一轮 Codex 完成和 NPC 复盘后，再判断是否适合长期运行。",
+    summary: "已有运行记录，但还没有形成发送、完成、监督复盘的完整闭环证据。",
+    nextAction: "继续观察到至少一轮 Codex 完成和监督复盘后，再判断是否适合长期运行。",
   };
 }
 
@@ -517,13 +517,13 @@ function deriveDiagnosis(counters, timeline, { hasRecovery = false, dispatch = n
       return {
         category: "partial_closed_loop_observed",
         userMessage: [
-          `已经观察到 ${counters.closedLoops} 轮发送、Codex 完成和 NPC 复盘。`,
+          `已经观察到 ${counters.closedLoops} 轮发送、Codex 完成和监督复盘。`,
           recoveredFailureNote,
         ].filter(Boolean).join(""),
         nextAction:
           counters.closedLoops >= 2
             ? "真实闭环证据已经达到长期运行基础要求，继续保留日志和人工观察。"
-            : "再跑至少 1 轮真实任务，确认发送、Codex 完成和 NPC 复盘能连续出现。",
+            : "再跑至少 1 轮真实任务，确认发送、Codex 完成和监督复盘能连续出现。",
       };
     }
     if (hasRecovery || timeline.some((event) => event.recoveredFromTimeout)) {
@@ -536,7 +536,7 @@ function deriveDiagnosis(counters, timeline, { hasRecovery = false, dispatch = n
     if ((counters.completions || 0) > (counters.supervisorReviews || 0)) {
       return {
         category: "completion_missing_supervisor_review",
-        userMessage: "Codex 已有完成回复，但还缺少 NPC 监督复盘，暂时不能算完整闭环。",
+        userMessage: "Codex 已有完成回复，但还缺少监督复盘，暂时不能算完整闭环。",
         nextAction: "先运行 npm run production:recover 补齐监督复盘；该命令不会发送下一轮指令。",
       };
     }
@@ -553,7 +553,7 @@ function deriveDiagnosis(counters, timeline, { hasRecovery = false, dispatch = n
     return {
       category: "healthy_or_waiting",
       userMessage: "当前周期没有失败记录。",
-      nextAction: "继续观察 Codex 完成和 NPC 复盘是否稳定出现。",
+      nextAction: "继续观察 Codex 完成和监督复盘是否稳定出现。",
     };
   }
 

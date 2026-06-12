@@ -50,7 +50,7 @@ test("production preflight reports trial readiness with explicit target confirma
       stage: "trial",
       summary: "代码闸门已通过，并已观察到 1 轮真实闭环。",
       nextAction:
-        "再跑至少 1 轮真实任务，确认发送、Codex 完成和 NPC 复盘能连续出现。 当前验证目标：按清单继续开发 / E:\\2026\\opencow / thread-123。触发真实循环前，请确认这就是要继续的任务。",
+        "再跑至少 1 轮真实任务，确认发送、Codex 完成和监督复盘能连续出现。 当前验证目标：按清单继续开发 / E:\\2026\\opencow / thread-123。触发真实循环前，请确认这就是要继续的任务。",
     },
     sections: [
       { label: "最近生产检查", status: "passed", summary: "8 项检查通过" },
@@ -59,8 +59,8 @@ test("production preflight reports trial readiness with explicit target confirma
       {
         label: "真实运行观测",
         status: "attention",
-        summary: "已经观察到 1 轮发送、Codex 完成和 NPC 复盘。",
-        nextAction: "再跑至少 1 轮真实任务，确认发送、Codex 完成和 NPC 复盘能连续出现。",
+        summary: "已经观察到 1 轮发送、Codex 完成和监督复盘。",
+        nextAction: "再跑至少 1 轮真实任务，确认发送、Codex 完成和监督复盘能连续出现。",
       },
     ],
   };
@@ -102,7 +102,7 @@ test("production preflight blocks dispatching to the current codex-loop thread",
       {
         label: "真实运行观测",
         status: "attention",
-        summary: "已经观察到 1 轮发送、Codex 完成和 NPC 复盘。",
+        summary: "已经观察到 1 轮发送、Codex 完成和监督复盘。",
       },
     ],
   };
@@ -141,7 +141,7 @@ test("production preflight blocks dispatch when Codex completion still needs sup
       {
         label: "真实运行观测",
         status: "attention",
-        summary: "Codex 已有完成回复，但还缺少 NPC 监督复盘，暂时不能算完整闭环。",
+        summary: "Codex 已有完成回复，但还缺少监督复盘，暂时不能算完整闭环。",
         nextAction: "先运行 npm run production:recover 补齐监督复盘；该命令不会发送下一轮指令。",
       },
     ],
@@ -153,7 +153,7 @@ test("production preflight blocks dispatch when Codex completion still needs sup
 
   assert.equal(preflight.status, "blocked");
   assert.equal(preflight.canDispatch, false);
-  assert.match(preflight.summary, /还缺少 NPC 监督复盘/);
+  assert.match(preflight.summary, /还缺少监督复盘/);
   assert.match(preflight.nextAction, /production:recover/);
   assert.match(preflight.evidence.join("\n"), /补齐监督复盘/);
 });
@@ -168,7 +168,7 @@ test("long-run smoke check is exposed and uses simulated controller dependencies
   assert.match(source, /runTurn/);
   assert.match(source, /reviewCompletion/);
   assert.match(source, /pendingUserGuidance/);
-  assert.match(source, /NPC|监督复盘|generatorSawGuidance/);
+  assert.match(source, /监督复盘|generatorSawGuidance/);
   assert.match(source, /产品经理|测试人员|真实用户|PM|QA/);
   assert.match(source, /independentVerification|独立验收/);
   assert.match(source, /cooldown|冷却|不重复/);
@@ -197,7 +197,7 @@ test("frontend evidence check verifies built desktop and mobile product surfaces
   assert.match(source, /dist[\\/]mobile/);
   assert.match(source, /历史对话/);
   assert.match(source, /发送引导/);
-  assert.match(source, /截图证据/);
+  assert.match(source, /视觉证据/);
   assert.match(source, /生产阶段/);
   assert.match(source, /验证目标/);
   assert.match(source, /启动预检/);
@@ -226,12 +226,12 @@ test("production status frontend evidence summary includes production stage", as
       {
         name: "桌面端",
         status: "passed",
-        requiredText: ["历史对话", "发送引导", "截图证据", "生产阶段", "验证目标", "启动预检", "待合并", "本地模型", "NPC"],
+        requiredText: ["历史对话", "发送引导", "视觉证据", "生产阶段", "验证目标", "启动预检", "待合并", "本地模型监督流程", "监督复盘"],
       },
       {
         name: "移动端",
         status: "passed",
-        requiredText: ["历史对话", "发送引导", "截图证据", "生产阶段", "验证目标", "启动预检", "待合并", "本地模型", "NPC"],
+        requiredText: ["历史对话", "发送引导", "视觉证据", "生产阶段", "验证目标", "启动预检", "待合并", "本地模型监督流程", "监督复盘"],
       },
     ],
   });
@@ -256,7 +256,7 @@ test("production status frontend evidence summary includes production stage", as
     assert.match(frontend.summary, /验证目标/);
     assert.match(frontend.summary, /历史对话/);
     assert.match(frontend.summary, /发送引导/);
-    assert.match(frontend.summary, /NPC 已进入构建产物/);
+    assert.match(frontend.summary, /本地模型监督流程、监督复盘 已进入构建产物/);
     assert.doesNotMatch(frontend.summary, /NPC已进入构建产物/);
   } finally {
     process.chdir(previousCwd);
@@ -843,7 +843,7 @@ test("production status falls back to the latest fresh observation report when l
     status: "passed",
     finishedAt: now,
     durationMs: 1,
-    summary: "已观察到 2 轮发送、Codex 完成和 NPC 复盘。",
+    summary: "已观察到 2 轮发送、Codex 完成和监督复盘。",
     counters: {
       dispatches: 2,
       completions: 2,
@@ -942,7 +942,7 @@ test("production status separates passed code gates from missing live long-run e
     assert.match(status.readiness.summary, /代码闸门已通过/);
     assert.match(status.readiness.summary, /缺少真实 2 轮闭环证据/);
     assert.match(status.readiness.nextAction, /启动真实任务/);
-    assert.match(status.readiness.nextAction, /发送、Codex 完成、NPC 复盘/);
+    assert.match(status.readiness.nextAction, /发送、Codex 完成、监督复盘/);
     assert.doesNotMatch(status.readiness.summary, /长期无人值守/);
   } finally {
     process.chdir(previousCwd);
@@ -980,11 +980,11 @@ test("production status treats one real closed loop as trial evidence instead of
     finishedAt: now,
     durationMs: 1,
     summary: "只观察到 1 轮完整闭环，说明链路可试用，但还不足以证明长期稳定运行。",
-    nextAction: "再跑至少 1 轮真实任务，确认发送、Codex 完成和 NPC 复盘能连续出现。",
+    nextAction: "再跑至少 1 轮真实任务，确认发送、Codex 完成和监督复盘能连续出现。",
     diagnosis: {
       category: "partial_closed_loop_observed",
-      userMessage: "已经观察到 1 轮发送、Codex 完成和 NPC 复盘。",
-      nextAction: "再跑至少 1 轮真实任务，确认发送、Codex 完成和 NPC 复盘能连续出现。",
+      userMessage: "已经观察到 1 轮发送、Codex 完成和监督复盘。",
+      nextAction: "再跑至少 1 轮真实任务，确认发送、Codex 完成和监督复盘能连续出现。",
     },
     counters: {
       dispatches: 1,
@@ -1050,7 +1050,7 @@ test("production status includes the bound task target before asking for another
     finishedAt: now,
     durationMs: 1,
     summary: "只观察到 1 轮完整闭环，说明链路可试用，但还不足以证明长期稳定运行。",
-    nextAction: "再跑至少 1 轮真实任务，确认发送、Codex 完成和 NPC 复盘能连续出现。",
+    nextAction: "再跑至少 1 轮真实任务，确认发送、Codex 完成和监督复盘能连续出现。",
     counters: {
       dispatches: 1,
       completions: 1,
@@ -1367,7 +1367,7 @@ test("production status exposes mobile remote-control evidence separately from m
     assert.match(status.mobileControlEvidence.label, /移动端远程操控闭环/);
     assert.match(status.mobileControlEvidence.summary, /真实保存并撤回补充/);
     assert.equal(status.guidanceEvidence.current, 0);
-    assert.match(status.guidanceEvidence.summary, /还没有观察到用户补充被 NPC|Ollama|本地模型合并/);
+    assert.match(status.guidanceEvidence.summary, /还没有观察到用户补充被本地监督流程合并/);
   } finally {
     process.chdir(previousCwd);
   }
@@ -1487,7 +1487,7 @@ test("production status requires merged guidance evidence before long-running ma
   await writeReport("runtime/frontend-evidence", "latest-frontend-evidence.json", {
     status: "passed",
     finishedAt: "2026-06-10T08:01:00.000Z",
-    results: [{ status: "passed", requiredText: ["历史对话", "发送引导", "待合并", "本地模型", "NPC"] }],
+    results: [{ status: "passed", requiredText: ["历史对话", "发送引导", "待合并", "本地模型监督流程", "监督复盘"] }],
   });
   await writeReport("runtime/longrun-smoke", "latest-longrun-smoke.json", {
     status: "passed",
@@ -1497,7 +1497,7 @@ test("production status requires merged guidance evidence before long-running ma
   await writeReport("runtime/production-observations", "no-guidance-production-observation.json", {
     status: "passed",
     finishedAt: "2026-06-10T08:03:00.000Z",
-    summary: "最近一次运行周期已观察到 2 轮发送、Codex 完成和 NPC 复盘。",
+    summary: "最近一次运行周期已观察到 2 轮发送、Codex 完成和监督复盘。",
     counters: {
       dispatches: 2,
       completions: 2,
@@ -1528,7 +1528,7 @@ test("production status requires merged guidance evidence before long-running ma
     assert.equal(status.guidanceEvidence.current, 0);
     assert.equal(status.guidanceEvidence.target, 1);
     assert.equal(status.guidanceEvidence.canLongRun, false);
-    assert.match(status.guidanceEvidence.summary, /还没有观察到用户补充被 NPC|Ollama|本地模型合并/);
+    assert.match(status.guidanceEvidence.summary, /还没有观察到用户补充被本地监督流程合并/);
   } finally {
     process.chdir(previousCwd);
   }
@@ -1597,7 +1597,7 @@ test("production status exposes structured maturity and remaining gaps", async (
     assert.equal(Array.isArray(status.closedLoopEvidence.evidencePlan.steps), true);
     assert.deepEqual(
       status.closedLoopEvidence.evidencePlan.steps.map((step) => step.label),
-      ["确认目标", "发送一轮", "等待 Codex 完成", "NPC 复盘", "重新检查"],
+      ["确认目标", "发送一轮", "等待 Codex 完成", "监督复盘", "重新检查"],
     );
     assert.doesNotMatch(
       status.closedLoopEvidence.evidencePlan.steps.map((step) => `${step.label} ${step.detail}`).join("\n"),
@@ -1738,11 +1738,11 @@ test("production status marks missing supervisor recovery as not ready for trial
     status: "attention",
     finishedAt: now,
     durationMs: 1,
-    summary: "Codex 已有完成回复，但还缺少 NPC 监督复盘，暂时不能算完整闭环。",
+    summary: "Codex 已有完成回复，但还缺少监督复盘，暂时不能算完整闭环。",
     nextAction: "先运行 npm run production:recover 补齐监督复盘；该命令不会发送下一轮指令。",
     diagnosis: {
       category: "completion_missing_supervisor_review",
-      userMessage: "Codex 已有完成回复，但还缺少 NPC 监督复盘，暂时不能算完整闭环。",
+      userMessage: "Codex 已有完成回复，但还缺少监督复盘，暂时不能算完整闭环。",
       nextAction: "先运行 npm run production:recover 补齐监督复盘；该命令不会发送下一轮指令。",
     },
     counters: {
@@ -1762,7 +1762,7 @@ test("production status marks missing supervisor recovery as not ready for trial
     });
 
     assert.equal(status.readiness.stage, "blocked");
-    assert.match(status.readiness.summary, /缺少 NPC 监督复盘/);
+    assert.match(status.readiness.summary, /缺少监督复盘/);
     assert.match(status.readiness.nextAction, /production:recover/);
     assert.equal(status.maturity.label, "需恢复");
     assert.equal(status.maturity.canTrial, false);
@@ -1848,7 +1848,7 @@ test("frontend evidence check requires closed-loop evidence progress on desktop 
   assert.match(source, /复制命令/);
   assert.match(source, /复制文件/);
   assert.match(source, /本地模型/);
-  assert.match(source, /NPC/);
+  assert.match(source, /本地模型监督流程/);
   assert.match(source, /待合并/);
   assert.match(source, /已合并补充/);
   assert.match(source, /先确认桌面端和移动端构建产物是否包含/);

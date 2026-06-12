@@ -67,10 +67,10 @@ test("dashboard can send queued guidance once from monitor mode without starting
   assert.match(appSource, /<DashboardHome[\s\S]*onSendPendingGuidance=\{sendPendingGuidance\}/);
 });
 
-test("dashboard exposes customizable npc supervisor settings", async () => {
+test("dashboard exposes customizable supervisor settings", async () => {
   const appSource = await fs.readFile("app/web/src/App.jsx", "utf8");
 
-  assert.match(appSource, /NPC 角色/);
+  assert.match(appSource, /监督角色/);
   assert.match(appSource, /角色特性/);
   assert.match(appSource, /测试规则/);
   assert.match(appSource, /验收标准/);
@@ -80,10 +80,10 @@ test("dashboard exposes customizable npc supervisor settings", async () => {
   assert.match(appSource, /settingsForm\.supervisorAcceptanceCriteria/);
 });
 
-test("dashboard exposes current task npc supervisor settings separately", async () => {
+test("dashboard exposes current task supervisor settings separately", async () => {
   const appSource = await fs.readFile("app/web/src/App.jsx", "utf8");
 
-  assert.match(appSource, /当前任务 NPC/);
+  assert.match(appSource, /当前任务监督/);
   assert.match(appSource, /\/loop-supervisor/);
   assert.match(appSource, /loopSupervisorForm/);
   assert.match(appSource, /当前任务专用/);

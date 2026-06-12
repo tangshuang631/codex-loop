@@ -20,7 +20,7 @@ The current top priority is the core local loop business:
 
 - loop 内核稳定：状态机、等待策略、预算、停止、恢复和错误分类必须可靠。
 - Codex 联动真实：绑定线程、发送指令、聊天镜像和完成状态识别必须可验证。
-- NPC 决策可信：Ollama / 本地模型必须基于项目文档、用户规则和 Codex 最新回复生成下一步。
+- 监督决策可信：Ollama / 本地模型必须基于项目文档、用户规则和 Codex 最新回复生成下一步。
 - 验证反馈闭环：测试、构建、日志、截图或人工验收结果必须回到 loop 状态。
 - 用户界面减噪：首页只展示状态、对话和必要操作，解释性内容进入帮助页或文档。
 - 长期运行治理：失败要可读、可恢复、可停止，不允许假装发送成功或盲目续跑。
@@ -33,7 +33,7 @@ The current top priority is the core local loop business:
 - P0 远程联动：安卓 App / PWA 必须能作为核心入口查看循环进程、历史对话、待合并引导，并支持远程操控，包括远程发送引导、编辑引导和撤回引导；它不是 P3 之后的附属查看页。
 - P0 Codex 风格对话：桌面端和移动端必须共用接近 Codex 桌面端的历史渲染规则。普通回复按连续对话流呈现；文件改动、命令输出、脚本内容、测试日志、截图证据等大块信息默认折叠，点击后展开详情，并提供复制文件路径、命令和脚本内容的入口。
 - P1 可控闭环：系统能识别 Codex 是否仍在工作，用户补充会排队等待当前轮完成，停止条件和预算会阻止下一轮派发。
-- P2 可验证闭环：NPC 会结合项目文档、用户规则和 Codex 最新回复生成下一步；测试、构建、日志或截图验收能写回状态。
+- P2 可验证闭环：本地监督流程会结合项目文档、用户规则和 Codex 最新回复生成下一步；测试、构建、日志或截图验收能写回状态。
 - P3 可长期监控闭环：运行日志可读，失败可恢复，多设备长期授权、重连、撤销和审计稳定。
 - P4 企业级治理闭环：多项目多 loop 稳定运行，角色规则可定制，权限边界可审计，长期任务有成本、失败率和质量趋势。
 
@@ -45,7 +45,7 @@ Required behavior:
 
 - 新建任务 must first describe the user goal and target project, then optionally configure loop behavior.
 - 不开始循环 must not make the task useless; it should still monitor Codex and allow guidance messages.
-- 发送引导 while Codex is working must wait until Codex can accept the next turn, then merge the guidance through the NPC workflow.
+- 发送引导 while Codex is working must wait until Codex can accept the next turn, then merge the guidance through the local supervisor workflow.
 - Binding should prefer 项目路径 + Codex 窗口名. Manual thread ID is only a fallback when automatic matching is unclear.
 
 Current implementation progress:
@@ -128,7 +128,7 @@ The first mobile App capability must be production-shaped, not a debug page:
 - collapsible detail blocks for edited files, command output, scripts, tests, screenshots, and verification logs
 - a Codex-like conversation flow instead of separated dashboard cards
 - long-lived pairing so the same phone can reconnect after the workstation service restarts
-- the same queue rule as desktop: if Codex is still working or NPC review is running, user guidance waits and does not interrupt
+- the same queue rule as desktop: if Codex is still working or supervisor review is running, user guidance waits and does not interrupt
 - clear status labels for whether Codex is waiting, working, reviewing, blocked, or ready for the next instruction
 
 Not:

@@ -295,7 +295,7 @@ function readableRuntimeEventTitle(type, event = {}) {
     supervisor_review_completed: "已完成监督复盘",
     supervisor_review_skipped: "已跳过监督复盘",
     supervisor_verification_completed: "已完成独立验收",
-    loop_supervisor_updated: "已更新当前任务 NPC",
+    loop_supervisor_updated: "已更新当前任务监督规则",
     codex_thread_mirror_synced: "已同步 Codex 记录",
     codex_conversation_mirror_synced: "已同步 Codex 对话",
     codex_followup_failed: "续跑失败",
@@ -722,7 +722,7 @@ async function markSupervisorReviewStarted(snapshot, { at = nowIso() } = {}) {
     snapshot.state,
     {
       continuationStatus: "reviewing",
-      latestSummary: "Codex 已完成当前轮，本地模型 NPC 正在复盘回复并决定下一步。",
+      latestSummary: "Codex 已完成当前轮，本地模型监督流程正在复盘回复并决定下一步。",
       latestEventType: "supervisor_review_started",
       lastContinuationError: "",
       lastUpdatedAt: at,
@@ -2270,7 +2270,7 @@ function deriveLatestInstructionSourceView(source, warning) {
       latestInstructionSourceLabel: "本地模型生成",
       latestInstructionSourceTone: "ready",
       latestInstructionSourceDetail:
-        "最近一条发给 Codex 的指令已经过 Ollama / NPC 工作流整理。",
+        "最近一条发给 Codex 的指令已经过本地模型监督流程整理。",
     };
   }
 
@@ -2289,7 +2289,7 @@ function deriveLatestInstructionSourceView(source, warning) {
       latestInstructionSourceLabel: "精简模板",
       latestInstructionSourceTone: "soft",
       latestInstructionSourceDetail:
-        "最近一条指令使用精简模板生成；开启本地模型后会优先交给 Ollama / NPC 处理。",
+        "最近一条指令使用精简模板生成；开启本地模型后会优先交给本地模型监督流程处理。",
     };
   }
 
@@ -2311,7 +2311,7 @@ function deriveCodexSummarySourceView(source, warning) {
       latestCodexSummarySourceLabel: "本地模型整理",
       latestCodexSummarySourceTone: "ready",
       latestCodexSummarySourceDetail:
-        "最新 Codex 回复已经过 Ollama / NPC 工作流整理，更适合在控制台和移动端查看。",
+        "最新 Codex 回复已经过本地模型监督流程整理，更适合在控制台和移动端查看。",
     };
   }
 
@@ -2333,7 +2333,7 @@ function deriveCodexSummarySourceView(source, warning) {
       latestCodexSummarySourceLabel: "原文",
       latestCodexSummarySourceTone: "soft",
       latestCodexSummarySourceDetail:
-        "最新 Codex 回复直接使用原文展示；开启本地模型后会优先交给 Ollama / NPC 整理。",
+        "最新 Codex 回复直接使用原文展示；开启本地模型后会优先交给本地模型监督流程整理。",
     };
   }
 
@@ -2684,7 +2684,7 @@ function buildProcessStatus(snapshot) {
     headline = "监督复盘中";
     detail = "本地模型监督流程正在以产品经理、测试人员、挑剔用户和监工视角复盘 Codex 回复，完成前不会发送下一条指令。";
     canSendNextTurn = false;
-    holdReason = "Codex 已完成当前轮，本地模型 NPC 正在复盘并决定下一步。";
+    holdReason = "Codex 已完成当前轮，本地模型监督流程正在复盘并决定下一步。";
     nextAction = "等待复盘结束；如有新要求，可以先写入补充引导。";
   } else if (waitingForCodex) {
     state = "codex_working";

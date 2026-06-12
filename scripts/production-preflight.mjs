@@ -29,7 +29,7 @@ function buildEvidence(status) {
   if (status.readiness?.stage === "production") {
     evidence.push("真实运行已具备 2 轮闭环证据。");
   } else if (needsSupervisorRecovery(status)) {
-    evidence.push("Codex 已有完成回复，但还缺少 NPC 监督复盘；请先运行 npm run production:recover 补齐监督复盘。");
+    evidence.push("Codex 已有完成回复，但还缺少监督复盘；请先运行 npm run production:recover 补齐监督复盘。");
   } else if (/1 轮/u.test(`${observation.summary || ""}\n${status.readiness?.summary || ""}`)) {
     evidence.push("真实运行已经观察到 1 轮闭环，还缺少第 2 轮连续闭环证据。");
   } else {
@@ -48,7 +48,7 @@ function needsSupervisorRecovery(status = {}) {
     observation.summary,
     observation.nextAction,
   ].filter(Boolean).join("\n");
-  return /缺少\s*NPC\s*监督复盘|补齐监督复盘|production:recover/u.test(textBlock);
+  return /缺少\s*(NPC\s*)?监督复盘|补齐监督复盘|production:recover/u.test(textBlock);
 }
 
 function derivePreflightStatus(status) {
@@ -91,7 +91,7 @@ export async function readProductionPreflightSummary({
     "请绑定另一个可见 Codex 窗口作为目标线程，再重新运行预检。";
   const supervisorRecovery = needsSupervisorRecovery(status);
   const recoverySummary =
-    "Codex 已有完成回复，但还缺少 NPC 监督复盘，不能继续发送下一轮。";
+    "Codex 已有完成回复，但还缺少监督复盘，不能继续发送下一轮。";
   const recoveryNextAction =
     "请先运行 npm run production:recover 补齐监督复盘；该命令不会发送下一轮指令。";
 
@@ -119,7 +119,7 @@ export async function readProductionPreflightSummary({
       : supervisorRecovery
         ? recoveryNextAction
       : decision.canDispatch
-      ? `${targetAction}再启动真实任务，观察发送、Codex 完成和 NPC 复盘是否连续出现。`
+      ? `${targetAction}再启动真实任务，观察发送、Codex 完成和监督复盘是否连续出现。`
       : status.nextAction || status.readiness?.nextAction || "先处理预检提示后再继续。",
     evidence,
     sourceStatus: status.status,

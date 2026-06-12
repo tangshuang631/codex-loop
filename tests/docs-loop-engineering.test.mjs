@@ -35,7 +35,7 @@ test("README presents the enterprise loop architecture layers", async () => {
   assert.match(readmeSource, /企业级结构/);
   assert.match(readmeSource, /Loop 内核/);
   assert.match(readmeSource, /Codex 联动层/);
-  assert.match(readmeSource, /NPC 决策层/);
+  assert.match(readmeSource, /监督决策层/);
   assert.match(readmeSource, /验证层/);
   assert.match(readmeSource, /产品界面层/);
   assert.match(readmeSource, /运行治理层/);
@@ -187,5 +187,5 @@ test("docs expose production status summary for long-running operation", async (
   assert.match(combinedSource, /12 小时/);
   assert.match(combinedSource, /重新运行 npm run production:check/);
   assert.match(combinedSource, /至少 2 轮|两轮/);
-  assert.match(combinedSource, /发送.*Codex 完成.*NPC 复盘|NPC 复盘.*Codex 完成.*发送/);
+  assert.match(combinedSource, /发送.*Codex 完成.*监督复盘|监督复盘.*Codex 完成.*发送/);
 });

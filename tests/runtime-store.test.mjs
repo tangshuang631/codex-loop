@@ -1134,7 +1134,7 @@ test("runLoopTurn records readable model source when waiting for Codex", async (
 
   assert.equal(snapshot.thread.lastDispatchPromptGenerator, "ollama");
   assert.ok(sentEvent, "运行记录里应该保留指令送达事件");
-  assert.match(sentEvent.detail, /本地模型生成|Ollama|NPC/);
+  assert.match(sentEvent.detail, /本地监督流程|本地模型生成|Ollama/);
   assert.match(sentEvent.detail, /等待 Codex/);
 });
 

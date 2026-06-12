@@ -137,7 +137,7 @@ async function runSmoke() {
       if (pendingUserGuidance) {
         generatorSawGuidance = pendingUserGuidance;
         dispatchedPromptWithGuidance =
-          "NPC 已结合 Codex 最新回复和用户补充生成下一步：" +
+          "本地监督流程已结合 Codex 最新回复和用户补充生成下一步：" +
           pendingUserGuidance;
       }
       events.push(
@@ -269,7 +269,7 @@ async function runSmoke() {
     !generatorSawGuidance ||
     currentSnapshot.thread.pendingUserGuidance
   ) {
-    throw new Error("Codex 完成后必须让 NPC 看到用户补充，融合到下一轮后再清空。");
+    throw new Error("Codex 完成后必须让本地监督流程看到用户补充，融合到下一轮后再清空。");
   }
   if (!/移动端引导/.test(dispatchedPromptWithGuidance)) {
     throw new Error("融合后的下一轮指令缺少用户补充重点。");
@@ -322,7 +322,7 @@ async function runSmoke() {
       "第一轮发送后进入等待 Codex",
       "Codex 未完成时不追发",
       "Codex 完成后先监督复盘再续发",
-      "用户补充会等 Codex 完成后交给 NPC 合并",
+      "用户补充会等 Codex 完成后交给本地监督流程合并",
       "定期以产品经理、测试人员和真实用户视角做独立验收，并在冷却期内不重复执行",
       "预算到达后停止自动发送",
     ],

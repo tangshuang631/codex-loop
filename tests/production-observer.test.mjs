@@ -37,7 +37,7 @@ test("production observer builds a readable timeline from real runtime events", 
       {
         type: "supervisor_review_completed",
         at: "2026-06-10T08:12:00.000Z",
-        summary: "NPC 以产品经理和测试人员视角确认可以继续。",
+        summary: "监督复盘以产品经理和测试人员视角确认可以继续。",
       },
       {
         type: "codex_followup_dispatching",
@@ -58,7 +58,7 @@ test("production observer builds a readable timeline from real runtime events", 
       {
         type: "supervisor_review_completed",
         at: "2026-06-10T08:19:00.000Z",
-        summary: "NPC 复盘确认第二轮仍可继续。",
+        summary: "监督复盘确认第二轮仍可继续。",
       },
       {
         type: "graceful_stop_completed",
@@ -88,7 +88,7 @@ test("production observer builds a readable timeline from real runtime events", 
   assert.equal(report.counters.supervisorReviews, 2);
   assert.equal(report.counters.failures, 0);
   assert.equal(report.counters.stopEvents, 1);
-  assert.match(report.summary, /已观察到 2 轮发送、Codex 完成和 NPC 复盘/);
+  assert.match(report.summary, /已观察到 2 轮发送、Codex 完成和监督复盘/);
   assert.match(report.nextAction, /可以继续真实任务/);
   assert.match(report.timeline.map((item) => item.label).join("\n"), /Codex 已完成一轮/);
   assert.match(report.timeline.map((item) => item.detail).join("\n"), /移动端历史对话/);
@@ -119,7 +119,7 @@ test("production observer treats one complete cycle as trial evidence, not long-
       {
         type: "supervisor_review_completed",
         at: "2026-06-10T08:12:00.000Z",
-        summary: "NPC 以产品经理和测试人员视角确认可以继续。",
+        summary: "监督复盘以产品经理和测试人员视角确认可以继续。",
       },
     ]
       .map((event) => JSON.stringify(event))
@@ -172,7 +172,7 @@ test("production observer counts merged guidance evidence from dispatched prompt
       {
         type: "supervisor_review_completed",
         at: "2026-06-10T08:12:00.000Z",
-        summary: "NPC 复盘确认用户补充已经落实。",
+        summary: "监督复盘确认用户补充已经落实。",
       },
     ].map((event) => JSON.stringify(event)).join("\n") + "\n",
     "utf8",
@@ -220,7 +220,7 @@ test("production observer only counts ordered dispatch-completion-review cycles"
   assert.equal(report.counters.completions, 2);
   assert.equal(report.counters.supervisorReviews, 2);
   assert.equal(report.counters.closedLoops, 0);
-  assert.match(report.summary, /还没有形成发送、完成、NPC 复盘的完整闭环证据/);
+  assert.match(report.summary, /还没有形成发送、完成、监督复盘的完整闭环证据/);
 });
 
 test("production observer defaults to config.currentRunId for multi-task consoles", async () => {
@@ -397,7 +397,7 @@ test("production observer treats later Codex mirror replies as timeout recovery 
   assert.equal(report.diagnosis.category, "codex_reply_recovered_after_timeout");
   assert.equal(report.counters.failures, 0);
   assert.equal(report.counters.completions, 1);
-  assert.match(report.summary, /缺少 NPC 监督复盘/);
+  assert.match(report.summary, /缺少监督复盘/);
   assert.match(report.nextAction, /production:recover/);
   assert.match(report.diagnosis.nextAction, /production:recover/);
   assert.doesNotMatch(report.nextAction, /不要立即连续补发/);
@@ -465,7 +465,7 @@ test("production observer stops asking for recovery after recovered replies are 
       {
         type: "supervisor_review_completed",
         at: "2026-06-10T11:31:00.000Z",
-        summary: "NPC 复盘确认恢复后的回复可以继续观察。",
+        summary: "监督复盘确认恢复后的回复可以继续观察。",
       },
     ].map((event) => JSON.stringify(event)).join("\n") + "\n",
     "utf8",
@@ -718,7 +718,7 @@ test("production observer judges the latest run cycle while preserving historica
       {
         type: "supervisor_review_completed",
         at: "2026-06-10T09:10:00.000Z",
-        summary: "NPC 复盘认为当前轮可以继续。",
+        summary: "监督复盘认为当前轮可以继续。",
       },
       {
         type: "codex_followup_dispatching",
@@ -734,7 +734,7 @@ test("production observer judges the latest run cycle while preserving historica
       {
         type: "supervisor_review_completed",
         at: "2026-06-10T09:20:00.000Z",
-        summary: "NPC 复盘认为第二轮也可以继续。",
+        summary: "监督复盘认为第二轮也可以继续。",
       },
     ]
       .map((event) => JSON.stringify(event))
@@ -788,7 +788,7 @@ test("production observer treats early same-run failures as resolved after two l
       {
         type: "supervisor_review_completed",
         at: "2026-06-10T09:13:00.000Z",
-        summary: "NPC 复盘确认第一轮可继续。",
+        summary: "监督复盘确认第一轮可继续。",
       },
       {
         type: "codex_followup_dispatching",
@@ -804,7 +804,7 @@ test("production observer treats early same-run failures as resolved after two l
       {
         type: "supervisor_review_completed",
         at: "2026-06-10T09:23:00.000Z",
-        summary: "NPC 复盘确认第二轮可继续。",
+        summary: "监督复盘确认第二轮可继续。",
       },
     ].map((event) => JSON.stringify(event)).join("\n") + "\n",
     "utf8",
@@ -819,7 +819,7 @@ test("production observer treats early same-run failures as resolved after two l
   assert.equal(report.counters.failures, 1);
   assert.equal(report.counters.unresolvedFailures, 0);
   assert.equal(report.counters.closedLoops, 2);
-  assert.match(report.summary, /2 轮发送、Codex 完成和 NPC 复盘/);
+  assert.match(report.summary, /2 轮发送、Codex 完成和监督复盘/);
   assert.match(report.diagnosis.userMessage, /早期失败已被后续稳定闭环覆盖/);
 });
 test("production observer counts dispatched events as delivered waiting evidence", async () => {
@@ -843,7 +843,7 @@ test("production observer counts dispatched events as delivered waiting evidence
       {
         type: "supervisor_review_completed",
         at: "2026-06-10T08:12:00.000Z",
-        summary: "NPC 澶嶇洏纭鍙互缁х画銆?",
+        summary: "监督复盘确认可以继续。",
       },
     ].map((event) => JSON.stringify(event)).join("\n") + "\n",
     "utf8",

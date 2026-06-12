@@ -44,7 +44,7 @@ function controllerStatus(state, overrides = {}) {
       running: true,
       state: "supervisor_reviewing",
       label: "监督复盘中",
-      detail: "Codex 已完成当前轮，本地模型 NPC 正在复盘并决定下一步。",
+      detail: "Codex 已完成当前轮，本地模型监督流程正在复盘并决定下一步。",
       nextAction: "等待复盘结束；如有新要求，先写入下一轮补充引导。",
     },
     paused_by_review: {

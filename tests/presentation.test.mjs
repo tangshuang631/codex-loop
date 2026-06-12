@@ -225,13 +225,13 @@ test("buildModelPipelineSummary reports whether ollama or fallback is currently 
   assert.deepEqual(
     buildModelPipelineSummary({
       latestInstructionSourceLabel: "本地模型生成",
-      latestInstructionSourceDetail: "最近一条发给 Codex 的指令已经过 Ollama / NPC 工作流整理。",
+      latestInstructionSourceDetail: "最近一条发给 Codex 的指令已经过本地模型监督流程整理。",
       latestCodexSummarySourceLabel: "原文降级",
       latestCodexSummarySourceDetail: "Ollama 摘要整理失败，已保留 Codex 原文。",
     }),
     {
       headline: "指令：本地模型生成；回复：原文降级",
-      detail: "最近一条发给 Codex 的指令已经过 Ollama / NPC 工作流整理。 Ollama 摘要整理失败，已保留 Codex 原文。",
+      detail: "最近一条发给 Codex 的指令已经过本地模型监督流程整理。 Ollama 摘要整理失败，已保留 Codex 原文。",
     },
   );
 });
