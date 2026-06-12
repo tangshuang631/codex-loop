@@ -1627,7 +1627,8 @@ select {
 }
 
 .mobile-pairing-devices,
-.mobile-pairing-audit {
+.mobile-pairing-audit,
+.mobile-pairing-backup {
   display: grid;
   gap: 0;
   border-top: 1px solid #eeeeea;
@@ -1663,19 +1664,26 @@ select {
   cursor: pointer;
 }
 
-.mobile-pairing-audit {
+.mobile-pairing-audit,
+.mobile-pairing-backup {
   padding-top: 8px;
 }
 
-.mobile-pairing-audit summary {
+.mobile-pairing-audit summary,
+.mobile-pairing-backup summary {
   color: var(--muted);
   cursor: pointer;
   font-size: 12px;
   list-style: none;
 }
 
-.mobile-pairing-audit summary::-webkit-details-marker {
+.mobile-pairing-audit summary::-webkit-details-marker,
+.mobile-pairing-backup summary::-webkit-details-marker {
   display: none;
+}
+
+.mobile-pairing-backup[open] {
+  gap: 8px;
 }
 
 .mobile-pairing-code,

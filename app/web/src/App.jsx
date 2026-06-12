@@ -941,17 +941,11 @@ function MobileAccessFold({
               </button>
             </div>
             {pairingSession?.browserPairingUrl ? (
-              <div className="mobile-pairing-code">
-                <span>手机浏览器直达</span>
-                <code>{pairingSession.browserPairingUrl}</code>
-                <button type="button" onClick={() => copyTextToClipboard(pairingSession.browserPairingUrl)}>
-                  复制绑定链接
-                </button>
-              </div>
+              <p>手机扫码后会自动打开绑定页；如果扫码失败，可以展开备用方式。</p>
             ) : null}
             {pairingSession?.qrPayload ? (
               <div className="mobile-pairing-qr">
-                <span>扫码内容</span>
+                <span>二维码</span>
                 {pairingQrDataUrl ? (
                   <img
                     className="mobile-pairing-qr-image"
@@ -959,11 +953,30 @@ function MobileAccessFold({
                     alt="手机扫码绑定"
                   />
                 ) : null}
-                <code>{pairingSession.qrPayload}</code>
-                <button type="button" onClick={() => copyTextToClipboard(pairingSession.qrPayload)}>
-                  复制扫码内容
-                </button>
               </div>
+            ) : null}
+            {pairingSession?.browserPairingUrl || pairingSession?.qrPayload ? (
+              <details className="mobile-pairing-backup">
+                <summary>备用绑定方式</summary>
+                {pairingSession?.browserPairingUrl ? (
+                  <div className="mobile-pairing-code">
+                    <span>绑定链接</span>
+                    <code>{pairingSession.browserPairingUrl}</code>
+                    <button type="button" onClick={() => copyTextToClipboard(pairingSession.browserPairingUrl)}>
+                      复制链接
+                    </button>
+                  </div>
+                ) : null}
+                {pairingSession?.qrPayload ? (
+                  <div className="mobile-pairing-code">
+                    <span>扫码内容</span>
+                    <code>{pairingSession.qrPayload}</code>
+                    <button type="button" onClick={() => copyTextToClipboard(pairingSession.qrPayload)}>
+                      复制内容
+                    </button>
+                  </div>
+                ) : null}
+              </details>
             ) : null}
             {pairingSession?.expiresAt ? (
               <p>有效期到 {formatTime(pairingSession.expiresAt)}，过期后重新生成即可。</p>
