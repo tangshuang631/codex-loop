@@ -89,7 +89,7 @@ test("dashboard uses mobile process status as the primary runtime status source"
   assert.match(appSource, /pendingGuidanceMergeLabel/);
   assert.match(appSource, /pendingGuidanceMergeDetail/);
   assert.match(appSource, /conversation-inline-status/);
-  assert.match(appSource, /本地模型|NPC|Ollama/);
+  assert.match(appSource, /本地模型|监督流程/);
 });
 
 test("dashboard surfaces merged guidance evidence without adding a new card", async () => {
@@ -320,7 +320,7 @@ test("dashboard folds the next real closed-loop evidence plan into status detail
   assert.match(statusSource, /确认目标/);
   assert.match(statusSource, /发送一轮/);
   assert.match(statusSource, /等待 Codex 完成/);
-  assert.match(statusSource, /NPC 复盘/);
+  assert.match(statusSource, /监督复盘/);
   assert.match(statusSource, /重新检查/);
   assert.match(statusSource, /status-detail-fold/);
   assert.doesNotMatch(appSource, /closed-loop-plan-card/);
@@ -334,7 +334,7 @@ test("dashboard surfaces supervisor review without adding noisy debug cards", as
   assert.match(appSource, /processStatus\?\.supervisorInstructionPreview/);
   assert.match(appSource, /processStatus\?\.supervisorPerspectiveRows/);
   assert.match(appSource, /监督复盘/);
-  assert.match(appSource, /NPC 视角/);
+  assert.match(appSource, /监督视角/);
   assert.match(appSource, /下一条指令/);
 });
 
@@ -526,7 +526,7 @@ test("dashboard labels default ollama auto mode without turning it into strict m
   const appSource = await fs.readFile("app/web/src/App.jsx", "utf8");
 
   assert.match(appSource, /promptGeneratorEnabled: "auto"/);
-  assert.match(appSource, /自动接入 Ollama/);
+  assert.match(appSource, /自动接入本地模型/);
   assert.match(appSource, /enabled: settingsForm\.promptGeneratorEnabled/);
   assert.doesNotMatch(appSource, /settingsForm\.promptGeneratorEnabled === "auto"\s*\?\s*true/);
 });
@@ -927,7 +927,7 @@ test("mobile guidance uses server dispatch result instead of a fixed saved messa
   assert.match(mobileAppSource, /pending\.statusLabel/);
   assert.match(mobileAppSource, /pending\.statusDetail/);
   assert.match(mobileAppSource, /pending\.actionLabel/);
-  assert.match(mobileAppSource, /本地模型|NPC/);
+  assert.match(mobileAppSource, /本地模型监督流程|监督流程/);
   assert.doesNotMatch(mobileSource, /setStatusText\("已保存补充引导，会等 Codex 完成后合并。"\)/);
 });
 
