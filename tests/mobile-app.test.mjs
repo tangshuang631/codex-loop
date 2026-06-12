@@ -480,7 +480,7 @@ test("mobile app shows supervisor screenshot evidence without adding noisy cards
 
   assert.match(source, /supervisorVerificationEvidencePreview/);
   assert.match(source, /supervisorVerificationEvidenceCount/);
-  assert.match(source, /截图证据/);
+  assert.match(source, /视觉证据/);
   assert.match(source, /status-detail-row/);
   assert.doesNotMatch(source, /screenshot-evidence-card/);
   assert.match(styleSource, /\.status-detail-row/);

@@ -1487,13 +1487,13 @@ function MobileTaskApp() {
   );
   const mobileStatusRows = [
     mobileProductionFocus.summary ? ["生产判断", mobileProductionFocus.summary] : null,
-    mobileModelPipeline.headline ? ["模型链路", mobileModelPipeline.headline] : null,
+    mobileModelPipeline.headline ? ["本地监督", mobileModelPipeline.headline] : null,
     mobileProductionTarget ? ["验证目标", mobileProductionTarget] : null,
   ].filter(Boolean);
   const mobileStatusDetails = [
     mobileProductionFocus.attention ? ["当前要留意", mobileProductionFocus.attention] : null,
     mobileProductionFocus.nextAction ? ["生产建议", mobileProductionFocus.nextAction] : null,
-    mobileModelPipeline.detail ? ["模型说明", mobileModelPipeline.detail] : null,
+    mobileModelPipeline.detail ? ["整理说明", mobileModelPipeline.detail] : null,
   ].filter(Boolean);
 
   return (
@@ -1816,8 +1816,8 @@ function StatusSummaryPanel({
     productionFocus.summary ? ["生产判断", productionFocus.summary] : null,
     productionFocus.attention ? ["当前要留意", productionFocus.attention] : null,
     productionFocus.nextAction ? ["生产建议", productionFocus.nextAction] : null,
-    modelPipeline.headline ? ["模型链路", modelPipeline.headline] : null,
-    modelPipeline.detail ? ["模型说明", modelPipeline.detail] : null,
+    modelPipeline.headline ? ["本地监督", modelPipeline.headline] : null,
+    modelPipeline.detail ? ["整理说明", modelPipeline.detail] : null,
     productionTarget ? ["验证目标", productionTarget] : null,
     productionPreflight ? ["启动预检", `${preflightLabel} · ${preflightDetail}`] : null,
     productionStatus ? ["生产阶段", `${maturityLabel} · ${productionStageSummary}`] : null,
@@ -1897,7 +1897,7 @@ function StatusSummaryPanel({
       : null,
     processStatus?.verificationCommands?.length
       ? [
-          "验证命令",
+          "验收动作",
           processStatus?.verificationCommandPreview ||
             processStatus.verificationCommands.join(" · "),
         ]
@@ -1948,7 +1948,7 @@ function StatusSummaryPanel({
       : null,
     productionStatus?.sections?.length
       ? [
-          "最近生产检查",
+          "最近生产体检",
           productionStatus.sections
             .slice(0, 3)
             .map((section) =>
@@ -1970,16 +1970,16 @@ function StatusSummaryPanel({
       : null,
     processStatus?.supervisorVerificationEvidenceCount
       ? [
-          "截图证据",
+          "视觉证据",
           processStatus?.supervisorVerificationEvidencePreview ||
-            `${processStatus.supervisorVerificationEvidenceCount} 个截图证据`,
+            `${processStatus.supervisorVerificationEvidenceCount} 条视觉证据`,
         ]
       : null,
     ["停止条件", processStatus?.stopLimit || "未设置停止条件"],
     ["线程", threadLabel],
     ["模型", modelStatus],
     ["健康提示", healthSummary || "当前没有明显异常。"],
-    ["刷新状态", pollStatus],
+    ["同步状态", pollStatus],
   ].filter(Boolean);
   const primaryRows = rows.filter(([label]) => primaryLabels.has(label));
   if (productionStatus) {
@@ -2029,7 +2029,7 @@ function StatusSummaryPanel({
       <details className="status-detail-fold">
         <summary>
           <span>更多状态</span>
-          <strong>生产判断、模型链路、线程和进展细节</strong>
+          <strong>生产判断、本地监督、线程和进展细节</strong>
         </summary>
         <LoopProgressPanel
           processStatus={processStatus}
@@ -2442,12 +2442,22 @@ function SkeletonBlock() {
   return (
     <main className="app-shell loading-shell">
       <div className="skeleton-shell">
-        <div className="skeleton-card skeleton-card-large" />
+        <section className="loading-intro" aria-live="polite">
+          <span>codex-loop</span>
+          <h1>正在连接本机 codex-loop</h1>
+          <p>如果这是刚启动的控制台，请稍等几秒；页面会在服务就绪后自动显示当前任务、对话记录和监督状态。</p>
+          <div className="loading-status-list">
+            <strong>连接本地服务</strong>
+            <strong>读取当前任务</strong>
+            <strong>同步 Codex 对话</strong>
+          </div>
+        </section>
+        <div className="skeleton-card skeleton-card-large" aria-hidden="true" />
         <div className="skeleton-grid">
-          <div className="skeleton-card" />
-          <div className="skeleton-card" />
-          <div className="skeleton-card" />
-          <div className="skeleton-card" />
+          <div className="skeleton-card" aria-hidden="true" />
+          <div className="skeleton-card" aria-hidden="true" />
+          <div className="skeleton-card" aria-hidden="true" />
+          <div className="skeleton-card" aria-hidden="true" />
         </div>
       </div>
     </main>

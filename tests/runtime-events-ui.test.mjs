@@ -174,7 +174,7 @@ test("dashboard keeps production status inside folded status details", async () 
   assert.match(appSource, /真实运行观测/);
   assert.match(appSource, /真实闭环|长期运行基本证据/);
   assert.match(appSource, /生产成熟度/);
-  assert.match(appSource, /最近生产检查/);
+  assert.match(appSource, /最近生产体检/);
   assert.match(appSource, /下一步建议/);
   assert.match(appSource, /status-detail-fold/);
   assert.doesNotMatch(appSource, /production-status-card/);
@@ -194,14 +194,14 @@ test("dashboard and mobile compress production status rows while keeping detail 
   assert.match(statusSource, /buildProductionFocusSummary/);
   assert.match(statusSource, /buildModelPipelineSummary/);
   assert.match(statusSource, /生产判断/);
-  assert.match(statusSource, /模型链路/);
+  assert.match(statusSource, /本地监督/);
   assert.match(statusSource, /summarizeVisibleText\(/);
   assert.match(mobileSource, /productionStageSummary/);
   assert.match(mobileSource, /productionObservationSummary/);
   assert.match(mobileSource, /buildProductionFocusSummary/);
   assert.match(mobileSource, /buildModelPipelineSummary/);
   assert.match(mobileSource, /生产判断/);
-  assert.match(mobileSource, /模型链路/);
+  assert.match(mobileSource, /本地监督/);
   assert.match(mobileSource, /compactText\(/);
 });
 
@@ -224,7 +224,7 @@ test("dashboard still keeps next action primary while independent verification s
   const productionJudgmentRowIndex = appSource.indexOf('productionFocus.summary ? ["生产判断", productionFocus.summary] : null');
   const primaryLabelsIndex = appSource.indexOf('const primaryLabels = new Set(["当前", "说明", "下一步"])');
   const detailRowsIndex = appSource.indexOf("const detailRows = [");
-  const modelPipelineRowIndex = appSource.indexOf('modelPipeline.headline ? ["模型链路", modelPipeline.headline] : null');
+  const modelPipelineRowIndex = appSource.indexOf('modelPipeline.headline ? ["本地监督", modelPipeline.headline] : null');
   const verificationRowIndex = appSource.indexOf('verificationText ? ["独立验收"');
   const holdReasonRowIndex = appSource.indexOf("processStatus?.holdReason");
 
@@ -345,7 +345,7 @@ test("dashboard surfaces supervisor verification plan as compact status rows", a
   assert.match(appSource, /processStatus\?\.verificationCommands/);
   assert.match(appSource, /processStatus\?\.acceptanceFocusPreview/);
   assert.match(appSource, /验收建议/);
-  assert.match(appSource, /验证命令/);
+  assert.match(appSource, /验收动作/);
 });
 
 test("dashboard keeps next action primary and folds independent verification details (legacy assertion kept for reference)", async () => {
@@ -353,7 +353,7 @@ test("dashboard keeps next action primary and folds independent verification det
 
   const modernNextActionRowIndex = appSource.indexOf('processStatus?.nextAction ? ["下一步", processStatus.nextAction] : null');
   const modernProductionJudgmentRowIndex = appSource.indexOf('productionFocus.summary ? ["生产判断", productionFocus.summary] : null');
-  const modernModelPipelineRowIndex = appSource.indexOf('modelPipeline.headline ? ["模型链路", modelPipeline.headline] : null');
+  const modernModelPipelineRowIndex = appSource.indexOf('modelPipeline.headline ? ["本地监督", modelPipeline.headline] : null');
   const modernPrimaryLabelsIndex = appSource.indexOf('const primaryLabels = new Set(["当前", "说明", "下一步"])');
   const modernDetailRowsIndex = appSource.indexOf("const detailRows = [");
   const modernVerificationRowIndex = appSource.indexOf('verificationText ? ["独立验收"');
@@ -379,7 +379,7 @@ test("dashboard exposes supervisor screenshot evidence inside compact status det
 
   assert.match(appSource, /supervisorVerificationEvidencePreview/);
   assert.match(appSource, /supervisorVerificationEvidenceCount/);
-  assert.match(appSource, /截图证据/);
+  assert.match(appSource, /视觉证据/);
   assert.match(appSource, /status-detail-fold/);
   assert.match(stylesSource, /\.status-detail-fold/);
   assert.doesNotMatch(appSource, /screenshot-evidence-card/);
@@ -571,6 +571,17 @@ test("dashboard loads core loop data even when auxiliary status endpoints fail",
   assert.match(appSource, /requestJson\("\/launcher-status"\)\.catch/);
   assert.match(appSource, /requestJson\("\/remote-access"\)\.catch/);
   assert.match(appSource, /requestJson\("\/loop-creation-assistant"\)\.catch/);
+});
+
+test("dashboard loading state is visible instead of a blank white page", async () => {
+  const appSource = await fs.readFile("app/web/src/App.jsx", "utf8");
+  const stylesSource = await fs.readFile("app/web/src/styles.css", "utf8");
+
+  assert.match(appSource, /正在连接本机 codex-loop/);
+  assert.match(appSource, /读取当前任务/);
+  assert.match(appSource, /同步 Codex 对话/);
+  assert.match(appSource, /aria-live="polite"/);
+  assert.match(stylesSource, /\.loading-intro/);
 });
 
 test("dashboard keeps mobile first screen compact and conversation readable", async () => {
@@ -902,8 +913,8 @@ test("mobile route mirrors production judgment and model pipeline status", async
   assert.match(mobileSource, /buildProductionFocusSummary/);
   assert.match(mobileSource, /buildModelPipelineSummary/);
   assert.match(mobileSource, /生产判断/);
-  assert.match(mobileSource, /模型链路/);
-  assert.match(mobileSource, /模型说明/);
+  assert.match(mobileSource, /本地监督/);
+  assert.match(mobileSource, /整理说明/);
   assert.match(stylesSource, /\.mobile-task-panel-details/);
   assert.match(stylesSource, /\.mobile-task-panel-detail-list/);
 });

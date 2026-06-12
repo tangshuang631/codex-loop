@@ -214,6 +214,7 @@ function presentMonitorText(value, fallback = "") {
   return text
     .replace(/本地模型\s*\/\s*NPC/g, "本地模型监督流程")
     .replace(/NPC\s*\/\s*Ollama/g, "本地模型监督流程")
+    .replace(/Ollama/g, "本地模型")
     .replace(/NPC/g, "监督流程");
 }
 
@@ -1254,7 +1255,7 @@ function StatusBlock({ mobileView, productionStatus, productionPreflight, status
     productionFocus.attention ? ["当前要留意", productionFocus.attention] : null,
     productionFocus.nextAction ? ["生产建议", productionFocus.nextAction] : null,
     productionFocus.summary ? ["生产判断", productionFocus.summary] : null,
-    modelPipeline.detail ? ["模型链路", modelPipeline.detail] : null,
+    modelPipeline.detail ? ["本地监督", modelPipeline.detail] : null,
     productionTarget ? ["验证目标", productionTarget] : null,
     productionStatus ? ["生产阶段", `${maturityLabel} · ${productionStageSummary}`] : null,
     productionStatus
@@ -1333,12 +1334,12 @@ function StatusBlock({ mobileView, productionStatus, productionPreflight, status
     process.supervisorVerificationAction ? ["验收动作", process.supervisorVerificationAction] : null,
     process.supervisorVerificationEvidencePreview || process.supervisorVerificationEvidenceCount
       ? [
-          "截图证据",
+          "视觉证据",
           process.supervisorVerificationEvidencePreview ||
-            `${process.supervisorVerificationEvidenceCount} 个截图证据`,
+            `${process.supervisorVerificationEvidenceCount} 条视觉证据`,
         ]
       : null,
-    process.latestInstructionSourceDetail ? ["模型来源", process.latestInstructionSourceDetail] : null,
+    process.latestInstructionSourceDetail ? ["整理来源", process.latestInstructionSourceDetail] : null,
     process.latestCodexSummarySourceLabel || process.latestCodexSummarySourceDetail
       ? [
           "回复摘要",
